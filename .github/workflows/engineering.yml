@@ -1,0 +1,121 @@
+name: Engineering checks
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [dev, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engineering-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated:
+    name: isolated (Python ${{ matrix.python }}, ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+        shard: ["decomposed", "other-a", "other-b"]
+    steps:
+      - name: Require same-repository development or prepared delivery promotion
+        if: github.event_name == 'pull_request'
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.base_ref }}
+        run: |
+          test "$PR_HEAD_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          case "$PR_HEAD_REF" in
+            dev) ;;
+            promotion/*) test "$PR_HEAD_REF" = "promotion/$PR_HEAD_SHA" ;;
+            *) exit 1 ;;
+          esac
+          test "$PR_BASE_REF" = "master"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5, pinned
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Preserve production data in the actual promotion merge tree
+        if: github.event_name == 'pull_request'
+        env:
+          PYTHONPATH: project/src
+          PROMOTION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PROMOTION_DEV_SHA: ${{ github.event.pull_request.head.sha }}
+          PROMOTION_HEAD_REF: ${{ github.head_ref }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pdm.runtime import promotion_delivery_check
+          base = os.environ['PROMOTION_BASE_SHA']
+          head = os.environ['PROMOTION_DEV_SHA']
+          actual = os.environ['GITHUB_SHA']
+          result = promotion_delivery_check('.', base, actual, head,
+                                            head_ref=os.environ['PROMOTION_HEAD_REF'])
+          print(json.dumps(result, ensure_ascii=False))
+          sys.exit(0 if result['status'] == 'passed' else 1)
+          PY
+      - name: Run isolated tests
+        env:
+          PYTHONPATH: project/src
+        run: python .github/scripts/run_test_shard.py --shard "${{ matrix.shard }}" --manifest "$RUNNER_TEMP/test-shard.json"
+  foundation:
+    # Preserve the required check names used by the delivery gate.
+    name: foundation (Python ${{ matrix.python }})
+    needs: isolated
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - name: Require every isolated shard on both Python versions
+        env:
+          ISOLATED_RESULT: ${{ needs.isolated.result }}
+        run: test "$ISOLATED_RESULT" = success
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5, pinned
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Verify local runtime
+        env:
+          PYTHONPATH: project/src
+        run: python -m pdm doctor --repo .
+      - name: Verify source archives exclude private data
+        run: |
+          git archive --format=zip HEAD --output "$RUNNER_TEMP/pdm-source.zip"
+          python - "$RUNNER_TEMP/pdm-source.zip" <<'PY'
+          import sys
+          import zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              names = archive.namelist()
+          excluded = ("memory/", "project/validation/", "fixtures/", "archive/")
+          assert not any(name.startswith(excluded) for name in names)
+          assert "project/src/pdm/cli.py" in names and "pyproject.toml" in names
+          print("Source archive excludes memory, acceptance evidence, fixtures and historical archives")
+          PY
+      - name: Build and verify code-only development artifact
+        env:
+          PYTHONPATH: project/src
+        run: |
+          python -m pdm release build --repo . --ref HEAD --output "$RUNNER_TEMP/pdm-foundation.zip"
+          python -m pdm release verify "$RUNNER_TEMP/pdm-foundation.zip" --expected-commit "$(git rev-parse HEAD)" --expected-package-version 0.2.0.dev19
+

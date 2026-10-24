@@ -1,0 +1,37 @@
+"""Synthetic model helpers only; these are never used by production transports."""
+
+import copy
+
+
+def add_quality(output, context):
+    """Bind each synthetic target to existing records that cite its source."""
+    output = copy.deepcopy(output)
+    coverage = []
+    for target in context["targets"]:
+        records = [record for record in output["objects"]
+                   if any(ref["source_id"] == target["source_id"]
+                          and ref["source_version"] == target["source_version"]
+                          for ref in record["sources"])]
+        if not records:
+            raise AssertionError("Synthetic fixture needs a record citing every quality target")
+        coverage.append({
+            "target_id": target["target_id"], "status": "summarized",
+            "record_ids": [record["id"] for record in records],
+            "body_evidence": [{"record_id": record["id"], "text": record["body"]}
+                              for record in records],
+            "reason": "",
+        })
+    output["quality"] = {"coverage_disposition": coverage, "statistic_claims": [], "temporal_claims": []}
+    return output
+
+
+def passed_review(required_checks):
+    return {
+        "verdict": "passed",
+        "reasons": ["Synthetic independent Review inspected the fixed evidence and final object scope."],
+        "checks": [{"check_id": check["check_id"], "scope_sha256": check["scope_sha256"],
+                    "result": "passed",
+                    "reason": "Synthetic check compared the fixed source evidence with the exact candidate.",
+                    "evidence_ids": list(check["evidence_ids"])}
+                   for check in required_checks],
+    }

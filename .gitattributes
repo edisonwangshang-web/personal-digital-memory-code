@@ -1,0 +1,12 @@
+* text=auto
+*.md text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+/memory export-ignore
+/project/validation export-ignore
+/fixtures export-ignore
+/archive export-ignore

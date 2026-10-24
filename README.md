@@ -1,0 +1,28 @@
+# Personal Digital Memory — 工程代码
+
+此仓库只提供来源采集、知识提取、独立审核、分类发布和带引用读取的工程代码、通用 Skill 与人工测试。当前版本为开发版；代码检查通过不代表真实资料加工或完整业务验收已经完成。
+
+## 代码与资料分开
+
+真实原文、知识、运行记录、授权、凭据和模型返回必须保存在另一个私有工作区。此仓库没有个人资料，也不包含原私库的提交历史。不要在此公开仓库运行会提交真实资料的采集或加工任务。`.gitignore` 只是防误加提示，不能阻止程序或手动强制提交。
+
+## 检查代码
+
+需要 Linux、Git 及 Python 3.11 或 3.12，无第三方运行依赖。
+
+```bash
+PYTHONPATH=project/src python -m pdm doctor --repo .
+PYTHONPATH=project/src python -m unittest discover -s project/tests
+```
+
+GitHub Actions 在推送 dev、master 或提交到 master 的 PR 时运行：两版 Python 各分三组测试，再检查运行条件、源码归档和代码包。PR 保留同仓库分支及生产资料保护检查。测试只在临时目录创建人工资料，不调用真实模型。
+
+## 目录
+
+- `project/src/pdm/`：工程实现。
+- `project/prompts/`：模型提示词。
+- `project/skills/`：提取与审核的版本化通用规则，适用于健康、工作与学习。
+- `project/tests/`：人工测试及临时 Git 仓库辅助工具。
+- `project/scripts/check_local.py`：本地按双 Python 分片检查；通过 `--help` 查看用法。
+
+保留全部历史 Skill 版本是为了核对规则绑定；它们不包含用户的加工结果。此代码仓库的提交号独立于私有资料仓库，CI 结果只适用于实际受测提交。
