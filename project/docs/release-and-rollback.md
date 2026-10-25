@@ -1,14 +1,14 @@
 # 工程迭代、发布与回滚
 
-当前程序 `0.2.0.dev22`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`。本文规定公开工程交付及私有资料运行的共同门禁，私有真实验收不在公库发布。程序版本、规则版本、数据格式及实际资料版本分别固定；代码发布不等于服务部署或M1验收。M1仍缺目标定时runner、两轮真实触发和第二模型等实际证据。
+当前程序 `0.2.0.dev23`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`。本文规定公开工程交付及私有资料运行的共同门禁，私有真实验收不在公库发布。程序版本、规则版本、数据格式及实际资料版本分别固定；代码发布不等于服务部署或M1验收。M1仍缺目标定时runner、两轮真实触发和第二模型等实际证据。
 
 [执行方案](m0-m1-execution-plan.md) · [数据规范](data-conventions.md) · [场景验收](scenarios-and-acceptance.md) · [Roadmap](roadmap.md) · [双仓操作](dual-repository-operation.md)
 
 ## 双仓边界与实际运行
 
-- 公库保存项目方案、产品设计、技术文档、工程代码、通用Skill、人工测试及CI；私库保存真实原文、知识、审核、历史、运行绑定和私有验收。公库使用独立Git历史，不导入私库分支、tag或祖先。
-- 公开CI只证明准确公库代码提交；私库仍有现存工程和运行绑定，实际程序从私库加载，不能把公库绿色状态复制为不同私库SHA的CI通过。
-- `check_dual_repo.py`只读检查两库可见性、准确公库CI及71个核心文件的完整集合、文件模式与内容；不自动sync，不迁移资料，不合并历史，不改变实际加载入口。报告和私库program_commit留私有位置，公库代码提交与实际加载版本分别记录。
+- 公库是项目方案、产品设计、技术文档、工程代码、提示词、通用 Skill、脚本、人工测试、CI、工作流定义及定时／恢复工程的唯一来源；私库仅保存真实原文、候选、知识、审核、控制、运行数据、历史、导航和私有验证。公库使用独立 Git 历史，不导入私库分支、tag 或祖先。
+- 公开 CI 证明准确公库代码 HEAD；实际程序直接从公库 checkout 加载，资料读写和环境绑定指向私库。无需给私库资料提交复制一套工程或补公库绿色状态，真实资料审核与生产发布门禁仍单独验证。
+- `check_dual_repo.py` 只读检查可见性、同名分支、准确公库 CI、公开工程完整性和私库无活动工程；不复制代码、迁移资料或合并历史。报告留私有位置，受测公库 `code_commit`、实际核心工程 `program_commit` 与私库 `data_head` 分别记录。
 - 规则与Skill资产随发布固定。已发布版本内容不可原地修改；规则修复发布新版本。旧受审资料仍只证明其原规则，不能通过换默认Skill冒称已重新加工。
 
 ## 分支与合并
@@ -21,9 +21,11 @@ PR说明具体行为、当前实际可用能力、测试与阻塞，关联实际
 
 工作流`Engineering checks`覆盖dev／master推送和base为master的PR。每版Python的完整测试按整模块分三组，分解审核的大型集成模块单独一组，其余排序交替分组；各组先完整发现测试并验证分组互斥且覆盖全部用例，发现错误、重复或空组均失败。Python3.11／3.12共六个测试任务全部成功后，两个`foundation`门禁才继续环境、源码归档及代码包检查。取消、缺失或失败任务不能计为通过；分组不缩小用例范围。完整准确CI另由实际平台记录证明。
 
-## 本轮环境绑定与工程提升门禁
+## 环境绑定与历史工程提升工具
 
-私库dev可能含开发资料，不能直接整分支合入生产master。`promotion prepare --repo --base --dev-commit`固定生产base与开发提交，在本机对象库创建未挂ref的双父candidate，父顺序为`[生产base, dev提交]`：工程树取dev，`memory/`、`fixtures/`、`archive/`、`.pdm/`及任意层的`pdm-environment.json`精确保留base。prepare不改工作区、dev／master引用或push，创建对象不等于交付。
+当前工程只在公库按 dev → master 的 PR 流程交付；私库不再同步工程，dev 与 master 的资料和运行绑定分别保留。以下 promotion prepare／check 是历史混合仓库的兼容工具，不是纯资料私库的日常工程更新步骤，也不授权将开发资料自动发布到生产。
+
+历史混合仓库的 dev 可能含开发资料，不能直接整分支合入生产 master。`promotion prepare --repo --base --dev-commit`固定生产base与开发提交，在本机对象库创建未挂ref的双父candidate，父顺序为`[生产base, dev提交]`：工程树取dev，`memory/`、`fixtures/`、`archive/`、`.pdm/`及任意层的`pdm-environment.json`精确保留base。prepare不改工作区、dev／master引用或push，创建对象不等于交付。
 
 `promotion check`只读检查双父、固定base／dev、保护路径逐字不变，以及非保护工程文件的精确mode／blob与dev父一致；第二父须为local dev或origin/dev祖先。clone局部环境绑定不经工程提升传播，也不代替目标环境验证。
 
@@ -56,7 +58,7 @@ PR说明具体行为、当前实际可用能力、测试与阻塞，关联实际
 
 | 版本依据 | 必须固定什么 |
 | --- | --- |
-| 程序 | 包版本、发布commit／tag、实际CI与产物摘要；实际加载代码及公库提交分别核对 |
+| 程序 | 公库包版本、发布 commit／tag、准确 HEAD 的 CI 与产物摘要；实际核心工程 program_commit 来自公库，与私库资料 HEAD 分别核对 |
 | 规则 | 实际提取、审核、回答规则、领域策略与不可变Skill及全部必要依赖 |
 | schema | 实际可读取／写入的结构版本与恢复语义，是否需迁移及拒写边界 |
 | 数据 | 实际验收输入／输出提交、来源及对象版本；真实证据只存私库 |
@@ -66,12 +68,12 @@ PR说明具体行为、当前实际可用能力、测试与阻塞，关联实际
 ## 暂停、回退与恢复
 
 1. 发布门禁失效、非预期写入或关键回归时，暂停后续自动触发及正式发布，固定程序、规则、schema和数据提交。在途模型或Git结果未知先核实际账本和远程，不假设失败或撤销。
-2. 核上一已验证程序／规则对当前格式和恢复语义的实际兼容性。兼容时在独立工程目录部署，并继续使用当前获准资料；不兼容就保持暂停，修复或设计可验证迁移。
+2. 核上一已验证程序／规则对当前格式和恢复语义的实际兼容性。兼容时在公库的独立工程 checkout 选择该版本，以 `--repo` 继续使用当前获准私库资料；不兼容就保持暂停，修复或设计可验证迁移。
 3. 回退程序不回退整库个人资料。保留新增原文、回执、纠正／删除控制、pending、registry、started、revision指针、queue／work／job、日程事件、全部unit plan／reservation／result／counter及祖先、audit和旧有限账本；不删proof、改schema、重置counter或整库reset绕门禁。
 4. 已完成模型节点只读重验后零调用续接。Review已完成但登记失败只补登记；已published而远程未确认只补同步／读回；unknown先对账，不换operation、run、queue、规则或池重发。
 5. 在隔离样例复验，再对限定未完成工作检查读回、版本门禁和幂等发布；通过后恢复触发，记录暂停原因、恢复版本与实际结果，保留原失败和发布记录。
 
-`python -m pdm doctor --repo <私有资料仓库>`的`memory_schema`／`memory_writable`及实际每次写入共同执行schema门禁；当前支持0.1—0.10以实际`contracts.SUPPORTED_SCHEMA_VERSIONS`为准。该探测只核受管文件头，不证明正文语义或迁移正确。未知、不支持、损坏或无法访问均保持不可写；不能只改pyproject版本、schema字符串或删除不认识文件取得通过。
+从已核对的公库目录和模块路径执行 `python -P -B -m pdm doctor --repo <私有资料仓库>`的`memory_schema`／`memory_writable`及实际每次写入共同执行schema门禁；当前支持0.1—0.10以实际`contracts.SUPPORTED_SCHEMA_VERSIONS`为准。该探测只核受管文件头，不证明正文语义或迁移正确。未知、不支持、损坏或无法访问均保持不可写；不能只改pyproject版本、schema字符串或删除不认识文件取得通过。
 
 格式兼容不代表恢复语义等价。例如旧程序可能认识0.4却缺共享预算门禁，或格式不变却重新暴露resolved对账及进程清理缺陷；恢复自动发布前须评估并复验。条件修改／删除要求Linux及文件系统支持`renameat2(RENAME_NOREPLACE)`；不可用时在副作用前拒绝，不用覆盖写入降级。
 

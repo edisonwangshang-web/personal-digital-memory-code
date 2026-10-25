@@ -2,7 +2,15 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前：0.2.0.dev22
+## 当前：0.2.0.dev23
+
+公库成为程序、提示词、Skill、脚本、测试、CI、工作流定义和设计的唯一工程来源；私库仅保存来源、候选、知识及分层、审核、控制、运行数据、私人验证、历史和导航。启动时当前目录及绝对模块路径指向公库，使用 `python -P -B`，`--repo` 指向私库；不再复制或比对第二份核心工程。同名 dev／master 配对、准确公库 HEAD 的 CI、可见性、干净工作区和运行前状态复核继续生效。
+
+`program_commit` 改从实际加载公库的核心工程最近提交取得，私库资料 HEAD 独立绑定。新增量预约将 `engine.md` 与 `started.md` 同提交保存，使用既有0.4封套及独立 `public-engine-v1` 契约，固定公库准确 HEAD、实际程序／规则版本、原预约摘要和私库资料父提交；新质量恢复使用原工程来源证明，旧无证明的运行只读核验原私库历史，不重写旧运行或重放 unknown。
+
+默认 extract@10／review@8、Skill 字节、业务 schema、processing key 和有限重试语义保持；本批只调整工程来源与其审计绑定。旧资料、审核、控制、调用账本及历史不随工程切换迁移。准确 CI、真实加工与恢复结果仍各取实际证据；本记录不预写通过，目标 GPT runner 和两轮真实触发仍待验收。契约见[数据规范](data-conventions.md#公库唯一工程来源的运行版本绑定)，操作见[双仓实际使用](dual-repository-operation.md)。
+
+## 历史：0.2.0.dev22
 
 默认extract@10／review@8、普通质量链schema0.12、原文0.1、正式知识0.2、group0.6及既有提取字段保持。专用`quality-completed-extraction-revalidation-v1`只恢复原生返工提取completed、因candidate_too_large且无stage／Review的已知输出；新证明明确是操作者核定本地缓存，不虚构旧Git或服务端输出摘要。零新extract，原失败和调用历史保留，完整独立Review仍必需。
 
@@ -34,7 +42,9 @@ current evidence／ask 新增 `--object` 与 `--compact-sources`：选择正式 
 
 已核对的公开工程提交 [`8e461422712252ccffefe664466c1ba254fc97cf`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/8e461422712252ccffefe664466c1ba254fc97cf) 对应 [CI 40163471251](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40163471251)：八任务成功，Python 3.11／3.12 各 1004 项，以及 doctor、源码归档排除、代码包核验通过。该记录只证明准确提交，不能转记为后续文档 HEAD 已通过。
 
-## 双仓库工程与操作入口
+## 历史：双仓库工程副本与操作入口
+
+以下记录早期双副本过渡方案，不是现行操作要求。现行公库唯一工程来源及私库仅存资料的规则见[双仓使用](dual-repository.md)；旧提交与旧运行版本保留原事实。
 
 工程、通用 Skill、人工测试、标准 CI 与产品／技术／工程文档归公开仓库；个人原文、知识、审核、真实验收与完整历史留私库。两个仓库采用独立历史，不公开私有旧提交或标签。
 

@@ -160,7 +160,12 @@ def _material(git, run_id, paths, runs, payload, response, *, historical=False):
         _fail("quality_completed_failure_changed")
     _ancestor(git, head, failure_snapshot["commit_sha"])
     _ancestor(git, failure_snapshot["commit_sha"], git.head())
-    versions = _versions_at(git, head)
+    from .engine_provenance import read_reservation
+    engine = read_reservation(git, run_id)
+    # Pre-split reservations retain their exact private Git engineering history.
+    # New data-only reservations bind the original loaded public engine before
+    # either model call; never substitute the current checkout for that version.
+    versions = engine["versions"] if engine is not None else _versions_at(git, head)
     sources = _load_sources(git.repo, paths, allow_versions=True, purpose="history", max_sources=256)
     related = _related_context(git, runs, sources, at_commit=head, max_runs=256)
     views = payload["sources"] if "batch_context" in payload else None
@@ -396,8 +401,15 @@ def verify_revalidated_extraction(git, candidate, *, historical=False):
                 or commit != _last_commit(git, git.head(), _stage_path(candidate["run_id"]))
                 or git.text("rev-parse", commit + "^") != candidate["base_head"]):
             _fail("quality_completed_guard_changed")
-        return [deepcopy(attestation[key]) for key in ("started", "revision_attempt", "failure")] + [
+        snapshots = [deepcopy(attestation[key]) for key in ("started", "revision_attempt", "failure")] + [
             {"path": guard_path, "commit_sha": commit, "sha256": _hash(guard_raw)}]
+        engine_path = "memory/runs/processes/" + candidate["run_id"] + "/engine.md"
+        # _material has already verified any sidecar's immutable same-commit
+        # history. Include that authority when callers inspect recovery alone.
+        if git.path(engine_path).is_file():
+            snapshots.append({"path": engine_path, "commit_sha": attestation["started"]["commit_sha"],
+                              "sha256": _hash(_committed(git, engine_path))})
+        return snapshots
     except (OSError, KeyError, TypeError, ValueError, AttributeError, RecursionError) as error:
         if isinstance(error, CaptureError):
             raise

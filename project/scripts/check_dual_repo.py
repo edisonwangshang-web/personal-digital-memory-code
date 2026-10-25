@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only check: public and private checkouts match on dev or master.
+"""Read-only check: tested public code operates on a private data checkout.
 
 No private source/knowledge bodies, reports, Git refs or worktree files are
 written. The CLI always queries GitHub; API injection exists only for unit tests.
@@ -22,6 +22,8 @@ from urllib.parse import urlsplit
 
 ROOTS = ("project/src/pdm", "project/prompts", "project/skills")
 CORE = (*ROOTS, "pyproject.toml")
+PRIVATE_ENGINE_PATHS = ("project/src", "project/prompts", "project/skills", "project/scripts",
+                        "project/tests", "project/ci", "pyproject.toml", ".github/workflows")
 WORKFLOW = ".github/workflows/engineering.yml"
 EXPECTED_JOBS = {
     *(f"isolated (Python {version}, {shard})"
@@ -231,6 +233,26 @@ def _snapshot(repo, commit):
     return saved
 
 
+def _data_only(repo):
+    """Reject active engineering copies without traversing personal data/history."""
+    for relative in PRIVATE_ENGINE_PATHS:
+        target = repo
+        for part in relative.split("/"):
+            target = target / part
+            try:
+                mode = target.lstat().st_mode
+            except FileNotFoundError:
+                break
+            except OSError:
+                _fail("private_engine_path_unreadable")
+            if stat.S_ISLNK(mode):
+                _fail("private_engine_path_unsafe")
+            if target == repo / relative:
+                _fail("private_engine_copy_present")
+            if not stat.S_ISDIR(mode):
+                _fail("private_engine_path_unsafe")
+
+
 def check(code_repo, data_repo, code_ref, ci_run, *, api=None):
     """Return private metadata only; do not execute code or load personal bodies."""
     if not isinstance(code_ref, str) or not SHA.fullmatch(code_ref):
@@ -260,17 +282,15 @@ def check(code_repo, data_repo, code_ref, ci_run, *, api=None):
     _metadata(api, code_name, False)
     _metadata(api, data_name, True)
     attempt = _approved_ci(api, code_name, code_ref, code_branch, int(ci_run))
-    code_files, data_files = _snapshot(code, code_head), _snapshot(data, data_head)
-    if code_files.keys() != data_files.keys():
-        _fail("core_path_mismatch")
-    if code_files != data_files:
-        _fail("core_content_mismatch")
-    program_commit = _text(data, "log", "-1", "--format=%H", data_head, "--", *CORE)
+    code_files = _snapshot(code, code_head)
+    _data_only(data)
+    program_commit = _text(code, "log", "-1", "--format=%H", code_head, "--", *CORE)
     if not SHA.fullmatch(program_commit):
-        _fail("private_program_commit_missing")
+        _fail("public_program_commit_missing")
     digest = hashlib.sha256(json.dumps(code_files, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    command = ["env", "PYTHONPATH=" + str(data / "project/src"), sys.executable,
-               "-B", "-m", "pdm", "doctor", "--repo", str(data)]
+    command = ["env", "PYTHONPATH=" + str(code / "project/src"), sys.executable,
+               "-P", "-B", "-m", "pdm", "doctor", "--repo", str(data)]
+    doctor_command = "cd " + shlex.quote(str(code)) + " && " + shlex.join(command)
     for repo, head, branch, name in ((code, code_head, code_branch, code_name),
                                      (data, data_head, data_branch, data_name)):
         if (_text(repo, "rev-parse", "--verify", "HEAD^{commit}") != head
@@ -278,13 +298,20 @@ def check(code_repo, data_repo, code_ref, ci_run, *, api=None):
                 or _git(repo, "status", "--porcelain", "--untracked-files=all")
                 or _origin(repo).casefold() != name.casefold()):
             _fail("repository_changed_during_check")
+    # Git status omits ignored files. Recheck both execution roots after metadata
+    # checks so concurrent ignored modules or a private engineering copy fail too.
+    if _snapshot(code, code_head) != code_files:
+        _fail("repository_changed_during_check")
+    _data_only(data)
     return {"status": "matched", "code_repository": code_name, "code_commit": code_ref,
-            "code_branch": code_branch,
+            "code_branch": code_branch, "program_commit": program_commit,
             "ci_run": int(ci_run), "ci_attempt": attempt, "ci_jobs": 8,
             "data_repository": data_name, "data_branch": data_branch,
-            "data_head": data_head, "private_program_commit": program_commit,
+            "data_head": data_head, "data_only": True,
             "core_files": len(code_files), "core_sha256": digest,
-            "private_doctor_command": shlex.join(command), "writes": 0, "model_calls": 0}
+            "working_directory": str(code), "doctor_command": doctor_command,
+            # Compatibility name only: this also loads the public checkout.
+            "private_doctor_command": doctor_command, "writes": 0, "model_calls": 0}
 
 
 class _Parser(argparse.ArgumentParser):

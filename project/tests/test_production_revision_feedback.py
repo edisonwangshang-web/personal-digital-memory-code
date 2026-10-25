@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import test_production
+from engine_fixtures import isolated_engine, advance_engine
 from pdm.batch_groups import verify_group_publication
 from pdm.budget import BudgetedModelCall
 from pdm.capture import capture
@@ -81,15 +82,12 @@ class ProductionRevisionFeedbackTests(unittest.TestCase):
         self.assertEqual(frozen, {path: (self.repo / path).read_bytes() for path in frozen})
 
     def test_new_plan_and_skill_can_repair_old_rejection_without_resetting_attempt(self):
+        code = isolated_engine(self)
         paths, original = self.prepare("old", resolve_skill_refs("knowledge-extract@9", "knowledge-review@7"))
         first = run_production(self.repo, "old", model_call=self.adapter, max_steps=1)
         old_state = deepcopy(self.state("old"))
-        # A real engineering-history commit changes the snapshot's program
-        # commit while preserving the exact artificial source work.
-        git = PipelineGit(self.repo)
-        (self.repo / "pyproject.toml").write_text("# Artificial engine history marker; no package is installed.\n")
-        git.run("add", "pyproject.toml")
-        git.run("commit", "-m", "artificial engineering history checkpoint")
+        # A separate public engineering commit preserves the private sources.
+        advance_engine(code)
         new = prepare_production(self.repo, "new", paths,
                   skill_bundle=resolve_skill_refs("knowledge-extract@10", "knowledge-review@8"))
         self.assertNotEqual(new["plan_id"], original["plan_id"])

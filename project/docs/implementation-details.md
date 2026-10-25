@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev22`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev23`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
 
 新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
 
@@ -13,7 +13,7 @@
 - [场景与验收](scenarios-and-acceptance.md)保存人工输入要求、操作步骤、预期结果与检查方法。
 - [Roadmap](roadmap.md)管理阶段成果、执行顺序、进度与通过证据；本页不重复阶段表。
 
-人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。公开工程检查不替代私库不同提交或真实资料验收。双仓当前只读核对核心文件和准确公开 CI，实际加载私库现有工程副本，不自动同步或迁移，见[双仓使用说明](dual-repository.md)。
+人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
 
 <a id="quality-completed-recovery-execution"></a>
 
@@ -219,7 +219,7 @@ plan 固定完整显式来源／回执、版本、控制和容量。表格与同
 | --- | --- |
 | `environment bind --repo --input`；`environment verify --repo [--require-binding] [--remote]` | 固定及核对资料根、分支、远程和持久状态绑定；该绑定本身不核程序SHA，实际程序／规则另由运行记录和双仓代码／CI核对验证 |
 | `runner probe --repo --input [--receipts <template.json>]` | 平台未验证时退出 4，配置有效不等于真实触发 |
-| `promotion prepare --repo --base --dev-commit`；`promotion check --repo --base --candidate [--dev-commit]` | prepare 仅创建未挂 ref 的双父 candidate，工程取 dev、生产保护路径取 base；不改工作区／分支或 push。check 只读核验；实际交付按[发布门禁](release-and-rollback.md#本轮环境绑定与工程提升门禁) |
+| `promotion prepare --repo --base --dev-commit`；`promotion check --repo --base --candidate [--dev-commit]` | 历史混合仓库兼容工具：prepare 仅创建未挂 ref 的双父 candidate，工程取 dev、生产保护路径取 base，不改工作区／分支或 push；check 只读核验。纯资料私库不再用它同步工程，见[发布门禁](release-and-rollback.md#环境绑定与历史工程提升工具) |
 | `budget create --mode budget\|audit` | 默认 budget；audit 省略 `--limit`，`--initial-used` 和 `--authorization-ref` 仍显式提供。引用和实际账本仅留私有环境 |
 | `context discover` | 显式 `--source`、`--allow-source`，可重复；可选 `--allow-run`、`--object-id`／`--topic-id`、`--max-sources`／`--max-runs` |
 | `context continuations plan`／`execute --repo --input <job-template.json> --budget-ledger` | 计划按同一 allow／capacity 规划；执行 operation 固定为 job_id，显式不同 ID 拒绝，计划不调用模型 |

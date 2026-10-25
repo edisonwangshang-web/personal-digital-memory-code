@@ -17,7 +17,7 @@
 | 验证功能 | [场景与验收](docs/scenarios-and-acceptance.md) | 人工样例、检查步骤、预期结果和验证边界 |
 | 查看阶段工作 | [Roadmap](docs/roadmap.md)、[M0—M1 执行方案](docs/m0-m1-execution-plan.md) | 阶段目标、工作包、实现与待验收事项 |
 | 日常操作 | [日常使用](docs/daily-use.md) | 采集、加工、发布、读取和受控恢复命令 |
-| 使用双仓库 | [双仓库核对](docs/dual-repository.md)、[操作方式](docs/dual-repository-operation.md) | 公库 CI、私库工程副本核对及实际运行 |
+| 使用双仓库 | [双仓库核对](docs/dual-repository.md)、[操作方式](docs/dual-repository-operation.md) | 公库唯一工程来源、准确 CI 与私库资料边界核对及实际运行 |
 | 检查和交付代码 | [本地检查](docs/local-checks.md)、[公开 CI](docs/public-code-ci.md)、[发布与回滚](docs/release-and-rollback.md) | 准确受测提交、分支、产物、数据保护与回退 |
 | 查看可选 CI 路线 | [自托管说明](docs/local-ci.md)、[Mac 说明](docs/mac-ci.md) | 可选方案及尚未验证的运行条件 |
 | 接续开发 | [工程交接](docs/codex-handoff.md)、[版本记录](docs/version-history.md)、[分支说明](docs/branch-reconciliation.md) | 阅读顺序、版本边界和协作约定 |

@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文描述 `0.2.0.dev22` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本，再把模块加载位置和 `--repo` 一起指向私库。
+本文描述 `0.2.0.dev23` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本；当前目录和模块加载路径指向公库，`--repo` 指向私库，代码更新不复制回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -9,14 +9,17 @@
 使用完整、干净的 Git checkout，Linux、Python 3.11 或 3.12 和 Git。Windows 使用 WSL2；原生 Windows 与原生 macOS 的生产运行尚未验证。先检查环境，不执行模型调用：
 
 ```bash
-cd /path/to/private
+cd /path/to/code
 export PYTHONPATH="$PWD/project/src"
-python -m pdm --version
-python -m pdm doctor --repo .
-python -m pdm environment verify --repo .
+export PDM_DATA_REPO="/path/to/private"
+python -P -B -m pdm --version
+python -P -B -m pdm doctor --repo "$PDM_DATA_REPO"
+python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 ```
 
-新环境由操作者准备仓库外的配置，再用 `environment bind --repo . --input "$environment_config"` 绑定实际资料根、分支、remote 与库外 `state_root`。已有绑定不因换设备或换版本自动覆盖；`--local-only` 仅供明确隔离的演练。配置字段见[数据规范](data-conventions.md)，环境与发布约束见[发布与回滚](release-and-rollback.md)。
+新环境由操作者准备仓库外的配置，再用 `environment bind --repo "$PDM_DATA_REPO" --input "$environment_config"` 绑定实际资料根、分支、remote 与库外 `state_root`。已有绑定不因换设备或换版本自动覆盖；`--local-only` 仅供明确隔离的演练。配置字段见[数据规范](data-conventions.md)，环境与发布约束见[发布与回滚](release-and-rollback.md)。
+
+`-P` 禁止将当前目录插入模块搜索路径，避免同名目录覆盖已核对的公库程序；`-B` 避免生成字节码。后文命令沿用以上绝对 `PYTHONPATH` 和资料根变量，`--expected-head` 始终读取私库 HEAD。
 
 模型调用还需要实际可用的服务与资料范围。工程仓库可读、GitHub 登录成功或命令存在，都不能证明具备模型服务访问权限。
 
@@ -27,10 +30,10 @@ python -m pdm environment verify --repo .
 日常审计模式记录调用，不设置每日或历史累计次数硬上限；容量、有限重试、并发、速率和实际服务范围仍约束执行。创建时按实际已有用量填写，不默认从零开始：
 
 ```bash
-python -m pdm budget create --repo . --ledger "$audit_ledger" \
+python -P -B -m pdm budget create --repo "$PDM_DATA_REPO" --ledger "$audit_ledger" \
   --mode audit --initial-used "$actual_initial_used" \
   --authorization-ref "$scope_reference"
-python -m pdm budget status --repo . --ledger "$audit_ledger"
+python -P -B -m pdm budget status --repo "$PDM_DATA_REPO" --ledger "$audit_ledger"
 ```
 
 历史有限预算模式仍可使用 `--limit "$authorized_total"`；旧记录按其原契约保留。`reserved` 和 `started` 分开报告，预约不等于已经调用，已发生调用也不因输出校验失败自动返还或重试。本文不包含任何实际调用记录。
@@ -40,8 +43,8 @@ python -m pdm budget status --repo . --ledger "$audit_ledger"
 把符合来源契约的 JSON 放在仓库外。保留原文、角色、顺序和已知时间；未知时间留空。取不到正文时保存链接与获取状态，不编摘要。将采集结果中的实际 `path` 用作后续的 `source_path`：
 
 ```bash
-python -m pdm capture --repo . --input "$source_json" \
-  --expected-head "$(git rev-parse HEAD)" --remote origin
+python -P -B -m pdm capture --repo "$PDM_DATA_REPO" --input "$source_json" \
+  --expected-head "$(git -C "$PDM_DATA_REPO" rev-parse HEAD)" --remote origin
 ```
 
 `local_saved` 只说明本地保存；指定 `--remote origin` 后，只有实际推送并精确读回成功，才报告 `remote_status: confirmed`。来源位于私库 `memory/sources/`，候选位于 `memory/staging/`，正式知识位于 `memory/records/` 和 `memory/topics/`。
@@ -51,11 +54,11 @@ python -m pdm capture --repo . --input "$source_json" \
 新任务默认使用 `knowledge-extract@10` 与 `knowledge-review@8`。程序准备资料清单、可复算描述统计和版本绑定，模型完成提取组织与独立语义审核；规则加载成功不能代替内容质量检查。未变的已提供旧对象可显式返回 `reuse_refs`，程序物化后仍做完整审核，不能用空输出省略旧记录。当前10/8合同使用0.12，专用已完成提取恢复另写0.13门禁；旧任务沿用原Skill与格式，不通过重命名队列清空失败或未知调用。
 
 ```bash
-python -m pdm production prepare --repo . --id "$queue_id" \
+python -P -B -m pdm production prepare --repo "$PDM_DATA_REPO" --id "$queue_id" \
   --source "$source_path" --review-strategy auto
-python -m pdm production run --repo . --id "$queue_id" \
+python -P -B -m pdm production run --repo "$PDM_DATA_REPO" --id "$queue_id" \
   --budget-ledger "$audit_ledger" --operation-id "$worker_operation_id"
-python -m pdm production status --repo . --id "$queue_id"
+python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 ```
 
 多来源重复 `--source`；需要旧知识时，准备阶段通过 `--allowed-source` 和 `--allowed-run` 明确全部允许的依赖。程序保存分批计划、各批候选与审核、最终依赖组证明和多主题原子发布结果。普通完整 Review 请求超过 256000 字节时，`auto` 按需转为 object／coverage／global 分解审核；完整必要语义仍超容量时保持 `blocked_capacity`，不能截断材料后宣称完成。
@@ -69,12 +72,12 @@ python -m pdm production status --repo . --id "$queue_id"
 小范围人工操作也可直接使用 `process`。它完成提取和 Review，随后由操作者明确发布：
 
 ```bash
-python -m pdm process --repo . --incremental --source "$source_path" \
-  --expected-head "$(git rev-parse HEAD)" \
+python -P -B -m pdm process --repo "$PDM_DATA_REPO" --incremental --source "$source_path" \
+  --expected-head "$(git -C "$PDM_DATA_REPO" rev-parse HEAD)" \
   --budget-ledger "$audit_ledger" --operation-id "$process_operation_id"
-python -m pdm publish --repo . --run "$run_id" \
-  --expected-head "$(git rev-parse HEAD)"
-python -m pdm verify-publication --repo . --run "$run_id"
+python -P -B -m pdm publish --repo "$PDM_DATA_REPO" --run "$run_id" \
+  --expected-head "$(git -C "$PDM_DATA_REPO" rev-parse HEAD)"
+python -P -B -m pdm verify-publication --repo "$PDM_DATA_REPO" --run "$run_id"
 ```
 
 使用返回的实际 `run_id`。更新同主题知识时，重复 `--source` 列出全部必要新旧来源，并显式提供 `--related-run "$old_run_id"`。缺少旧记录、主题依赖或来源范围时停止补齐，不自动读全库。`already_processed` 表示核验并复用旧成功链；`passed` 只表示审核通过，尚未正式发布。
@@ -86,10 +89,10 @@ python -m pdm verify-publication --repo . --run "$run_id"
 ## 只读取需要的记录或主题
 
 ```bash
-python -m pdm evidence --repo . --current \
+python -P -B -m pdm evidence --repo "$PDM_DATA_REPO" --current \
   --source "$source_path" --run "$run_id" \
   --object memory/topics/example-topic.md --compact-sources
-python -m pdm ask --repo . --current \
+python -P -B -m pdm ask --repo "$PDM_DATA_REPO" --current \
   --source "$source_path" --run "$run_id" \
   --object memory/topics/example-topic.md --compact-sources \
   --question '在本次选定范围内，哪些结论有依据，还有哪些缺口？' \
@@ -107,7 +110,7 @@ python -m pdm ask --repo . --current \
 稳定领域键为 `health`（健康与运动）、`career`（工作事业）、`learning`（学习与能力提升）。提取自动分类，独立 Review 核对；新建或实质更新的记录可跨类或明确未分类，同一事实不为分类复制多份。精确 `reuse` 保留旧受审对象，不为换标签制造更新。
 
 ```bash
-python -m pdm knowledge --repo . --source "$source_path" --run "$run_id" \
+python -P -B -m pdm knowledge --repo "$PDM_DATA_REPO" --source "$source_path" --run "$run_id" \
   --domain learning --budget-bytes "$evidence_budget" --format markdown
 ```
 
@@ -120,10 +123,10 @@ python -m pdm knowledge --repo . --source "$source_path" --run "$run_id" \
 先保存新原文，再预览明确范围的控制操作：
 
 ```bash
-python -m pdm control plan --repo . --input "$control_json"
-python -m pdm control apply --repo . --input "$control_json" \
-  --expected-head "$(git rev-parse HEAD)"
-python -m pdm pending list --repo . --status open
+python -P -B -m pdm control plan --repo "$PDM_DATA_REPO" --input "$control_json"
+python -P -B -m pdm control apply --repo "$PDM_DATA_REPO" --input "$control_json" \
+  --expected-head "$(git -C "$PDM_DATA_REPO" rev-parse HEAD)"
+python -P -B -m pdm pending list --repo "$PDM_DATA_REPO" --status open
 ```
 
 缺少来源或对象依赖时拒绝写入；纠正控制不自动改正文，随后仍走增量加工、审核与发布。普通删除清理当前视图并防止旧来源重建，Git 历史保留；彻底清除历史须另定范围。
@@ -131,11 +134,11 @@ python -m pdm pending list --repo . --status open
 Review 需要澄清时登记统一事项。回复先 `capture`，再关联原事项，后续真实新发布实际采用全部有效答复后才能解决：
 
 ```bash
-python -m pdm pending answer --repo . --item "$item_id" --source "$reply_source_path"
-python -m pdm pending resolve --repo . --item "$item_id" --run "$new_run_id"
+python -P -B -m pdm pending answer --repo "$PDM_DATA_REPO" --item "$item_id" --source "$reply_source_path"
+python -P -B -m pdm pending resolve --repo "$PDM_DATA_REPO" --item "$item_id" --run "$new_run_id"
 ```
 
-`answered` 表示已收到回复，`resolved` 需要后续发布核验。限定 evidence／ask 会投影相关 pending；仅在来源、回复和正文都完整选中时显示完整问题，缺范围时只报告缺口。`registration_required` 表示 Review 已保存但登记未完成；核对存储或冲突后，可用 `pending repair-registration --repo . --run "$run_id" --source "$source_path"` 零模型补登记，重复列全原来源。不能修改候选或规则后沿用旧审核。
+`answered` 表示已收到回复，`resolved` 需要后续发布核验。限定 evidence／ask 会投影相关 pending；仅在来源、回复和正文都完整选中时显示完整问题，缺范围时只报告缺口。`registration_required` 表示 Review 已保存但登记未完成；核对存储或冲突后，可用 `pending repair-registration --repo "$PDM_DATA_REPO" --run "$run_id" --source "$source_path"` 零模型补登记，重复列全原来源。不能修改候选或规则后沿用旧审核。
 
 ## 日程入口与停启
 
@@ -144,35 +147,35 @@ python -m pdm pending resolve --repo . --item "$item_id" --run "$new_run_id"
 新 `continuous-v1` 配置使用 `production-v1` 引擎，明确来源、允许的旧运行、时区、`max_attempts=4`、`max_calls=null` 及远程模式。配置保存在仓库外；旧无 engine 日程不静默升级。字段与完整流程见[数据规范](data-conventions.md)和[实现明细](implementation-details.md)。
 
 ```bash
-python -m pdm schedule configure --repo . --input "$schedule_config"
-python -m pdm schedule plan --repo . --id "$schedule_id"
-python -m pdm schedule drain --repo . --id "$schedule_id" --trigger "$trigger_json" \
+python -P -B -m pdm schedule configure --repo "$PDM_DATA_REPO" --input "$schedule_config"
+python -P -B -m pdm schedule plan --repo "$PDM_DATA_REPO" --id "$schedule_id"
+python -P -B -m pdm schedule drain --repo "$PDM_DATA_REPO" --id "$schedule_id" --trigger "$trigger_json" \
   --budget-ledger "$audit_ledger" --operation-id "$schedule_operation_id" \
   --max-slices 8 --window-seconds 300
-python -m pdm schedule status --repo . --id "$schedule_id"
+python -P -B -m pdm schedule status --repo "$PDM_DATA_REPO" --id "$schedule_id"
 ```
 
 `drain` 在有限窗口内推进持久队列，续跑使用返回的 `--continuation "$continuation_json"` 和原身份。答复关联为 `answered` 后，同一日程会携带完整必要回复继续加工。`remote_mode=required` 需要实际条件 push、fetch 和精确读回；`local_only` 仅供隔离演练。完整来源并集超过支持范围或必要语义超容量时停止，不截断。
 
 ```bash
-python -m pdm schedule pause --repo . --id "$schedule_id" --reason "$pause_reason"
-python -m pdm schedule resume --repo . --id "$schedule_id" --validation-ref "$validation_ref"
+python -P -B -m pdm schedule pause --repo "$PDM_DATA_REPO" --id "$schedule_id" --reason "$pause_reason"
+python -P -B -m pdm schedule resume --repo "$PDM_DATA_REPO" --id "$schedule_id" --validation-ref "$validation_ref"
 ```
 
 暂停阻止程序的新正式发布，不等于关闭外部任务。恢复前核对在途执行、本地与远程发布及原调用记录。没有平台观测时保持 `trigger_unknown`；`incomplete`／`reconciliation_required` 先核已有结果。`abandon` 是受控终结入口，不撤销外部在途请求，不能把未知结果改成从未执行；完整条件按实现与数据契约核验。
 
 ## 恢复与另一模型读取
 
-遇 `transaction_recovery_required` 先核对 HEAD 和已有提交，再执行 `python -m pdm recover --repo .`。冲突或结果不明时保持暂停，不整库 reset，不直接删除锁或 journal。资料恢复使用私库的完整 Git 历史；源码 ZIP 或代码包不能替代。
+遇 `transaction_recovery_required` 先核对 HEAD 和已有提交，再执行 `python -P -B -m pdm recover --repo "$PDM_DATA_REPO"`。冲突或结果不明时保持暂停，不整库 reset，不直接删除锁或 journal。资料恢复使用私库的完整 Git 历史；源码 ZIP 或代码包不能替代。
 
 `resume-unstarted-revision` 和 `revalidate-completed-extraction` 是历史 `0.9` 人工恢复入口。它们核对原预约／已完成返回和固定证明；当前不能用于新的 Skill 质量任务，该模式会要求 `skill_quality_recovery_attestation_required`。不要照抄旧命令绕过质量、原调用身份或未知结果检查。
 
 另一模型读取先准备同一固定证据与问题；问题 JSON 是字符串数组，不含答案和验收预期，输出使用仓库外尚不存在的新文件：
 
 ```bash
-python -m pdm reading-package prepare --repo . --source "$source_path" --run "$run_id" \
+python -P -B -m pdm reading-package prepare --repo "$PDM_DATA_REPO" --source "$source_path" --run "$run_id" \
   --questions "$questions_json" --output "$reading_package_json"
-python -m pdm reading-package verify "$reading_package_json" \
+python -P -B -m pdm reading-package verify "$reading_package_json" \
   --expected-sha256 "$package_sha256"
 ```
 

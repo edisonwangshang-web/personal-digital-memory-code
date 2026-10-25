@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -33,20 +35,23 @@ class DualRepositoryTests(unittest.TestCase):
             self.git(repo, "config", "commit.gpgsign", "false")
             self.git(repo, "config", "core.hooksPath", "/dev/null")
             self.git(repo, "remote", "add", "origin", f"https://github.com/fixture/{name}.git")
-            for path, text in {
-                "pyproject.toml": '[project]\nname="synthetic"\nversion="0.1.0"\n',
-                "project/src/pdm/__init__.py": '__version__="0.1.0"\n',
-                "project/prompts/extract.md": "Synthetic general rule.\n",
-                "project/skills/shared/policy.md": "Synthetic shared policy.\n",
+            files = {
                 "README.md": "Code instructions.\n" if name == "code" else "Private navigation.\n",
                 ".gitignore": "__pycache__/\nignored.py\n*.so\n*.pyd\n*.pyc\n",
-            }.items():
+            }
+            if name == "code":
+                files.update({
+                    "pyproject.toml": '[project]\nname="synthetic"\nversion="0.1.0"\n',
+                    "project/src/pdm/__init__.py": '__version__="0.1.0"\n',
+                    "project/prompts/extract.md": "Synthetic general rule.\n",
+                    "project/skills/shared/policy.md": "Synthetic shared policy.\n",
+                })
+            for path, text in files.items():
                 self.write(repo, path, text)
             if name == "data":
                 self.write(repo, "memory/sources/private.md", "PRIVATE SYNTHETIC BODY MUST STAY PRIVATE\n")
             self.save(repo)
         self.ref = self.git(self.code, "rev-parse", "HEAD")
-        self.program = self.git(self.data, "rev-parse", "HEAD")
         self.write(self.data, "memory/records/private.md", "Synthetic private knowledge.\n")
         self.save(self.data)
         self.responses = {
@@ -85,6 +90,13 @@ class DualRepositoryTests(unittest.TestCase):
         self.requests.append(endpoint)
         return deepcopy(self.responses[endpoint])
 
+    def accept_code_fixture_commit(self):
+        """Only synthetic API evidence follows this artificial code commit."""
+        self.ref = self.git(self.code, "rev-parse", "HEAD")
+        self.responses["repos/fixture/code/actions/runs/123"]["head_sha"] = self.ref
+        for job in self.responses["repos/fixture/code/actions/runs/123/attempts/1/jobs?per_page=100"]["jobs"]:
+            job["head_sha"] = self.ref
+
     def check(self, **kwargs):
         values = {"code_repo": self.code, "data_repo": self.data,
                   "code_ref": self.ref, "ci_run": "123", "api": self.api}
@@ -100,7 +112,7 @@ class DualRepositoryTests(unittest.TestCase):
         before = {repo: (self.git(repo, "rev-parse", "HEAD"),
                          self.git(repo, "rev-parse", "--abbrev-ref", "HEAD"),
                          self.git(repo, "status", "--porcelain")) for repo in (self.code, self.data)}
-        target = self.data / "project/src/pdm/__init__.py"
+        target = self.data / "README.md"
         info = target.stat()
         os.utime(target, (info.st_atime + 10, info.st_mtime + 10))
         index_before = (self.data / ".git/index").read_bytes()
@@ -109,6 +121,7 @@ class DualRepositoryTests(unittest.TestCase):
 
         def bounded(path):
             self.assertNotIn("memory", path.parts)
+            self.assertTrue(path.is_relative_to(self.code))
             reads.append(path)
             return original(path)
 
@@ -118,10 +131,14 @@ class DualRepositoryTests(unittest.TestCase):
         self.assertEqual(result["status"], "matched")
         self.assertEqual((result["code_branch"], result["data_branch"]), ("dev", "dev"))
         self.assertEqual(result["core_files"], 4)
-        self.assertEqual(result["private_program_commit"], self.program)
-        self.assertNotEqual(result["code_commit"], result["private_program_commit"])
-        self.assertNotEqual(result["data_head"], result["private_program_commit"])
-        self.assertIn(str(self.data / "project/src"), result["private_doctor_command"])
+        self.assertEqual(result["program_commit"], self.ref)
+        self.assertNotIn("private_program_commit", result)
+        self.assertNotEqual(result["data_head"], result["program_commit"])
+        self.assertTrue(result["data_only"])
+        self.assertEqual(result["working_directory"], str(self.code))
+        self.assertIn(str(self.code / "project/src"), result["doctor_command"])
+        self.assertNotIn(str(self.data / "project/src"), result["doctor_command"])
+        self.assertEqual(result["private_doctor_command"], result["doctor_command"])
         self.assertEqual((result["writes"], result["model_calls"]), (0, 0))
         self.assertEqual(len(reads), 8)
         self.assertEqual(len(self.requests), 4)
@@ -145,33 +162,113 @@ class DualRepositoryTests(unittest.TestCase):
             self.assertEqual(self.git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "master")
             self.assertEqual(self.git(repo, "status", "--porcelain"), "")
 
-    def test_master_pair_still_rejects_committed_private_core_differences(self):
+    def test_master_pair_rejects_committed_private_engine_copy(self):
         for repo in (self.code, self.data):
             self.git(repo, "branch", "-m", "master")
         self.responses["repos/fixture/code/actions/runs/123"]["head_branch"] = "master"
         self.assertEqual(self.check()["status"], "matched")
         self.write(self.data, "project/prompts/extract.md", "Different committed production rule.\n")
         self.save(self.data)
-        self.blocked("core_content_mismatch")
+        self.blocked("private_engine_copy_present")
 
-    def test_core_byte_mismatch_blocks_even_when_private_change_is_committed(self):
-        self.write(self.data, "project/prompts/extract.md", "Different committed rule.\n")
-        self.save(self.data)
-        self.blocked("core_content_mismatch")
+    def test_code_tampering_hidden_by_assume_unchanged_is_rejected(self):
+        self.git(self.code, "update-index", "--assume-unchanged", "project/prompts/extract.md")
+        self.write(self.code, "project/prompts/extract.md", "Different uncommitted rule.\n")
+        self.assertEqual(self.git(self.code, "status", "--porcelain"), "")
+        self.blocked("core_worktree_mismatch")
 
     def test_additional_ignored_python_module_is_not_hidden_by_clean_git_status(self):
-        self.write(self.data, "project/src/pdm/ignored.py", "EXTRA = True\n")
-        self.assertEqual(self.git(self.data, "status", "--porcelain"), "")
+        self.write(self.code, "project/src/pdm/ignored.py", "EXTRA = True\n")
+        self.assertEqual(self.git(self.code, "status", "--porcelain"), "")
         self.blocked("core_path_mismatch")
 
     def test_ignored_native_and_sourceless_modules_are_rejected(self):
         for suffix in ("so", "pyd", "pyc"):
             with self.subTest(suffix=suffix):
-                path = self.data / ("project/src/pdm/ignored." + suffix)
+                path = self.code / ("project/src/pdm/ignored." + suffix)
                 path.write_bytes(b"synthetic unused module")
-                self.assertEqual(self.git(self.data, "status", "--porcelain"), "")
+                self.assertEqual(self.git(self.code, "status", "--porcelain"), "")
                 self.blocked("unexpected_core_file")
                 path.unlink()
+
+    def test_private_active_engine_paths_are_rejected_even_when_ignored(self):
+        ignored = (self.data / ".gitignore").read_text()
+        self.write(self.data, ".gitignore", ignored + "\n".join(bridge.PRIVATE_ENGINE_PATHS) + "\n")
+        self.save(self.data)
+        for relative in bridge.PRIVATE_ENGINE_PATHS:
+            with self.subTest(path=relative):
+                target = self.data / relative
+                if relative == "pyproject.toml":
+                    self.write(self.data, relative, "# unused synthetic engine config\n")
+                else:
+                    self.write(self.data, relative + "/ignored.py", "raise RuntimeError('must not execute')\n")
+                self.assertEqual(self.git(self.data, "status", "--porcelain"), "")
+                self.blocked("private_engine_copy_present")
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+
+    def test_private_historical_engine_and_evidence_are_not_active_copies(self):
+        self.write(self.data, "project/src/pdm/old.py", "# synthetic historical source\n")
+        self.save(self.data)
+        historical = self.git(self.data, "rev-parse", "HEAD")
+        self.git(self.data, "rm", "-r", "project/src")
+        self.write(self.data, "project/validation/past.md", "Private historical evidence.\n")
+        self.write(self.data, "archive/runtime/project/src/pdm/old.py", "# retained historical archive\n")
+        self.save(self.data)
+        result = self.check()
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(self.git(self.data, "show", historical + ":project/src/pdm/old.py"),
+                         "# synthetic historical source")
+
+    def test_private_parent_symlink_is_rejected_without_reading_its_target(self):
+        outside = self.base / "private-external"
+        outside.mkdir()
+        (self.data / "project").symlink_to(outside, target_is_directory=True)
+        self.save(self.data)
+        original = bridge._file_bytes
+
+        def only_public(path):
+            self.assertTrue(path.is_relative_to(self.code))
+            return original(path)
+
+        with patch.object(bridge, "_file_bytes", side_effect=only_public):
+            self.blocked("private_engine_path_unsafe")
+
+    def test_documentation_commit_has_separate_program_and_checkout_identity(self):
+        program = self.ref
+        self.write(self.code, "README.md", "Updated synthetic instructions.\n")
+        self.save(self.code)
+        self.accept_code_fixture_commit()
+        result = self.check()
+        self.assertEqual(result["program_commit"], program)
+        self.assertEqual(result["code_commit"], self.ref)
+        self.assertNotEqual(program, self.ref)
+
+    def test_generated_command_loads_public_code_from_private_working_directory(self):
+        self.write(self.code, "project/src/pdm/__main__.py",
+                   "import json, os, sys\nfrom pathlib import Path\n"
+                   "print(json.dumps({'engine': str(Path(__file__).resolve()), 'cwd': os.getcwd(), "
+                   "'data': sys.argv[-1], 'safe_path': sys.flags.safe_path}))\n")
+        # Neither the data cwd nor the public checkout root is an import root.
+        self.write(self.code, "json.py", "raise RuntimeError('public cwd was imported')\n")
+        self.write(self.data, "json.py", "raise RuntimeError('private cwd was imported')\n")
+        self.write(self.data, "pdm.py", "raise RuntimeError('private pdm was imported')\n")
+        self.save(self.code)
+        self.save(self.data)
+        self.accept_code_fixture_commit()
+        result = self.check()
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(self.data)
+        completed = subprocess.run(["/bin/sh", "-c", result["doctor_command"]], cwd=self.data,
+                                   env=environment, capture_output=True, text=True, check=True, timeout=15)
+        loaded = json.loads(completed.stdout)
+        self.assertEqual(loaded["engine"], str(self.code / "project/src/pdm/__main__.py"))
+        self.assertEqual(loaded["cwd"], str(self.code))
+        self.assertEqual(loaded["data"], str(self.data))
+        self.assertTrue(loaded["safe_path"])
+        self.assertIn("-P", shlex.split(result["doctor_command"]))
 
     def test_private_head_or_clean_state_change_during_api_check_is_rejected(self):
         for mutation in ("commit", "dirty"):
@@ -190,6 +287,27 @@ class DualRepositoryTests(unittest.TestCase):
                     return self.api(endpoint)
 
                 self.blocked("repository_changed_during_check", api=provider)
+
+    def test_ignored_engine_added_after_initial_snapshot_is_rejected(self):
+        original = bridge._origin
+        for repo, error in ((self.code, "core_path_mismatch"),
+                            (self.data, "private_engine_copy_present")):
+            with self.subTest(repo=repo.name):
+                visits = 0
+
+                def concurrent_origin(path):
+                    nonlocal visits
+                    value = original(path)
+                    if path == self.data:
+                        visits += 1
+                        if visits == 2:
+                            self.write(repo, "project/src/pdm/ignored.py", "# concurrent synthetic code\n")
+                            self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+                    return value
+
+                with patch.object(bridge, "_origin", side_effect=concurrent_origin):
+                    self.blocked(error)
+                (repo / "project/src/pdm/ignored.py").unlink()
 
     def test_branch_changes_during_check_are_rejected_even_when_heads_stay_equal(self):
         for repos in ((self.code,), (self.data,), (self.code, self.data)):
@@ -308,17 +426,19 @@ class DualRepositoryTests(unittest.TestCase):
                 self.blocked("ci_run_not_approved")
 
     def test_core_symlink_and_mode_mismatch_are_rejected(self):
-        path = self.data / "project/src/pdm/__init__.py"
+        path = self.code / "project/src/pdm/__init__.py"
+        self.git(self.code, "update-index", "--assume-unchanged", "project/src/pdm/__init__.py")
         path.chmod(0o755)
-        self.save(self.data)
-        self.blocked("core_content_mismatch")
+        self.blocked("core_file_mode_mismatch")
+        self.git(self.code, "update-index", "--no-assume-unchanged", "project/src/pdm/__init__.py")
         path.unlink()
         path.symlink_to(self.data / "memory/sources/private.md")
-        self.save(self.data)
+        self.save(self.code)
+        self.accept_code_fixture_commit()
         self.blocked("invalid_core_file")
 
     def test_core_parent_symlink_target_is_not_read(self):
-        source = self.data / "project/src/pdm"
+        source = self.code / "project/src/pdm"
         moved = self.base / "moved-core"
         source.rename(moved)
         source.symlink_to(moved, target_is_directory=True)
@@ -330,7 +450,7 @@ class DualRepositoryTests(unittest.TestCase):
 
         with patch.object(bridge, "_file_bytes", side_effect=safe_read):
             with self.assertRaises(bridge.CheckError) as caught:
-                bridge._snapshot(self.data, "HEAD")
+                bridge._snapshot(self.code, "HEAD")
         self.assertEqual(caught.exception.code, "core_symlink_rejected")
 
     def test_credential_bearing_origin_is_rejected_without_leaking_it(self):

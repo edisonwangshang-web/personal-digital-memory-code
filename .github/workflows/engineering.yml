@@ -117,5 +117,5 @@ jobs:
           PYTHONPATH: project/src
         run: |
           python -m pdm release build --repo . --ref HEAD --output "$RUNNER_TEMP/pdm-foundation.zip"
-          python -m pdm release verify "$RUNNER_TEMP/pdm-foundation.zip" --expected-commit "$(git rev-parse HEAD)" --expected-package-version 0.2.0.dev22
+          python -m pdm release verify "$RUNNER_TEMP/pdm-foundation.zip" --expected-commit "$(git rev-parse HEAD)" --expected-package-version 0.2.0.dev23
 

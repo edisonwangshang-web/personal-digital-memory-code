@@ -297,6 +297,7 @@ def _candidate_sources(git, candidate, *, historical=False):
 
 def execution_versions(git):
     """Bind actual loaded program/rules bytes, separately from evolving data HEAD."""
+    from .engine_provenance import program_commit
     package = Path(__file__).resolve().parent
     project = package.parents[1]
     code = {}
@@ -313,7 +314,7 @@ def execution_versions(git):
               for path in sorted((project / "skills").rglob("*")) if path.is_file() and not path.is_symlink()}
     return {"program_sha256": _hash(code), "rules_version": _hash({**prompts, "domain_policy": policy_digest, "skills": skills}),
             "domain_policy_version": DOMAIN_POLICY_VERSION, "domain_policy_sha256": policy_digest,
-            "program_commit": git.text("log", "-1", "--format=%H", "--", "project/src/pdm", "project/prompts", "project/skills", "pyproject.toml") or None}
+            "program_commit": program_commit()}
 
 
 def _string(value, maximum=65536):
@@ -1599,6 +1600,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 started_bytes = _document("processing_attempt", started,
                     _processing_header(skill_bundle, M1_SCHEMA_VERSION))
                 started_files = {started_path: started_bytes}
+                from .engine_provenance import reservation_file
+                started_files.update(reservation_file(run_id, key, head, started_bytes, versions))
                 if revision_context is not None:
                     pointer = {"run_id": run_id, "revision_context_sha256": _hash(revision_context),
                                "source_paths": source_paths, "related_runs": related_runs, "processing_key": key}
@@ -1953,6 +1956,13 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     if (git.text("rev-parse", stage_commit + "^") != candidate["base_head"]
             or git.read(stage_commit, stage_path) != stage_bytes):
         _error("candidate_mismatch")
+    if incremental:
+        from .engine_provenance import read_reservation
+        engine = read_reservation(git, run_id)
+        original_versions = candidate.get("revision_revalidation", {}).get("original_extraction_versions")
+        if engine is not None and (original_versions is not None or "revision_resume" not in candidate):
+            if engine["versions"] != (original_versions or candidate["versions"]):
+                _error("engine_provenance_changed")
     return candidate, sources, stage_bytes, stage_commit
 
 
@@ -2039,6 +2049,7 @@ def _computation_snapshots(git, candidate, visited=()):
         entries.extend(recovery.verify_revalidated_extraction(git, candidate, historical=True))
     for name, path in (("stage", _stage_path(run_id)), ("review", _run_path(run_id, "review")),
                        ("failure", _run_path(run_id, "failure")), ("started", _run_path(run_id, "started")),
+                       ("engine", _run_path(run_id, "engine")),
                        ("revalidation-failure", _run_path(run_id, "revalidation-failure")),
                        ("revalidation-review-failure", _run_path(run_id, "revalidation-review-failure"))):
         if git.path(path).is_file():

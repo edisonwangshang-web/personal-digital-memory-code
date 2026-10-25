@@ -6,17 +6,17 @@
 
 ## 当前阶段
 
-当前程序为 `0.2.0.dev22`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础规则为 extract v14／review v10／answer v7。M0 手动基础闭环已有历史验收；M1 已实现主要工程能力，**整体仍未验收**。M2—M4 尚未作为完整产品阶段交付。
+当前程序为 `0.2.0.dev23`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础规则为 extract v14／review v10／answer v7。M0 手动基础闭环已有历史验收；M1 已实现主要工程能力，**整体仍未验收**。M2—M4 尚未作为完整产品阶段交付。
 
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 
 公开工程已核对的快照为 [`9ec7ccd31631d45345f609b5fe6ff78174d22420`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/9ec7ccd31631d45345f609b5fe6ff78174d22420)，其 [CI 40178015107](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40178015107) 八任务成功，Python 3.11／3.12 各 1023 项及基础检查通过。该结果只属于这个提交，不能视为本页后续文档 HEAD 已通过。
 
-公库 `dev` 开发、`master` 稳定交付；真实加工继续从私库工程副本加载。只读入口核对准确公开 CI 和两边完整核心工程，实际文件数以该版本核对报告为准；不自动复制或同步，不替代私库不同 SHA 的生产门禁。操作见[双仓库实际使用](dual-repository-operation.md)，CI 路线见[公开工程 CI](public-code-ci.md)。
+公库 `dev` 开发、`master` 稳定交付，公库成为代码、提示词、Skill、脚本、测试、CI、工作流定义及设计的唯一工程来源。真实加工从公库 checkout 加载，资料根指向私库，私库仅保留资料、审核、控制、私人验证、历史与导航。只读入口核对准确公开 CI 和代码／资料边界，不再复制或比对两份核心工程。定时与恢复工程归公库不代表目标 runner 已部署；本批代码、CI 与实际运行按各自证据记录。操作见[双仓库实际使用](dual-repository-operation.md)，CI 路线见[公开工程 CI](public-code-ci.md)。
 
 ## 双仓库分支对应
 
-工程 `dev` 对资料 `dev`，工程 `master` 对资料 `master`。核对入口同时约束两边实际分支及准确 CI 的分支，拒绝交叉配对；同名仍须完整核对核心内容与版本。此规则不自动同步代码、提升生产或发布开发资料，生产对应 runtime 的 `prod` 环境。操作见[分支配对](dual-repository.md#分支配对)，各真实环境是否已对齐仍单独记录。
+工程 `dev` 对资料 `dev`，工程 `master` 对资料 `master`。核对入口同时约束两边实际分支及准确 CI 的分支，拒绝交叉配对；同名仍须核对公库准确代码 HEAD、工程完整性与私库资料边界。此规则不自动切换分支、提升生产或发布开发资料，生产对应 runtime 的 `prod` 环境。操作见[分支配对](dual-repository.md#分支配对)，各真实环境是否已完成切换仍单独记录。
 
 ## 项目级里程碑
 

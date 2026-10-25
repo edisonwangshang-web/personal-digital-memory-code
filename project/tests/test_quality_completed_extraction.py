@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from git_fixtures import configure_test_repository
+from engine_fixtures import isolated_engine, advance_engine
 from quality_fixtures import add_quality, passed_review
 from test_pipeline import git
 from pdm import pipeline
@@ -21,7 +22,7 @@ from pdm.contracts import CaptureError, canonical
 from pdm.model_calls import render_model_request, request_binding
 from pdm.quality_completed_extraction import (CONTRACT, RESPONSE_PROVENANCE, RESERVATION_CONTRACT,
     prepare_attestation, verify_completed_extraction, verify_revalidated_extraction)
-from pdm.skill_support import PROJECT_ROOT, resolve_skill_refs
+from pdm.skill_support import resolve_skill_refs
 from pdm.transaction import PipelineGit
 
 
@@ -36,12 +37,21 @@ class QualityCompletedExtractionTests(unittest.TestCase):
         configure_test_repository(self.repo)
         git(self.repo, "config", "user.name", "Artificial Completed Extraction")
         git(self.repo, "config", "user.email", "completed@example.invalid")
-        for name in ("src/pdm", "prompts", "skills"):
-            shutil.copytree(PROJECT_ROOT / name, self.repo / "project" / name,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        shutil.copyfile(PROJECT_ROOT.parent / "pyproject.toml", self.repo / "pyproject.toml")
-        git(self.repo, "add", ".")
-        git(self.repo, "commit", "-m", "artificial committed program snapshot")
+        self.code = isolated_engine(self)
+        legacy = self._testMethodName.startswith("test_legacy_")
+        legacy_patches = []
+        if legacy:
+            shutil.copytree(self.code / "project", self.repo / "project")
+            shutil.copyfile(self.code / "pyproject.toml", self.repo / "pyproject.toml")
+            git(self.repo, "add", ".")
+            git(self.repo, "commit", "-m", "artificial legacy embedded engine")
+            legacy_patches = [patch("pdm.engine_provenance.program_commit", return_value=git(self.repo, "rev-parse", "HEAD")),
+                              patch("pdm.engine_provenance.reservation_file", return_value={})]
+            for fixture in legacy_patches:
+                fixture.start()
+                self.addCleanup(fixture.stop)
+        else:
+            git(self.repo, "commit", "--allow-empty", "-m", "artificial data-only baseline")
         self.saved = capture(self.repo, {"source_key": "artificial:completed", "source_type": "note",
             "acquisition_status": "full_text", "body": "date,load_kg\n2025-01-01,10\n2025-01-02,20\n"})
         self.bundle = resolve_skill_refs("knowledge-extract@10", "knowledge-review@8")
@@ -95,11 +105,15 @@ class QualityCompletedExtractionTests(unittest.TestCase):
                          self.rejected_bundle["sha256"])
         self.response = json.loads((self.cache / "response.json").read_text())
         self.binding = json.loads((self.cache / "request-binding.json").read_text())
-        # A later engineering commit is legal; sources, controls and old failure
-        # remain exact. Preparation freezes this new validation HEAD.
-        (self.repo / "project/src/pdm/recovery_upgrade.py").write_text("# artificial program-only upgrade\n")
-        git(self.repo, "add", "project/src/pdm/recovery_upgrade.py")
-        git(self.repo, "commit", "-m", "artificial recovery program upgrade")
+        for fixture in legacy_patches:
+            fixture.stop()
+        if legacy:
+            git(self.repo, "rm", "-r", "project", "pyproject.toml")
+            git(self.repo, "commit", "-m", "remove active legacy engine; preserve original Git history")
+        else:
+            git(self.repo, "commit", "--allow-empty", "-m", "artificial later data checkpoint")
+        # The public engine evolves independently of immutable private proofs.
+        advance_engine(self.code)
 
     def native(self, role, payload, timeout=120, *, on_start):
         self.number += 1
@@ -270,6 +284,21 @@ class QualityCompletedExtractionTests(unittest.TestCase):
         self.assertEqual(pipeline.verify_publication(self.repo, result["run_id"], historical=True)["files"], published["files"])
         for path, raw in protected.items():
             self.assertEqual((self.repo / path).read_bytes(), raw)
+
+    def test_legacy_original_response_recovers_from_history_after_active_engine_removed(self):
+        self.assertFalse((self.repo / "project").exists())
+        self.assertFalse((self.repo / pipeline._run_path(self.failed["run_id"], "engine")).exists())
+        self.test_original_successful_response_recovers_with_review_only_and_survives_cache_deletion()
+
+    def test_deleted_engine_proof_cannot_fall_back_to_legacy_or_current_code(self):
+        path = pipeline._run_path(self.failed["run_id"], "engine")
+        git(self.repo, "rm", path)
+        git(self.repo, "commit", "-m", "artificial removed provenance")
+        before = self.number, self.ledger_path.read_bytes()
+        with self.assertRaises(CaptureError) as raised:
+            self.prepare()
+        self.assertEqual(raised.exception.code, "engine_provenance_changed")
+        self.assertEqual((self.number, self.ledger_path.read_bytes()), before)
 
     def test_batch_original_views_survive_new_program_plan_and_historical_review(self):
         plan = plan_batches(self.repo, [self.saved["path"]], max_input_bytes=240000, purpose="history")

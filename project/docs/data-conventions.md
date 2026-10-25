@@ -1,6 +1,6 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev22`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev23`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
 来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；已支持格式 `0.1`—`0.13` 按各自 kind 契约读取，不批量迁移；`0.13` 仅用于下述专用已完成提取恢复门禁，普通10/8候选与质量链仍为 `0.12`。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
@@ -236,7 +236,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev22支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
+Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev23支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 
@@ -297,6 +297,23 @@ Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SC
 每个新的 `0.4` 尝试在调用模型前提交 `memory/runs/processes/<run_id>/started.md`，头为 `kind: processing_attempt`，正文含 `run_id`、`processing_key`、`execution_context`、`source_paths`、`related_runs`、`reserved_calls: 2`、`started_at`。同预分配 run 已有 started 时返回 `run_already_exists`，不重发调用。复用 processed marker 还要求请求的全部旧知识稳定路径已由原运行 objects／related 比较覆盖；额外未比较上下文返回 `processing_context_changed` 且零模型调用，不把相同来源误报为所有新上下文都已处理。
 
 `verify_publication(..., historical=False)` 核对当前正式字节；`historical=True`／CLI `--historical` 核对固定发布提交，用于追溯已被后续合法版本替代的原发布。历史通过不表示旧结论仍为当前有效，也不绕过现行删除控制。默认读取不能因历史链完整而继续沿用已纠正旧事实。
+
+### 公库唯一工程来源的运行版本绑定
+
+新运行从实际加载模块所在的公库 checkout 取得工程版本，不能根据 `--repo` 的私库 HEAD 推断程序版本。`execution_versions.program_commit` 是公库核心路径 `project/src/pdm/`、`project/prompts/`、`project/skills/` 与 `pyproject.toml` 的最近提交；实际程序、规则和领域策略仍按原契约计算摘要。公库准确 HEAD、核心工程提交和私库资料 HEAD 各有含义，文档提交不会被误认为新的核心工程版本。
+
+新增量尝试在写入 `started.md` 的同一提交原子保存 `memory/runs/processes/<run_id>/engine.md`。它使用既有 `schema_version: 0.4` 封套、`kind: engine_provenance` 和独立 `contract: public-engine-v1`；不改变现有业务 schema、processing key 或重试计数语义。正文严格保存：
+
+| 字段 | 含义 |
+| --- | --- |
+| `run_id`、`processing_key` | 对应原预约运行与处理身份 |
+| `repository` | 固定 `pdm-public-engine`，表示工程来源类别，不保存私人远程地址 |
+| `code_commit` | 实际加载公库 checkout 的准确 HEAD；成功 CI 仍由双仓入口另行核验 |
+| `versions` | 实际 `program_sha256`、`rules_version`、`domain_policy_version`、`domain_policy_sha256` 及公库核心 `program_commit` |
+| `data_base_head` | 预约提交之前的私库资料 HEAD，与公库代码提交独立 |
+| `started_sha256` | 同提交 `started.md` 的原始字节摘要 |
+
+恢复检查该证明与原 started 的提交、摘要、处理身份及资料父提交一致，证明发生增删改、损坏或不符时拒绝；不能删除证明后回退到旧逻辑。新质量恢复使用原证明中的工程版本，私库当前工作树无需工程副本。没有该证明的旧运行仅按原契约只读核验私库原 Git 历史中的工程，不补写、重标旧证明或重放 unknown。来源、模型审计、控制、候选、Review、已有发布及完整父链保留原事实。
 
 ### 来源纠正、替代和普通删除
 
@@ -504,7 +521,7 @@ continuation仅含schedule_id、root_tick_key、parent_tick_key、slice_index，
 
 runner配置严格包含schema_version、environment、platform、platform_task_id、schedule_id、code_commit、transport、allowed_source_ids、allowed_source_paths、trigger_observer、state_root、daily_time、timezone。时刻固定Asia/Shanghai 22:00，授权来源至少一类非空，environment及state_root须与绑定相符。`validate_runner_config(config)`只校验配置；`probe_runner(repo, config, *, receipt_refs=None)`只检测本机Git／Python／Codex可执行文件是否存在、绑定与state目录权限，不证明工具已成功执行模型或跨窗口持久恢复，也不调用模型。当前无平台adapter，返回blocked／platform_execution_unverified，platform_task_status为unverified、task_created_by_probe与task_enabled_by_probe均false，五项平台能力仍unverified；caller填写true或提供回执引用名均不能升级为真实通过，也不创建／启用GPT任务。
 
-`promotion_check(repo, base, candidate, *, dev_commit=None)`只读核验双父候选：第一父精确为base，显式dev_commit时第二父须匹配。base至candidate对memory／fixtures／archive／.pdm或任意层名为pdm-environment.json的文件有变化即blocked，并列出需从base保留的路径。该函数只读核验，另有`prepare_promotion(repo, base, dev_commit)`及promotion prepare --repo --base --dev-commit在本机对象库构造未挂ref的双父candidate：工程取dev，保护根及子路径／绑定文件精确保留生产base，check还核非保护文件的精确mode／blob与dev父一致，第二父须为local dev或origin/dev祖先。prepare返回prepared、candidate_commit／tree和report，git_objects_created=true、refs_changed=false、worktree_changed=false、pushed=false。临时promotion交付分支及实际merge按发布门禁核对，不能把创建对象当生产交付。
+以下 promotion 接口保留历史混合仓库的兼容行为；纯资料私库不再通过它复制工程，公库工程按 dev → master 的 PR 流程交付。`promotion_check(repo, base, candidate, *, dev_commit=None)`只读核验双父候选：第一父精确为base，显式dev_commit时第二父须匹配。base至candidate对memory／fixtures／archive／.pdm或任意层名为pdm-environment.json的文件有变化即blocked，并列出需从base保留的路径。该函数只读核验，另有`prepare_promotion(repo, base, dev_commit)`及promotion prepare --repo --base --dev-commit在本机对象库构造未挂ref的双父candidate：工程取dev，保护根及子路径／绑定文件精确保留生产base，check还核非保护文件的精确mode／blob与dev父一致，第二父须为local dev或origin/dev祖先。prepare返回prepared、candidate_commit／tree和report，git_objects_created=true、refs_changed=false、worktree_changed=false、pushed=false。临时promotion交付分支及实际merge按发布门禁核对，不能把创建对象当生产交付。
 
 `promotion_delivery_check(repo, base, actual_merge, head_commit, head_ref=...)`核GitHub外层merge：交付head必须命名promotion/<head完整SHA>，prepared检查通过，outer父顺序为[base, head]且tree与head一致才允许交付。base改变须重新准备，不把GitHub合并成功当生产资料保持证明。
 
