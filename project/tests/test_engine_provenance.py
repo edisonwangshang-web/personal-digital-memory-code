@@ -113,6 +113,37 @@ class EngineProvenanceTests(unittest.TestCase):
         test_pipeline.git(self.repo, "commit", "-m", "artificial byte restoration")
         self.assert_changed(result["run_id"])
 
+    def test_unrelated_branch_merge_preserves_original_reservation(self):
+        base = test_pipeline.git(self.repo, "rev-parse", "HEAD")
+        branch = test_pipeline.git(self.repo, "branch", "--show-current")
+        result, sidecar = self.publication()
+        started = sidecar.with_name("started.md")
+        original = sidecar.read_bytes(), started.read_bytes()
+        test_pipeline.git(self.repo, "checkout", "-b", "artificial-unrelated", base)
+        test_pipeline.git(self.repo, "commit", "--allow-empty", "-m", "artificial unrelated branch change")
+        test_pipeline.git(self.repo, "checkout", branch)
+        test_pipeline.git(self.repo, "merge", "--no-ff", "artificial-unrelated", "-m", "artificial unrelated merge")
+        self.assertEqual(len(test_pipeline.git(self.repo, "rev-list", "--parents", "-n", "1", "HEAD").split()), 3)
+        self.assertEqual((sidecar.read_bytes(), started.read_bytes()), original)
+        verified = verify_publication(self.repo, result["run_id"], historical=True)
+        self.assertIn(sidecar.relative_to(self.repo).as_posix(),
+                      {item["path"] for item in verified["authority_snapshots"]})
+
+    def test_ours_merge_cannot_hide_engine_edits_on_another_branch(self):
+        result, sidecar = self.publication()
+        branch = test_pipeline.git(self.repo, "branch", "--show-current")
+        original = sidecar.read_bytes()
+        test_pipeline.git(self.repo, "checkout", "-b", "artificial-provenance-edit")
+        sidecar.write_bytes(original + b"\n")
+        test_pipeline.git(self.repo, "add", "-u")
+        test_pipeline.git(self.repo, "commit", "-m", "artificial branch provenance modification")
+        test_pipeline.git(self.repo, "checkout", branch)
+        test_pipeline.git(self.repo, "merge", "--no-ff", "-s", "ours", "artificial-provenance-edit",
+                          "-m", "artificial merge retaining original bytes")
+        self.assertEqual(len(test_pipeline.git(self.repo, "rev-list", "--parents", "-n", "1", "HEAD").split()), 3)
+        self.assertEqual(sidecar.read_bytes(), original)
+        self.assert_changed(result["run_id"])
+
     def test_later_sidecar_cannot_be_attached_to_an_old_reservation(self):
         deferred = {}
         original = engine_provenance.reservation_file

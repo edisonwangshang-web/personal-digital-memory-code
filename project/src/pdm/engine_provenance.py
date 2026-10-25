@@ -54,8 +54,18 @@ def read_reservation(git, run_id):
             _fail()
         return None
     commit = _last_commit(git, head, started_path)
-    if history != [commit] or not git.path(path).is_file():
+    if commit not in history or not git.path(path).is_file():
         _fail()
+    original_tree = git.run("ls-tree", "-z", commit, "--", path)
+    for change in history:
+        if change == commit:
+            continue
+        # Full history includes TREESAME merges that merely carry the original
+        # reservation across branches. Keep those, while inspecting every
+        # branch's actual edits (including edits later restored to old bytes).
+        parents = git.text("rev-list", "--parents", "-n", "1", change).split()[1:]
+        if len(parents) < 2 or git.run("ls-tree", "-z", change, "--", path) != original_tree:
+            _fail()
     raw = _committed(git, path, commit)
     value = _load(raw, "engine_provenance", SCHEMA)
     started_bytes = _committed(git, started_path, commit)

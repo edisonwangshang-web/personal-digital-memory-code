@@ -108,6 +108,8 @@ def _scope(git, run_id, context, source_paths, related_runs, reservation, *, at_
             or pointer != {"run_id": run_id, "revision_context_sha256": _hash(context), "source_paths": selected,
                            "related_runs": related, "processing_key": reservation["processing_key"]}):
         _fail("revision_resume_reservation_changed")
+    from .engine_provenance import read_reservation
+    engine = read_reservation(git, run_id)
     if require_unstarted:
         absent = [_stage_path(run_id), *[_run_path(run_id, name) for name in
                   ("review", "failure", "manifest", "receipt", "pending", "pending-registration", "reused")]]
@@ -117,6 +119,10 @@ def _scope(git, run_id, context, source_paths, related_runs, reservation, *, at_
         _fail("revision_resume_controls_changed")
     authority = verify_revision_context(git, context, source_paths=selected, related_runs=related,
                                          at_commit=at_commit, historical=True)
+    if engine is not None:
+        engine_path = _run_path(run_id, "engine")
+        authority.append({"path": engine_path, "commit_sha": head,
+                          "sha256": _hash(_committed(git, engine_path, head))})
     return authority + [deepcopy(reservation[key]) for key in expected_paths]
 
 

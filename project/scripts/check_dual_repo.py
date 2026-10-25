@@ -180,6 +180,21 @@ def _file_bytes(path):
     return value
 
 
+def _import_root(repo):
+    """The whole PYTHONPATH entry must exclude unchecked sibling modules."""
+    root = repo / "project/src"
+    try:
+        for entry in root.iterdir():
+            mode = entry.lstat().st_mode
+            if entry.name == "pdm" and stat.S_ISDIR(mode):
+                continue
+            if stat.S_ISREG(mode) and entry.suffix in {".md", ".txt"}:
+                continue
+            _fail("unexpected_import_root_entry")
+    except OSError:
+        _fail("import_root_unreadable")
+
+
 def _snapshot(repo, commit):
     saved = {}
     for row in _git(repo, "ls-tree", "-r", "-z", commit, "--", *CORE).split(b"\0"):
@@ -230,6 +245,7 @@ def _snapshot(repo, commit):
                 live.add(relative)
     if live != set(saved):
         _fail("core_path_mismatch")
+    _import_root(repo)
     return saved
 
 

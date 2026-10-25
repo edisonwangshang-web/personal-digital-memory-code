@@ -270,6 +270,41 @@ class DualRepositoryTests(unittest.TestCase):
         self.assertTrue(loaded["safe_path"])
         self.assertIn("-P", shlex.split(result["doctor_command"]))
 
+    def test_ignored_sibling_module_that_real_command_would_import_is_rejected(self):
+        self.write(self.code, "project/src/pdm/__main__.py", "import json\nprint(json.dumps('public engine'))\n")
+        self.save(self.code)
+        self.accept_code_fixture_commit()
+        command = self.check()["doctor_command"]
+        completed = subprocess.run(["/bin/sh", "-c", command], cwd=self.data,
+                                   capture_output=True, text=True, check=True, timeout=15)
+        self.assertEqual(json.loads(completed.stdout), "public engine")
+        self.write(self.code, ".git/info/exclude", "project/src/json.py\n")
+        self.write(self.code, "project/src/json.py", "raise RuntimeError('unchecked sibling imported')\n")
+        self.assertEqual(self.git(self.code, "status", "--porcelain"), "")
+        self.blocked("unexpected_import_root_entry")
+        # The synthetic failure proves this entry affects the actual launch path.
+        poisoned = subprocess.run(["/bin/sh", "-c", command], cwd=self.data,
+                                  capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(poisoned.returncode, 0)
+        self.assertIn("unchecked sibling imported", poisoned.stderr)
+
+    def test_ignored_sibling_packages_native_modules_and_symlinks_are_rejected(self):
+        for relative in ("project/src/json/__init__.py", "project/src/json.so",
+                         "project/src/json.pyc", "project/src/json.pyd", "project/src/json.md"):
+            with self.subTest(path=relative):
+                self.write(self.code, ".git/info/exclude", "project/src/json*\n")
+                target = self.code / relative
+                if target.suffix == ".md":
+                    target.symlink_to(self.data / "memory/sources/private.md")
+                else:
+                    self.write(self.code, relative, "# synthetic unused entry\n")
+                self.assertEqual(self.git(self.code, "status", "--porcelain"), "")
+                self.blocked("unexpected_import_root_entry")
+                if target.parent.name == "json":
+                    shutil.rmtree(target.parent)
+                else:
+                    target.unlink()
+
     def test_private_head_or_clean_state_change_during_api_check_is_rejected(self):
         for mutation in ("commit", "dirty"):
             with self.subTest(mutation=mutation):
@@ -290,9 +325,12 @@ class DualRepositoryTests(unittest.TestCase):
 
     def test_ignored_engine_added_after_initial_snapshot_is_rejected(self):
         original = bridge._origin
-        for repo, error in ((self.code, "core_path_mismatch"),
-                            (self.data, "private_engine_copy_present")):
-            with self.subTest(repo=repo.name):
+        for repo, relative, error in (
+            (self.code, "project/src/pdm/ignored.py", "core_path_mismatch"),
+            (self.code, "project/src/ignored.py", "unexpected_import_root_entry"),
+            (self.data, "project/src/pdm/ignored.py", "private_engine_copy_present"),
+        ):
+            with self.subTest(repo=repo.name, path=relative):
                 visits = 0
 
                 def concurrent_origin(path):
@@ -301,13 +339,13 @@ class DualRepositoryTests(unittest.TestCase):
                     if path == self.data:
                         visits += 1
                         if visits == 2:
-                            self.write(repo, "project/src/pdm/ignored.py", "# concurrent synthetic code\n")
+                            self.write(repo, relative, "# concurrent synthetic code\n")
                             self.assertEqual(self.git(repo, "status", "--porcelain"), "")
                     return value
 
                 with patch.object(bridge, "_origin", side_effect=concurrent_origin):
                     self.blocked(error)
-                (repo / "project/src/pdm/ignored.py").unlink()
+                (repo / relative).unlink()
 
     def test_branch_changes_during_check_are_rejected_even_when_heads_stay_equal(self):
         for repos in ((self.code,), (self.data,), (self.code, self.data)):
