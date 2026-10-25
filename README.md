@@ -1,6 +1,15 @@
 # Personal Digital Memory — 工程代码
 
-此仓库只提供来源采集、知识提取、独立审核、分类发布和带引用读取的工程代码、通用 Skill 与人工测试。当前版本为开发版；代码检查通过不代表真实资料加工或完整业务验收已经完成。
+此仓库统一提供产品方案、技术设计，以及来源采集、知识提取、独立审核、分类发布和带引用读取的工程代码、通用 Skill、人工测试与 CI。当前版本为开发版；代码检查通过不代表真实资料加工或完整业务验收已经完成。
+
+## 项目方案与产品设计
+
+产品目标、用户场景、技术方案、实现明细、数据契约及阶段计划统一在本工程仓库维护，入口见[项目文档导航](project/README.md)。
+
+- [总体方案](project/docs/overall-plan.md)：产品目标、用户场景与范围。
+- [技术方案](project/docs/technical-plan.md)：四层架构与实现原理。
+- [实现明细](project/docs/implementation-details.md)、[数据规范](project/docs/data-conventions.md)、[场景与验收](project/docs/scenarios-and-acceptance.md)：具体执行与检查要求。
+- [Roadmap](project/docs/roadmap.md)：已实现、待验证和后续阶段。
 
 ## 代码与资料分开
 
@@ -26,6 +35,7 @@ GitHub Actions 在推送 dev、master 或提交到 master 的 PR 时运行：两
 ## 目录
 
 - `project/src/pdm/`：工程实现。
+- `project/docs/`：产品方案、技术设计、使用说明及架构图。
 - `project/prompts/`：模型提示词。
 - `project/skills/`：提取与审核的版本化通用规则，适用于健康、工作与学习。
 - `project/tests/`：人工测试及临时 Git 仓库辅助工具。
