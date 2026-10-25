@@ -1,4 +1,5 @@
 """New feedback schema remains closed across a real decomposed publication."""
+import json
 import unittest
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import test_reuse_refs as reuse_fixture
 from pdm.batching import plan_batches, project_batch_sources
 from pdm.batch_groups import publish_final_group, verify_group_publication
 from pdm.contracts import parse_markdown
+from pdm.engine_provenance import read_reservation
 from pdm.pipeline import PipelineGit, _read_fixed_candidate, process_sources, publish, resume_decomposed_processing
 from pdm.skill_support import resolve_skill_refs
 
@@ -32,9 +34,18 @@ class FeedbackDecomposedTests(unittest.TestCase):
         candidate, sources, _, _ = _read_fixed_candidate(PipelineGit(self.repo), result['run_id'])
         self.assertEqual(candidate['reuse_quality_requirements'], [])
         run_root = self.repo / 'memory/runs/processes' / result['run_id']
+        self.assertTrue((run_root / 'engine.md').is_file())
         for path in run_root.rglob('*.md'):
             with self.subTest(path=str(path.relative_to(run_root))):
-                self.assertEqual(parse_markdown(path.read_bytes())[0]['schema_version'], '0.12')
+                metadata, body = parse_markdown(path.read_bytes())
+                if path == run_root / 'engine.md':
+                    self.assertEqual(metadata, {'schema_version': '0.4', 'kind': 'engine_provenance',
+                                                'run_id': result['run_id']})
+                    engine = read_reservation(PipelineGit(self.repo), result['run_id'])
+                    self.assertEqual(engine, json.loads(body))
+                    self.assertEqual(engine['contract'], 'public-engine-v1')
+                else:
+                    self.assertEqual(metadata['schema_version'], '0.12')
         before = PipelineGit(self.repo).head(), len(self.calls)
         reopened = resume_decomposed_processing(self.repo, result['run_id'], allowed_source_paths=paths, model_call=lambda *a, **k: self.fail('must reuse completed proof'))
         self.assertEqual(reopened['status'], 'passed', reopened)
