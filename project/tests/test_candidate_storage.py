@@ -29,6 +29,8 @@ class CandidateStorageTests(unittest.TestCase):
         self.repo.mkdir()
         git(self.repo, "init", "-b", "dev")
         configure_test_repository(self.repo)
+        git(self.repo, "config", "user.name", "Artificial Candidate Storage")
+        git(self.repo, "config", "user.email", "candidate-storage@example.invalid")
         git(self.repo, "commit", "--allow-empty", "-m", "artificial baseline")
         self.adapter = PipelineGit(self.repo)
         self.head = self.adapter.head()
