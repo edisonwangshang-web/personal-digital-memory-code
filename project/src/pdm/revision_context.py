@@ -7,7 +7,7 @@ its authority snapshots into a later publication.
 
 from copy import deepcopy
 
-from .contracts import CaptureError
+from .contracts import CaptureError, quality_schema_version
 
 SCHEMA = "0.9"
 QUALITY_SCHEMA = "0.10"
@@ -105,7 +105,8 @@ def build_revision_context(git, revision_from_run, *, source_paths, related_runs
     candidate, _, stage_bytes, stage_commit, review, review_bytes, review_commit, controls = _read_rejected(
         git, revision_from_run, source_paths, related_runs, anchor)
     context = {
-        "schema_version": (QUALITY_SCHEMA if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA),
+        "schema_version": (quality_schema_version(candidate["skill_bundle"])
+                           if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA),
         "contract": CONTRACT,
         "source_run_id": revision_from_run,
         "trust": "unpublished_candidate_and_review_feedback_not_source_facts",
@@ -153,7 +154,8 @@ def _valid_schema(context):
     candidate = context.get("candidate")
     if not isinstance(candidate, dict):
         return False
-    expected = QUALITY_SCHEMA if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA
+    expected = (quality_schema_version(candidate.get("skill_bundle"))
+                if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA)
     return context.get("schema_version") == expected
 
 

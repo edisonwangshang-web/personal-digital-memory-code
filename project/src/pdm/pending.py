@@ -6,7 +6,7 @@ import json
 import re
 from datetime import datetime
 
-from .contracts import CaptureError, M1_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION, canonical, markdown, timestamp
+from .contracts import CaptureError, M1_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, canonical, markdown, timestamp
 from .transaction import PipelineGit
 
 REGISTRY_PATH = "memory/pending.md"
@@ -270,7 +270,7 @@ def _verify_input_refs(repo, item):
             continue
         header, body = _read_document(git, stage)
         candidate = _json(body)
-        if (header.get("schema_version") not in {"0.2", "0.3", M1_SCHEMA_VERSION, "0.6", "0.7", "0.8", "0.9", QUALITY_SCHEMA_VERSION}
+        if (header.get("schema_version") not in {"0.2", "0.3", M1_SCHEMA_VERSION, "0.6", "0.7", "0.8", "0.9", *QUALITY_SCHEMA_VERSIONS}
                 or header.get("kind") != "candidate" or header.get("run_id") != run
                 or not isinstance(candidate, dict) or candidate.get("run_id") != run):
             _error("pending_object_mismatch")
@@ -279,7 +279,7 @@ def _verify_input_refs(repo, item):
             bound = {_source_tuple(ref) for ref in [candidate["source"], *candidate.get("additional_sources", [])]}
             if selected != bound:
                 _error("pending_source_mismatch")
-            if header["schema_version"] == QUALITY_SCHEMA_VERSION:
+            if header["schema_version"] in QUALITY_SCHEMA_VERSIONS:
                 # New quality references are accepted only with the complete
                 # fixed candidate/request/Review proof, after exact source scope
                 # matching. Only the root's final non-passing verdict is
@@ -466,18 +466,18 @@ def _publication_source_refs(git, run_id):
                 or (metadata.get("schema_version"), metadata.get("kind")) not in {
                     ("0.2", "manifest"), ("0.3", "manifest"), (M1_SCHEMA_VERSION, "manifest"),
                     ("0.6", "manifest"), ("0.6", "batch_group_manifest"), ("0.7", "manifest"), ("0.8", "manifest"), ("0.9", "manifest"),
-                    (QUALITY_SCHEMA_VERSION, "manifest")}
+                    *((version, "manifest") for version in QUALITY_SCHEMA_VERSIONS)}
                 or metadata.get("run_id") != run_id
                 or not isinstance(manifest, dict) or manifest.get("run_id") != run_id):
             _error()
         bindings = [manifest["source"], *manifest.get("additional_sources", [])]
-        if metadata["schema_version"] == QUALITY_SCHEMA_VERSION:
+        if metadata["schema_version"] in QUALITY_SCHEMA_VERSIONS:
             # Share the read-only candidate/mode preflight with current
             # evidence; full publication verification remains AFTER the item's
             # associated source scope has been checked by the caller.
             from .evidence import _peek_publication
             _peek_publication(git, run_id, git.head())
-        maximum = 256 if metadata["schema_version"] in {"0.6", "0.7", "0.8", "0.9", QUALITY_SCHEMA_VERSION} else 8
+        maximum = 256 if metadata["schema_version"] in {"0.6", "0.7", "0.8", "0.9", *QUALITY_SCHEMA_VERSIONS} else 8
         chosen = [_source_tuple(binding) for binding in bindings]
         if len(chosen) > maximum or len(set(chosen)) != len(chosen):
             _error("pending_publication_mismatch")

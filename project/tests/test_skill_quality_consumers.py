@@ -246,7 +246,7 @@ class QualityBatchConsumersTests(unittest.TestCase):
         paths, _, projection = self.prepare(9)
         processed = process_sources(self.repo, paths, related_runs=[], model_call=self.model,
             batch_context=projection["batch_context"], source_views=projection["source_views"],
-            skill_bundle=resolve_skill_refs())
+            skill_bundle=resolve_skill_refs("knowledge-extract@8", "knowledge-review@6"))
         self.assertEqual(processed["status"], "passed", processed)
         published = publish(self.repo, processed["run_id"])
         self.assertEqual(parse_markdown((self.repo / published["manifest_path"]).read_bytes())[0]["schema_version"],

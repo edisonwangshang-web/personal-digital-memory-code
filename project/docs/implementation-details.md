@@ -2,9 +2,9 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev19`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev20`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
 
-新任务默认 `knowledge-extract@8`／`knowledge-review@6`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
+新任务默认 `knowledge-extract@9`／`knowledge-review@7`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
 
 文档分工如下：
 
@@ -50,7 +50,7 @@ ChatGPT 是交互入口，模型 API 不自动提供对应聊天应用的历史�
 
 | 入口 | 现行行为 |
 | --- | --- |
-| `pdm process` | 新加工默认解析两个固定 Skill；可显式传 `--extract-skill knowledge-extract@8 --review-skill knowledge-review@6`。`--revision-from-run` 未指定新引用时继承被退回候选的 bundle |
+| `pdm process` | 新加工默认解析两个固定 Skill；可显式传 `--extract-skill knowledge-extract@9 --review-skill knowledge-review@7`。`--revision-from-run` 未指定新引用时继承被退回候选的 bundle |
 | `pdm production prepare` | 新队列默认固定两个 Skill；已存在队列未指定新引用时使用原 bundle，范围或绑定不符仍拒绝 |
 | `pdm schedule configure` | 新建 `continuous-v1`／`production-v1` 日程默认固定两个 Skill 并传入后续队列；旧配置幂等读取／续接保留原契约 |
 | Python API | `process_sources(..., skill_bundle=None)` 保持旧调用兼容；显式 bundle 才启用质量链。生产／日程 API 的 `use_default_skills` 默认 false，由新建 CLI 入口明确启用 |
@@ -59,7 +59,7 @@ ChatGPT 是交互入口，模型 API 不自动提供对应聊天应用的历史�
 
 加载器只接受已注册、角色匹配且摘要一致的版本，拒绝未知引用、外部路径和依赖变化。版本化文件位于 `project/skills/knowledge-extract/<version>/`、`knowledge-review/<version>/`，共同依赖位于 `project/skills/shared/`。当前两个默认角色共同引用 `knowledge-context-v1`。`skill_support.py` 核不可变 manifest 与实际内容；`model_calls.py` 展开冻结规则并计算真实字节和摘要；`knowledge_quality.py` 准备并核验质量材料；pipeline、production、scheduler 及分解 Review 消费同一绑定。
 
-新质量候选、Review、manifest／receipt、queue／attempt、日程事件和分解 proof 使用 `0.10`；来源／采集 `0.1`、正式 record／topic `0.2`、group wrapper `0.6` 保持。分解审核及其 proof 的历史契约为 `0.8`，显式返工为 `0.9`，统一 registry 保留 `0.4`／`0.7`。历史格式按原契约读取，不回填“已加载 Skill”，稳定计数与预约身份不迁移。
+新9/7合同的候选、Review、manifest／receipt、queue／attempt、日程事件和分解 proof 使用 `0.11`，旧8/6质量链保持 `0.10`；来源／采集 `0.1`、正式 record／topic `0.2`、group wrapper `0.6` 保持。分解审核及其 proof 的历史契约为 `0.8`，显式返工为 `0.9`，统一 registry 保留 `0.4`／`0.7`。历史格式按原契约读取，不回填“已加载 Skill”，稳定计数与预约身份不迁移。
 
 ### 加工与审核
 
@@ -73,11 +73,19 @@ ChatGPT 是交互入口，模型 API 不自动提供对应聊天应用的历史�
 
 Skill 由接入层受控展开，真实规则和模板参与模型请求；只传名称、要求模型自报已加载或依赖会话记忆均不能满足门禁。确定性清单和统计在程序内执行，模型不因 Skill 引用获得任意读库、联网或发布权限。CLI 继续关闭隐式 Skill 注入，由显式加载器提供固定规则。完整规则与必要依据超容量时保留阻塞，不能删规则、截依据或退回普通提示词后发布。
 
+### 原样复用的解析与核验
+
+extract@9的原始输出显式携带 `reuse_refs`。每项为 `{path, content_version}`，只从本次已验证的related对象选择；未变对象可省去重复全文，新建和实质变化项仍按原字段返回全文。batch中的objects/wikis可在引用足够时为空；普通模式的wiki可为空值，但物化后仍须恰好一篇Wiki。完整候选仍满足原记录／Wiki数量及全部依赖约束，不自动补回未声明对象。
+
+程序先核引用的路径、精确版本、授权范围和控制，再物化旧对象的受审字段与正文。原始 `extraction_output` 和实际调用摘要保持；物化结果参与候选绑定并在当前／历史核验时从固定related重新构建。重复、未知或错误引用、全文与引用冲突、过时Wiki成员和缺失旧记录均失败关闭。
+
+随后在物化的完整候选上核覆盖、数字、时态、分类及必要关联，继续原auto／分解Review和发布流程。物化不生成新的模型调用或新事实，也不能补写quality、代替Review、缩减必要审核证据或修改原始失败返回。发布reuse沿原operations机制保存正式文件原字节及原审核来源。
+
 ### 实际容量与分解交接
 
 按真实逐行`source_views`测完整请求容量。source profile通过`evidence_id`保存完整实际片段，target和必需检查用`source_scope_id`／`source_scope_ids`引用；scope摘要仍核完整来源与候选，避免每项指标反复展开同一片段列表。object保持其完整对象与必要证据，coverage保持实际批次／draft的完整语义范围及全部最终对象，global核跨来源关系；不把逐行切割当作独立语义审核，也不通过删掉未被提取者声明的统计来省略查漏义务。
 
-实际渲染由`model_calls.py`按显式角色版本选择 v1／v2／v3；当前默认 extract@8／review@6 使用`pdm-columnar-shared-json-v3`，按列式结构、v2字段字典、v1共享值的顺序完整还原。`skill_wire.py`负责基础v1共享值编码，重复值完整保存一次并用引用重用，保留键显式转义。编码后在程序内解码并逐值核原JSON，模型收到解引用说明；原source、context和完整payload不删减，原始调用审计保留。容量与请求摘要使用真正提交的全部字节，含Skill规则、共享表和编码说明；旧请求渲染不变，模型返回仍必须给实际业务字段，不能拿共享引用代替原文或知识正文。
+实际渲染由`model_calls.py`按显式角色版本选择 v1／v2／v3；当前默认 extract@9／review@7 使用`pdm-columnar-shared-json-v3`，按列式结构、v2字段字典、v1共享值的顺序完整还原。`skill_wire.py`负责基础v1共享值编码，重复值完整保存一次并用引用重用，保留键显式转义。编码后在程序内解码并逐值核原JSON，模型收到解引用说明；原source、context和完整payload不删减，原始调用审计保留。容量与请求摘要使用真正提交的全部字节，含Skill规则、共享表和编码说明；旧请求渲染不变，模型返回仍必须给实际业务字段，不能拿共享引用代替原文或知识正文。
 
 global使用`verified-quality-conclusions-v1`证书投影，保留前序逐项结论、理由、范围和完整输出／检查摘要，重复证据ID数组以摘要绑定。原始完整Review输出仍在proof节点保存并于汇合时重验；global仍看完整最终知识与关系，证书不声称其读过未提供原文。任何必要单元仍超容量就保留阻塞，实际最终字节和检查结果统一见提测记录，不能以压缩后的请求结构代替真实模型质量验收。
 

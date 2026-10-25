@@ -36,7 +36,7 @@ class SkillQualityPipelineTests(unittest.TestCase):
             "platform": "fixture", "original_url": None, "acquisition_status": "full_text",
             "original_time": "2026-10-01", "body": "用户：我计划整理运动资料。\n",
         })
-        self.bundle = resolve_skill_refs()
+        self.bundle = resolve_skill_refs("knowledge-extract@8", "knowledge-review@6")
         self.calls = []
         self.mutate = None
 

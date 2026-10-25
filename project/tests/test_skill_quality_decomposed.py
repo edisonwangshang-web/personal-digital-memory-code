@@ -51,7 +51,8 @@ class SkillQualityDecomposedTests(TestCase):
         from pdm.knowledge_quality import prepare_quality
         from pdm.skill_support import resolve_skill_refs
         legacy.DecomposedReviewTests.freeze(self)
-        quality = {"quality_contract": "skill-quality-v1", "skill_bundle": resolve_skill_refs(),
+        quality = {"quality_contract": "skill-quality-v1", "skill_bundle": resolve_skill_refs(
+                       "knowledge-extract@8", "knowledge-review@6"),
                    "quality_context": prepare_quality(self.inputs, source_views=self.payload["sources"])}
         self.payload.update(deepcopy(quality))
         self.candidate.update(deepcopy(quality))
@@ -114,7 +115,8 @@ class SkillQualityDecomposedTests(TestCase):
         paths, _, projection = self.prepare(2)
         result = process_sources(self.repo, paths, related_runs=[], model_call=self.model,
             batch_context=projection["batch_context"], source_views=projection["source_views"],
-            review_strategy="decomposed-v1", skill_bundle=resolve_skill_refs())
+            review_strategy="decomposed-v1", skill_bundle=resolve_skill_refs(
+                "knowledge-extract@8", "knowledge-review@6"))
         self.assertEqual(result["status"], "passed", result)
         self.assertEqual(self.roles, ["extract"] + ["review"] * 6)
         for request in self.contexts[1:]:

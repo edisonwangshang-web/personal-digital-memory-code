@@ -1,6 +1,6 @@
 # M0—M1 执行方案：第一版个人知识库
 
-本文是公开工程的完整实施方案；真实来源、模型返回、授权与实际验收留在私库。当前程序 `0.2.0.dev19`，默认 `knowledge-extract@8`／`knowledge-review@6`；source0.1、formal0.2、新质量链0.10，旧格式按原契约保留。M0 的历史真实验收不在此复制；M1 尚未整体验收，尤其缺少目标定时 runner、两轮真实触发和第二模型等实际证据。工程实现、人工回归、实际模型语义与业务验收分别判断，状态以[Roadmap](roadmap.md)为准。
+本文是公开工程的完整实施方案；真实来源、模型返回、授权与实际验收留在私库。当前程序 `0.2.0.dev20`，默认 `knowledge-extract@9`／`knowledge-review@7`；source0.1、formal0.2、新9/7质量链0.11、旧质量链0.10，旧格式按原契约保留。M0 的历史真实验收不在此复制；M1 尚未整体验收，尤其缺少目标定时 runner、两轮真实触发和第二模型等实际证据。工程实现、人工回归、实际模型语义与业务验收分别判断，状态以[Roadmap](roadmap.md)为准。
 
 公库保存方案、产品设计、技术文档、代码、通用Skill、人工测试及CI；私库保存真实个人资料、知识、审核、历史与私有验收。程序实际从私库加载，双仓只读核对不自动同步或合并历史。所有工程在dev开发，验证及独立审查通过后经PR以保留父边的merge commit交付master；准确提交的实际CI不能转给另一仓库或不同SHA。见[双仓操作](dual-repository-operation.md)、[发布与回滚](release-and-rollback.md)。
 
@@ -10,7 +10,7 @@
 
 ## M1 知识质量与 Skill 接入批次
 
-提取和独立审核实际加载不可变Skill、必要模板与共同质量规范，绑定资料覆盖、可复算描述统计、时间限定和逐项质量检查。extract@8／review@6还引用knowledge-context-v1，要求知识来源、时间、范围和已提供关系自足；current按明确object_paths读取，主题带精确record依赖。所选对象齐全不表示读遍原文或全库。来源与正式对象不迁移；历史规则及请求字节保留。字段见[质量契约](data-conventions.md#skill-quality-contract)，执行见[实现明细](implementation-details.md#skill-quality-execution)，验收见[SQ01—SQ11](scenarios-and-acceptance.md#skill-quality-acceptance)。
+提取和独立审核实际加载不可变Skill、必要模板与共同质量规范，绑定资料覆盖、可复算描述统计、时间限定和逐项质量检查。extract@9／review@7还引用knowledge-context-v1，要求知识来源、时间、范围和已提供关系自足；current按明确object_paths读取，主题带精确record依赖。所选对象齐全不表示读遍原文或全库。来源与正式对象不迁移；历史规则及请求字节保留。字段见[质量契约](data-conventions.md#skill-quality-contract)，执行见[实现明细](implementation-details.md#skill-quality-execution)，验收见[SQ01—SQ11](scenarios-and-acceptance.md#skill-quality-acceptance)。
 
 | 顺序 | 工程与实际验收 | 验收出口 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 | 4. 发布、兼容与恢复 | 候选和审核绑定规则、覆盖、计算及精确版本；普通／分解审核全部义务通过后发布；旧链按原契约读取 | SQ10—SQ11；规则变化不能借旧Review发布，unknown与持久重试身份保留，完成节点核验复用 |
 | 5. 限定真实质量验收 | 仅使用实际获准的来源，以新链加工、独立审核，复核指标覆盖、主题概览、时态、引用、目录与只读问答 | 适用SQ场景及真实模型证据；不预定对象数，不以旧规则通过结果代替新质量验收 |
 
-质量验收纳入M1-01，并覆盖M1-02更新和M1-03同一加工链。普通返工及分解恢复支持0.10；历史0.9 operator入口`resume-unstarted-revision`和`revalidate-completed-extraction`缺新Skill证明，对新质量链须以`skill_quality_recovery_attestation_required`在模型前拒绝，不能降级。
+质量验收纳入M1-01，并覆盖M1-02更新和M1-03同一加工链。普通返工及分解恢复按绑定支持0.10／0.11；历史0.9 operator入口`resume-unstarted-revision`和`revalidate-completed-extraction`缺新Skill证明，对新质量链须以`skill_quality_recovery_attestation_required`在模型前拒绝，不能降级。
 
 可先人工触发capture→提取分类→独立Review→proof消费发布→目录／只读问答→恢复。同一有效已完成阶段核验复用，只对失败或规则改变影响的环节返工；unknown先对账。新queue默认auto，容量内单次Review，超限或显式decomposed-v1使用object／coverage／global完整证明；必要语义闭包仍超256000字节则blocked_capacity。人工成功不证明云任务已部署，也不完成M1。
 

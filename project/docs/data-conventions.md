@@ -1,10 +1,18 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev19`，新任务默认 `knowledge-extract@8`／`knowledge-review@6`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev20`，新任务默认 `knowledge-extract@9`／`knowledge-review@7`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
-来源及采集 `0.1`、正式对象 `0.2`、新质量链 `0.10`；旧格式 `0.1`—`0.10` 按各自原契约读取，不批量迁移。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
+来源及采集 `0.1`、正式对象 `0.2`、新9/7质量链 `0.11`，旧质量链 `0.10`；历史格式 `0.1`—`0.11` 按各自原契约读取，不批量迁移。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
-current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。extract@8／review@6 还固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
+current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。extract@9／review@7 还固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
+
+## dev20：显式原样复用（schema `0.11`）
+
+新默认extract@9／review@7使用 `reuse_refs` 输出合同。引用项恰含 `path`、`content_version`；路径只允许本次实际提供且已验证发布依据的related record／topic，版本须与该固定对象完全一致。引用本身不携带可覆盖旧事实的正文，也不能增加来源权限。
+
+新建／变化项继续输出全文；objects与wikis的原始数组可因明确引用而为空，普通wiki允许为空值，但物化后的完整输出仍须满足原记录数量、Wiki数量及精确成员版本。旧合同不接受新增键，也不能将缺省或空输出推断为reuse。重复引用、未知路径、错误版本、全文冲突及变化记录配旧Wiki均拒绝。
+
+原始模型JSON和调用输出摘要保持，物化对象及其关联解析进入固定候选并可从Git历史重新验证。quality的目标去向、统计和时态仍核完整物化正文；Review读取完整候选，不因reuse减少审核义务。新合同运行族使用 `0.11`，旧8/6质量链保持 `0.10`；来源0.1、正式对象0.2、group0.6及audit账本保持原格式。
 
 ## 无损模型传输契约
 
@@ -12,13 +20,13 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 
 <a id="skill-quality-contract"></a>
 
-## M1 Skill 引用与知识质量契约（schema `0.10`）
+## M1 Skill 引用与知识质量契约（旧schema `0.10`，新9/7为 `0.11`）
 
-显式bundle启用`quality_contract="skill-quality-v1"`，新质量运行使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
+显式bundle启用`quality_contract="skill-quality-v1"`，新9/7合同使用0.11，旧质量运行使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
 
 ### Skill 引用、展开与运行绑定
 
-CLI 分别提供 `--extract-skill`、`--review-skill`，加载器接口为 `resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；新任务默认 extract@8／review@6，历史 extract@1—@7 与 review@1—@5 保留原字节。底层 API 的 `None` 继续旧契约，不能借此给新质量链降级。引用解析为包含 `SKILL.md`、共同质量规范、输出契约和冻结基础提示词的完整 `skill_bundle`。两个角色共享 `knowledge-quality-v1`，来源正文不能改变本次引用或权限；未知版本、外部路径或未声明依赖不自动发现。
+CLI 分别提供 `--extract-skill`、`--review-skill`，加载器接口为 `resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；新任务默认 extract@9／review@7，历史 extract@1—@8 与 review@1—@6 保留原字节。底层 API 的 `None` 继续旧契约，不能借此给新质量链降级。引用解析为包含 `SKILL.md`、共同质量规范、输出契约和冻结基础提示词的完整 `skill_bundle`。两个角色共享 `knowledge-quality-v1`，来源正文不能改变本次引用或权限；未知版本、外部路径或未声明依赖不自动发现。
 
 `skill_bundle` 顶层为 `schema_version="skill-bundle-v1"`、`quality_contract`、`skills`、`shared_policy` 和 `sha256`。`skills.extract`／`skills.review` 各保存 `ref`、`role`、`version`、`manifest`、`files`、`base_prompt`；每个内容快照包含 `path`、`content`、`sha256`、`bytes`。manifest 和完整依赖按注册摘要核验，bundle摘要覆盖除其自身 `sha256` 外的规范JSON；角色和共享规范必须一致。设计阶段的 `skill_binding` 在实际格式中由完整bundle与请求绑定共同承担，不另存同名字段。
 
@@ -54,7 +62,7 @@ summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一�
 
 `pdm-shared-json-v1`是共享值的基础无损表示：`{format,root,shared}`保存输入根与完整共享值表，只有`{"$pdm_ref": id}`的对象指向共享表中的完整值。原资料对象含`$pdm_ref`或`$pdm_literal`保留键时，编码器使用`$pdm_literal`转义，避免把资料误解释成引用。只共享能减少字节的重复值，其余完整内联；原文、统计、上下文、候选和检查项均能解引用还原，不靠删除辅助材料或拆小语义范围满足容量。
 
-当前默认 `knowledge-extract@8`／`knowledge-review@6` 按显式角色版本渲染为 `pdm-columnar-shared-json-v3`：先还原列式结构，再还原 v2 字段字典和 v1 共享值。v1 基础及旧角色的历史渲染继续保留，不能把新任务全部视为 v1 请求。
+当前默认 `knowledge-extract@9`／`knowledge-review@7` 按显式角色版本渲染为 `pdm-columnar-shared-json-v3`：先还原列式结构，再还原 v2 字段字典和 v1 共享值。v1 基础及旧角色的历史渲染继续保留，不能把新任务全部视为 v1 请求。
 
 `encode_shared_json`在每次编码时调用`decode_shared_json`核对规范JSON与原输入相等；解码拒绝循环、悬空引用、非法结构及超限展开。模型请求同时提供解引用说明，模型输出仍按原业务schema，不能用共享ID代替真实来源、quote、正文或检查标识。`request_binding`和容量门禁核实际编码后的完整线上字节，包括规则与编码说明；编码前原payload审计和完整候选继续保留。旧契约请求维持原字节渲染，历史输出不追写共享引用。
 
@@ -74,7 +82,7 @@ M1 的描述性概览可包含有记录天数及符合明确可比条件的分�
 
 新质量材料与 Skill 绑定共同进入候选、输入去重和审核证明，正式发布重验实际加载材料、覆盖处置、统计计算、时态依据以及最终候选的精确版本。单次和分解 Review 均消费同一固定规范及相应完整范围；一项必需检查失败或尚未完成，相关依赖组不得发布。能力／加载／容量问题记录为执行阻塞，不能伪装成内容审核通过或要求用户决定的知识问题。
 
-Skill bundle摘要进入processing key；工程版本绑定包含实际Skill资产，规则变更不能借旧Review发布。重试计数和未知调用身份继续保留，不因换Skill、run或队列清零。新质量候选／Review／manifest／receipt／failure、queue／attempt、日程事件和分解proof为0.10；source0.1、formal0.2、group0.6、原started／revision_attempt及稳定counter保持原格式。普通返工继承bundle，分解恢复核固定单元；历史0.9 operator的`resume-unstarted-revision`与`revalidate-completed-extraction`缺少原Skill请求证明，对新质量链明确报`skill_quality_recovery_attestation_required`。旧候选按原schema读回，不追写Skill证明，不自动重跑旧知识；兼容与拒写按公开验收定义检查，实际结果另行记录。
+Skill bundle摘要进入processing key；工程版本绑定包含实际Skill资产，规则变更不能借旧Review发布。重试计数和未知调用身份继续保留，不因换Skill、run或队列清零。新9/7合同的候选／Review／manifest／receipt／failure、queue／attempt、日程事件和分解proof为0.11，旧8/6质量链仍为0.10；source0.1、formal0.2、group0.6及旧started／revision_attempt与稳定counter保持原格式；新9/7的首次预约也使用0.11，不能让旧writer在模型调用期间继续写新合同工作区。普通返工继承bundle，分解恢复核固定单元；历史0.9 operator的`resume-unstarted-revision`与`revalidate-completed-extraction`缺少原Skill请求证明，对新质量链明确报`skill_quality_recovery_attestation_required`。旧候选按原schema读回，不追写Skill证明，不自动重跑旧知识；兼容与拒写按公开验收定义检查，实际结果另行记录。
 
 ## dev11：auto与分解Review实际消费（schema `0.8`）
 
@@ -120,7 +128,7 @@ auto先以实际review.md正文、真实JSON序列化及连接文本计算完整
 
 ## dev10：确认登记与每日生产契约（schema `0.7`）
 
-本节定义0.7执行状态；后继普通分解链为0.8、显式返工链为0.9、新质量链为0.10，旧0.1—0.6文件不批量迁移。原文及采集仍0.1、正式record／Wiki仍0.2、无continuation_context的普通batch链仍0.6、所有group wrapper／清单仍0.6，audit账本仍为库外独立schema2。新0.7用于下述扩大registry、登记marker、带continuation_context的普通加工链、新production queue／attempt及production-v1日程事件；不能据程序版本号改写旧schema。
+本节定义0.7执行状态；后继普通分解链为0.8、显式返工链为0.9、旧质量链为0.10，新9/7合同另用0.11，旧0.1—0.6文件不批量迁移。原文及采集仍0.1、正式record／Wiki仍0.2、无continuation_context的普通batch链仍0.6、所有group wrapper／清单仍0.6，audit账本仍为库外独立schema2。新0.7用于下述扩大registry、登记marker、带continuation_context的普通加工链、新production queue／attempt及production-v1日程事件；不能据程序版本号改写旧schema。
 
 ### 扩大registry与持久登记结果
 
@@ -194,7 +202,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev19支持 `0.1`—`0.10`；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
+Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev20支持 `0.1`—`0.11`；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 

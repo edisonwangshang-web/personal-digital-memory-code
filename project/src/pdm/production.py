@@ -14,7 +14,8 @@ from pathlib import Path
 import re
 import stat
 
-from .contracts import CaptureError, canonical, markdown, parse_markdown
+from .contracts import (CaptureError, QUALITY_SCHEMA_VERSIONS, REUSE_SCHEMA_VERSION,
+                        canonical, markdown, parse_markdown, quality_schema_version)
 from .budget import BudgetedModelCall
 from .transaction import PipelineGit
 
@@ -106,6 +107,16 @@ def _path(queue_id):
     return ROOT + queue_id + "/state.md"
 
 
+def _quality_schema(value):
+    bundle = value.get("request", {}).get("skill_bundle")
+    if bundle is not None:
+        return quality_schema_version(bundle)
+    marker = value.get("schema_version")
+    if marker is not None and marker != REUSE_SCHEMA_VERSION:
+        _fail("invalid_queue_quality_binding")
+    return REUSE_SCHEMA_VERSION if marker is not None else QUALITY_SCHEMA
+
+
 def _read(git, path, kind):
     data = git._existing(path)
     if data is None:
@@ -115,7 +126,8 @@ def _read(git, path, kind):
     if git.read(git.head(), path) != data:
         _fail("queue_state_changed")
     meta, body = parse_markdown(data)
-    if meta not in ({"schema_version": QUALITY_SCHEMA, "kind": kind},
+    if meta not in ({"schema_version": REUSE_SCHEMA_VERSION, "kind": kind},
+                    {"schema_version": QUALITY_SCHEMA, "kind": kind},
                     {"schema_version": SCHEMA, "kind": kind},
                     {"schema_version": "0.7", "kind": kind},
                     {"schema_version": LEGACY_SCHEMA, "kind": kind}):
@@ -136,7 +148,9 @@ def _read(git, path, kind):
         _fail("invalid_queue_state")
     bundle = value.get("request", {}).get("skill_bundle") if kind == "production_queue" else None
     quality = bundle is not None or value.get("quality_contract") == "skill-quality-v1"
-    if quality != (meta["schema_version"] == QUALITY_SCHEMA):
+    if (quality != (meta["schema_version"] in QUALITY_SCHEMA_VERSIONS)
+            or "schema_version" in value and (kind != "production_attempts" or not quality)
+            or quality and meta["schema_version"] != _quality_schema(value)):
         _fail("invalid_queue_quality_binding")
     if bundle is not None:
         from .skill_support import validate_skill_bundle
@@ -148,7 +162,7 @@ def _save(git, path, value, kind, head):
     before = git._existing(path)
     quality = ("skill_bundle" in value.get("request", {})
                or value.get("quality_contract") == "skill-quality-v1")
-    data = markdown({"schema_version": QUALITY_SCHEMA if quality else SCHEMA, "kind": kind},
+    data = markdown({"schema_version": _quality_schema(value) if quality else SCHEMA, "kind": kind},
                     canonical(value).decode() + "\n")
     if data == before:
         return head
@@ -329,6 +343,8 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             _fail("queue_attempt_identity_conflict")
         if skill_bundle is not None:
             attempts["quality_contract"] = "skill-quality-v1"
+            if quality_schema_version(skill_bundle) == REUSE_SCHEMA_VERSION:
+                attempts["schema_version"] = REUSE_SCHEMA_VERSION
         for old in attempts["attempts"]:
             if old["run_id"] in registrations:
                 restored = registrations[old["run_id"]]

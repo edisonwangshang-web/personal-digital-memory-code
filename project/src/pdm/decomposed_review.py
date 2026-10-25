@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 
-from .contracts import CaptureError, canonical, markdown, parse_markdown
+from .contracts import CaptureError, QUALITY_SCHEMA_VERSIONS, REUSE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version
 
 SCHEMA = "0.8"
 QUALITY_SCHEMA = "0.10"
@@ -30,7 +30,7 @@ def _hash(value):
 
 
 def _document(kind, value):
-    schema = QUALITY_SCHEMA if value.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
+    schema = value.get("schema_version", QUALITY_SCHEMA) if value.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
     return markdown({"schema_version": schema, "kind": kind, "run_id": value["run_id"]}, canonical(value).decode() + "\n")
 
 
@@ -40,10 +40,12 @@ def _read(git, path, kind, *, commit=None, immutable=True):
     if immutable and git._existing(path) != data:
         _fail("decomposed_bytes_changed")
     schema = parse_markdown(data)[0].get("schema_version")
-    if schema not in {SCHEMA, QUALITY_SCHEMA}:
+    if schema not in {SCHEMA, *QUALITY_SCHEMA_VERSIONS}:
         _fail()
     value = _load(data, kind, schema)
-    if (schema == QUALITY_SCHEMA) != (value.get("quality_contract") == QUALITY_CONTRACT):
+    if ((schema in QUALITY_SCHEMA_VERSIONS) != (value.get("quality_contract") == QUALITY_CONTRACT)
+            or schema == REUSE_SCHEMA_VERSION and value.get("schema_version") != schema
+            or schema != REUSE_SCHEMA_VERSION and "schema_version" in value):
         _fail("decomposed_quality_contract_mismatch")
     return value, data
 
@@ -249,6 +251,8 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
         value.update(quality_contract=QUALITY_CONTRACT, prompt=frozen_prompt,
                      skill_bundle_sha256=candidate["skill_bundle"]["sha256"],
                      quality_context_sha256=_hash(candidate["quality_context"]))
+        if quality_schema_version(candidate["skill_bundle"]) == REUSE_SCHEMA_VERSION:
+            value["schema_version"] = REUSE_SCHEMA_VERSION
     if request_contract is not None:
         inventory = _input_scope_inventory(candidate, payload)
         value.update(request_contract=request_contract, input_scope_inventory=inventory,
@@ -379,7 +383,7 @@ def _untouched_plan(git, plan, adapter):
 
 
 def _proof(plan, nodes, status):
-    return {"schema_version": QUALITY_SCHEMA if plan.get("quality_contract") == QUALITY_CONTRACT else SCHEMA,
+    return {"schema_version": plan.get("schema_version", QUALITY_SCHEMA) if plan.get("quality_contract") == QUALITY_CONTRACT else SCHEMA,
             "plan_id": plan["plan_id"],
             "plan_path": f"memory/runs/processes/{plan['run_id']}/decomposed-plan.md",
             "plan_sha256": _hash(_document("decomposed_review_plan", plan)),
@@ -428,6 +432,8 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
     quality = plan.get("quality_contract") == QUALITY_CONTRACT
     if quality:
         expected.update({"quality_contract", "request_binding"})
+        if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
+            expected.add("schema_version")
     if (set(result) != expected or result["run_id"] != plan["run_id"] or result["plan_id"] != plan["plan_id"]
             or result["unit_id"] != unit["unit_id"] or result["request_sha256"] != reservation["request_sha256"]
             or _call_metadata({**result["call"], "output": result["output"]}) != result["call"]):
@@ -435,6 +441,8 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
     if quality:
         if (request is None or result.get("quality_contract") != QUALITY_CONTRACT
                 or reservation.get("quality_contract") != QUALITY_CONTRACT
+                or result.get("schema_version") != plan.get("schema_version")
+                or reservation.get("schema_version") != plan.get("schema_version")
                 or result.get("request_binding") != _rendered_binding(request)
                 or reservation.get("request_binding") != result["request_binding"]
                 or reservation["request_sha256"] != _hash(request)
@@ -500,6 +508,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
             counter, _ = _read(git, counter_path, "decomposed_review_attempts")
         if counter["identity"] != identity or counter["audit_pool"] != _pool(model_call):
             _fail("decomposed_audit_identity_changed")
+        if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
+            counter.update(quality_contract=QUALITY_CONTRACT, schema_version=REUSE_SCHEMA_VERSION)
         result, node, retry = None, None, None
         for attempt in counter["attempts"]:
             if attempt["request_sha256"] == request_sha and attempt["plan_id"] == plan["plan_id"]:
@@ -539,6 +549,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                            "counter": _snapshot(git, counter_path)}
             if plan.get("quality_contract") == QUALITY_CONTRACT:
                 reservation.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
+                if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
+                    reservation["schema_version"] = REUSE_SCHEMA_VERSION
             if git._existing(retry["reservation_path"]) is not None:
                 # A provably unstarted guard rejection keeps its original
                 # reservation snapshot and does not use a retry slot.
@@ -579,6 +591,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                                "attempted_calls": actual, "error": retry["error"]}
                     if plan.get("quality_contract") == QUALITY_CONTRACT:
                         failure.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
+                        if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
+                            failure["schema_version"] = REUSE_SCHEMA_VERSION
                     if not received and actual == 0:
                         retry["status"] = "reserved"
                         retry.pop("error", None)
@@ -603,6 +617,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                      "sha256": _hash(git.read(commit, retry["reservation_path"]))}, "call": call, "output": response["output"]}
             if plan.get("quality_contract") == QUALITY_CONTRACT:
                 saved.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
+                if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
+                    saved["schema_version"] = REUSE_SCHEMA_VERSION
             _write(git, retry["result_path"], saved, "decomposed_review_result")
             retry["status"] = saved["output"]["verdict"]
             _write(git, counter_path, counter, "decomposed_review_attempts", mutable=True)
@@ -624,7 +640,7 @@ def verify_decomposed_review(git, candidate, review, payload, sources, historica
     from .pipeline import _stage_path, _run_path
     _scope(candidate, payload, sources)
     proof = review.get("decomposed_proof")
-    expected_schema = QUALITY_SCHEMA if candidate.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
+    expected_schema = quality_schema_version(candidate.get("skill_bundle")) if candidate.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
     if not isinstance(proof, dict) or proof.get("schema_version") != expected_schema:
         _fail()
     expected_path = _run_path(candidate["run_id"], "decomposed-plan")

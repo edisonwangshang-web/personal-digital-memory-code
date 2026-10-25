@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime
 from pathlib import Path
 
-from .contracts import CaptureError, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, source_contract, timestamp
+from .contracts import CaptureError, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version, source_contract, timestamp
 from .domains import DOMAIN_LABELS, DOMAIN_POLICY_VERSION, domain_policy
 from .model_calls import ModelCallError, USAGE_FIELDS, call_model
 from .transaction import PipelineGit
@@ -60,7 +60,8 @@ def _load(value, kind, schema_version=None):
                             parse_constant=lambda value: _error())
     except (ValueError, TypeError, RecursionError):
         _error()
-    supported = (PIPELINE_SCHEMA, MULTISOURCE_PIPELINE_SCHEMA, M1_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION) if schema_version is None else (schema_version,)
+    supported = ((PIPELINE_SCHEMA, MULTISOURCE_PIPELINE_SCHEMA, M1_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS)
+                 if schema_version is None else schema_version if isinstance(schema_version, tuple) else (schema_version,))
     if metadata.get("schema_version") not in supported or metadata.get("kind") != kind or not isinstance(result, dict):
         _error()
     if metadata.get("run_id") != result.get("run_id"):
@@ -227,7 +228,7 @@ def _source_fields(sources):
 
 def _pipeline_schema(candidate):
     if _quality_enabled(candidate):
-        return QUALITY_SCHEMA_VERSION
+        return quality_schema_version(candidate.get("skill_bundle"))
     if "revision_context" in candidate:
         return REVISION_SCHEMA_VERSION
     if candidate.get("review_strategy", "legacy-v1") != "legacy-v1":
@@ -355,17 +356,69 @@ def _time(value):
             _error("invalid_model_output")
 
 
-def _objects(output, sources, run_id, response, versions, created, *, batch=False, quality_context=None):
+def _reuse_refs_enabled(skill_bundle):
+    skills = skill_bundle.get("skills", {}) if isinstance(skill_bundle, dict) else {}
+    return isinstance(skills, dict) and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+        for role, ref in (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")))
+
+
+def _reuse_objects(refs, related, sources):
+    """Materialize only explicitly selected, already-authorized frozen documents."""
+    if not isinstance(refs, list) or len(refs) > 40:
+        _error("invalid_reuse_reference")
+    known = {document["path"]: document for item in related for document in item["documents"]}
+    result, seen = [], set()
+    for ref in refs:
+        if (not isinstance(ref, dict) or set(ref) != {"path", "content_version"}
+                or not isinstance(ref["path"], str) or not isinstance(ref["content_version"], str)
+                or ref["path"] in seen):
+            _error("invalid_reuse_reference")
+        old = known.get(ref["path"])
+        if old is None or ref["content_version"] != old["content_version"]:
+            _error("invalid_reuse_reference")
+        metadata = old["metadata"]
+        folder = "topics" if metadata.get("type") == "wiki" else "records"
+        identifier = metadata.get("id")
+        if (not isinstance(identifier, str) or not ID_RE.fullmatch(identifier)
+                or ref["path"] != f"memory/{folder}/{identifier}.md"
+                or metadata.get("content_version") != ref["content_version"]):
+            _error("invalid_reuse_reference")
+        _refs(metadata.get("sources"), sources)
+        seen.add(ref["path"])
+        result.append(copy.deepcopy({"path": ref["path"], "metadata": metadata, "body": old["body"]}))
+    return result
+
+
+def _reuse_quality_output(output, reused):
+    return {**output, "objects": [*output["objects"],
+            *[{**obj["metadata"], "body": obj["body"]} for obj in reused
+              if obj["metadata"]["type"] != "wiki"]]}
+
+
+def _objects(output, sources, run_id, response, versions, created, *, batch=False, quality_context=None,
+             related=(), skill_bundle=None):
     fields = {"objects", "wikis"} if batch else {"objects", "wiki"}
+    reuse_enabled = _reuse_refs_enabled(skill_bundle)
+    if reuse_enabled:
+        fields.add("reuse_refs")
     if quality_context is not None:
         from .knowledge_quality import validate_quality_output
         if not isinstance(output, dict) or set(output) != fields | {"quality"}:
             _error("invalid_model_output")
-        validate_quality_output(output, quality_context)
+        if not reuse_enabled:
+            validate_quality_output(output, quality_context)
+        quality = output["quality"]
         output = {key: value for key, value in output.items() if key != "quality"}
-    if not isinstance(output, dict) or set(output) != fields or not isinstance(output["objects"], list) or not 1 <= len(output["objects"]) <= 20:
+    if not isinstance(output, dict) or set(output) != fields or not isinstance(output["objects"], list):
         _error("invalid_model_output")
-    result, ids = [], set()
+    reused = _reuse_objects(output["reuse_refs"], related, sources) if reuse_enabled else []
+    reused_records = [obj for obj in reused if obj["metadata"]["type"] != "wiki"]
+    reused_wikis = [obj for obj in reused if obj["metadata"]["type"] == "wiki"]
+    if not 1 <= len(output["objects"]) + len(reused_records) <= 20:
+        _error("invalid_model_output")
+    result, ids = [], {obj["metadata"]["id"] for obj in reused}
+    if len(ids) != len(reused):
+        _error("invalid_reuse_reference")
     record_fields = {"id", "type", "title", "source_kind", "sources", "domains", "valid_from", "valid_to", "verification_status", "lifecycle_status", "body"}
     for value in output["objects"]:
         if not isinstance(value, dict) or set(value) != record_fields:
@@ -382,8 +435,9 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
         _time(value["valid_to"])
         material = {key: value[key] for key in value if key != "body"}
         result.append(_object(material, value["body"], "records", sources, ids, run_id, response, versions, created))
-    wikis = output["wikis"] if batch else [output["wiki"]]
-    if not isinstance(wikis, list) or not 1 <= len(wikis) <= 20:
+    result.extend(reused_records)
+    wikis = output["wikis"] if batch else ([] if reuse_enabled and output["wiki"] is None else [output["wiki"]])
+    if (not isinstance(wikis, list) or not 1 <= len(wikis) + len(reused_wikis) <= (20 if batch else 1)):
         _error("invalid_model_output")
     records = {obj["metadata"]["id"]: obj for obj in result}
     for wiki in wikis:
@@ -395,6 +449,19 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
         material = {key: wiki[key] for key in wiki if key not in {"body", "record_ids"}}
         material.update(type="wiki", records=[{"id": key, "content_version": records[key]["metadata"]["content_version"]} for key in selected])
         result.append(_object(material, wiki["body"], "topics", sources, ids, run_id, response, versions, created))
+    for wiki in reused_wikis:
+        dependencies = wiki["metadata"].get("records")
+        if (not isinstance(dependencies, list) or not dependencies
+                or any(not isinstance(ref, dict) or set(ref) != {"id", "content_version"}
+                       or not isinstance(ref["id"], str) or ref["id"] not in records
+                       or ref["content_version"] != records[ref["id"]]["metadata"]["content_version"]
+                       for ref in dependencies)
+                or len({ref["id"] for ref in dependencies}) != len(dependencies)
+                or not batch and {ref["id"] for ref in dependencies} != set(records)):
+            _error("invalid_wiki_dependency")
+        result.append(wiki)
+    if reuse_enabled and quality_context is not None:
+        validate_quality_output(_reuse_quality_output({**output, "quality": quality}, reused), quality_context)
     return result
 
 
@@ -692,7 +759,8 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
     _validate_candidate_quality(git, old, sources)
     extraction = _call_metadata({**old["extraction"], "output": old["extraction_output"]})
     expected = _objects(old["extraction_output"], sources, run_id, extraction, versions, old["created_at"],
-                        batch=True, quality_context=old.get("quality_context"))
+                        batch=True, quality_context=old.get("quality_context"),
+                        related=old["related"], skill_bundle=old.get("skill_bundle"))
     _updated_objects(git, expected, old["related"])
     if old["objects"] != expected:
         _error("candidate_mismatch")
@@ -752,14 +820,14 @@ def _existing_revision_attempt(git, context, source_paths, related_runs):
         if _last_commit(git, git.head(), path):
             _error("revision_attempt_deleted")
         return None
-    value = _load(_committed(git, path), "revision_attempt", REVISION_SCHEMA_VERSION)
+    value = _load(_committed(git, path), "revision_attempt", (REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION))
     run = value.get("run_id")
     if value != {"run_id": run, "revision_context_sha256": _hash(context),
             "source_paths": source_paths, "related_runs": related_runs,
             "processing_key": value.get("processing_key")}:
         _error("revision_attempt_mismatch")
     _run_path(run, "review")
-    started = _load(_committed(git, _run_path(run, "started")), "processing_attempt", M1_SCHEMA_VERSION)
+    started = _load(_committed(git, _run_path(run, "started")), "processing_attempt", (M1_SCHEMA_VERSION, REUSE_SCHEMA_VERSION))
     if (started.get("processing_key") != value["processing_key"]
             or started.get("source_paths") != source_paths or started.get("related_runs") != related_runs
             or _last_commit(git, git.head(), _run_path(run, "started")) != _last_commit(git, git.head(), path)):
@@ -778,7 +846,7 @@ def _existing_revision_attempt(git, context, source_paths, related_runs):
     if git.path(failure_path).is_file():
         failure = _load(_committed(git, failure_path), "failure")
         metadata, _ = _parse_saved(_committed(git, failure_path))
-        if metadata.get("schema_version") not in {REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION}:
+        if metadata.get("schema_version") not in {REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS}:
             _error("revision_attempt_mismatch")
         return {**result, "status": "failed", "error": failure["error"], "next_action": "operator_reconcile"}
     return {**result, "status": "unknown", "next_action": "reconcile"}
@@ -1088,7 +1156,11 @@ def _validate_candidate_quality(git, candidate, sources):
     context = prepare_quality(sources, source_views=candidate.get("source_views"))
     if candidate["quality_context"] != context:
         _error("quality_context_mismatch")
-    validate_quality_output(candidate["extraction_output"], context)
+    output = candidate["extraction_output"]
+    if _reuse_refs_enabled(candidate["skill_bundle"]):
+        reused = _reuse_objects(output.get("reuse_refs"), candidate["related"], sources)
+        output = _reuse_quality_output(output, reused)
+    validate_quality_output(output, context)
     payload = _candidate_payload(git, candidate, sources)
     # Revalidation may adopt a new program version but must retain the actual
     # completed request, whose prior quality snapshot cannot be exchanged.
@@ -1347,7 +1419,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if all(source["metadata"]["acquisition_status"] == "link_only" for source in sources):
             _error("source_has_no_text")
         source_fields = _source_fields(sources)
-        schema_version = (QUALITY_SCHEMA_VERSION if skill_bundle is not None else REVISION_SCHEMA_VERSION if revision_context is not None else DECOMPOSED_SCHEMA_VERSION if review_strategy != "legacy-v1" else ORCHESTRATED_SCHEMA_VERSION if continuation_context is not None else CONTINUOUS_SCHEMA_VERSION
+        schema_version = (quality_schema_version(skill_bundle) if skill_bundle is not None else REVISION_SCHEMA_VERSION if revision_context is not None else DECOMPOSED_SCHEMA_VERSION if review_strategy != "legacy-v1" else ORCHESTRATED_SCHEMA_VERSION if continuation_context is not None else CONTINUOUS_SCHEMA_VERSION
                           if batch else M1_SCHEMA_VERSION if incremental else _pipeline_schema(source_fields))
         versions = execution_versions(git)
         payload = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
@@ -1411,12 +1483,14 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             else:
                 started = {"run_id": run_id, "processing_key": key, "execution_context": copy.deepcopy(execution_context),
                            "source_paths": source_paths, "related_runs": related_runs, "reserved_calls": 2, "started_at": timestamp()}
-                started_bytes = _document("processing_attempt", started, M1_SCHEMA_VERSION)
+                started_bytes = _document("processing_attempt", started,
+                    REUSE_SCHEMA_VERSION if _reuse_refs_enabled(skill_bundle) else M1_SCHEMA_VERSION)
                 started_files = {started_path: started_bytes}
                 if revision_context is not None:
                     pointer = {"run_id": run_id, "revision_context_sha256": _hash(revision_context),
                                "source_paths": source_paths, "related_runs": related_runs, "processing_key": key}
-                    started_files[_revision_attempt_path(revision_context)] = _document("revision_attempt", pointer, REVISION_SCHEMA_VERSION)
+                    started_files[_revision_attempt_path(revision_context)] = _document("revision_attempt", pointer,
+                        REUSE_SCHEMA_VERSION if _reuse_refs_enabled(skill_bundle) else REVISION_SCHEMA_VERSION)
                 head = git.write_files(started_files, head, "process: reserve immutable run before model calls")
             # The reservation advances HEAD; both model calls must receive the
             # control snapshot at the same base used by the fixed candidate.
@@ -1448,7 +1522,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 context_fields["revision_resume"] = attach_revision_resume_extraction(model_call, _resume_unstarted, extraction, payload)
             created = timestamp()
             objects = _objects(response["output"], sources, run_id, response, versions, created, batch=batch,
-                               quality_context=context_fields.get("quality_context"))
+                               quality_context=context_fields.get("quality_context"),
+                               related=related, skill_bundle=skill_bundle)
             _current_object_corrections(objects, sources)
             if batch:
                 from .batching import assert_fragment_refs
@@ -1652,7 +1727,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             _error("processing_context_changed")
         attempt_path = _run_path(run_id, "started")
         attempt_bytes = _committed(git, attempt_path)
-        attempt = _load(attempt_bytes, "processing_attempt", M1_SCHEMA_VERSION)
+        attempt = _load(attempt_bytes, "processing_attempt",
+            REUSE_SCHEMA_VERSION if _reuse_refs_enabled(candidate.get("skill_bundle")) else M1_SCHEMA_VERSION)
         if (candidate.get("attempt_path") != attempt_path or candidate.get("attempt_sha256") != _hash(attempt_bytes)
                 or _last_commit(git, git.head(), attempt_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])
                 or attempt != {"run_id": run_id, "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"]),
@@ -1679,7 +1755,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         verify_revision_context(git, candidate["revision_context"], source_paths=[source["path"] for source in sources],
             related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical)
         pointer_path = _revision_attempt_path(candidate["revision_context"])
-        pointer = _load(_committed(git, pointer_path), "revision_attempt", REVISION_SCHEMA_VERSION)
+        pointer = _load(_committed(git, pointer_path), "revision_attempt",
+            REUSE_SCHEMA_VERSION if _reuse_refs_enabled(candidate.get("skill_bundle")) else REVISION_SCHEMA_VERSION)
         if (pointer != {"run_id": run_id, "revision_context_sha256": _hash(candidate["revision_context"]),
                 "source_paths": [source["path"] for source in sources], "related_runs": candidate["related_runs"],
                 "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"])}
@@ -1715,7 +1792,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
                 _error("extraction_not_reusable")
     _validate_candidate_quality(git, candidate, sources)
     expected_objects = _objects(candidate["extraction_output"], sources, run_id, extraction, candidate["versions"], candidate["created_at"],
-                                batch=batch, quality_context=candidate.get("quality_context"))
+                                batch=batch, quality_context=candidate.get("quality_context"),
+                                related=related, skill_bundle=candidate.get("skill_bundle"))
     if batch:
         for obj in expected_objects:
             assert_fragment_refs(obj["metadata"]["sources"], candidate["source_views"])
@@ -1754,7 +1832,7 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
         _error("review_binding_mismatch")
     proof = review.get("decomposed_proof")
     if proof is not None:
-        if schema_version not in {DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION} or candidate.get("review_strategy") not in {"auto", "decomposed-v1"}:
+        if schema_version not in {DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS} or candidate.get("review_strategy") not in {"auto", "decomposed-v1"}:
             _error("review_binding_mismatch")
         from .decomposed_review import verify_decomposed_review
         _ancestor(git, stage_commit, review_commit)

@@ -12,7 +12,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from .contracts import CaptureError, canonical, markdown, parse_markdown
+from .contracts import (CaptureError, QUALITY_SCHEMA_VERSIONS, canonical, markdown,
+                        parse_markdown, quality_schema_version)
 from .transaction import PipelineGit
 
 SCHEMA = "0.4"
@@ -258,10 +259,10 @@ def _read(git, path, commit=None):
         _json(data.decode("utf-8")[4:].split("\n---\n", 1)[0])
         value = _json(body)
         version = header.get("schema_version")
-        if (version not in {SCHEMA, BUDGET_SCHEMA, CONTINUOUS_SCHEMA, PRODUCTION_SCHEMA, QUALITY_SCHEMA} or header != {"schema_version": version, "kind": "schedule_event"}
+        if (version not in {SCHEMA, BUDGET_SCHEMA, CONTINUOUS_SCHEMA, PRODUCTION_SCHEMA, *QUALITY_SCHEMA_VERSIONS} or header != {"schema_version": version, "kind": "schedule_event"}
                 or not isinstance(value, dict) or not isinstance(value.get("data"), dict)):
             raise ValueError
-        if version in {PRODUCTION_SCHEMA, QUALITY_SCHEMA}:
+        if version in {PRODUCTION_SCHEMA, *QUALITY_SCHEMA_VERSIONS}:
             from .schedule_production import validate_event
             validate_event(value.get("kind"), value["data"])
         elif version == BUDGET_SCHEMA:
@@ -313,9 +314,10 @@ def _state(git, schedule_id, commit=None):
     quality = "skill_bundle" in config
     for event in events:
         header, _ = parse_markdown(git.read(snapshot, event["path"]))
-        if ((header["schema_version"] in {CONTINUOUS_SCHEMA, PRODUCTION_SCHEMA, QUALITY_SCHEMA}) != continuous
-                or (header["schema_version"] in {PRODUCTION_SCHEMA, QUALITY_SCHEMA}) != production
-                or (header["schema_version"] == QUALITY_SCHEMA) != quality):
+        if ((header["schema_version"] in {CONTINUOUS_SCHEMA, PRODUCTION_SCHEMA, *QUALITY_SCHEMA_VERSIONS}) != continuous
+                or (header["schema_version"] in {PRODUCTION_SCHEMA, *QUALITY_SCHEMA_VERSIONS}) != production
+                or (header["schema_version"] in QUALITY_SCHEMA_VERSIONS) != quality
+                or quality and header["schema_version"] != quality_schema_version(config["skill_bundle"])):
             _fail("unknown_schedule_state")
     if production:
         from .schedule_production import validate_history
@@ -364,10 +366,10 @@ def _append_locked(git, schedule_id, kind, data, at, expected_head=None):
         # concurrent caller must not poison the log with duplicate slice claims.
         _attempts({**state, "events": [*state["events"], {**event, "path": path}]})
     configuration = state["config"] if state else data
-    version = (QUALITY_SCHEMA if "skill_bundle" in configuration
+    version = (quality_schema_version(configuration["skill_bundle"]) if "skill_bundle" in configuration
                else PRODUCTION_SCHEMA if configuration.get("processing_engine") == PRODUCTION_ENGINE
                else CONTINUOUS_SCHEMA if continuous else BUDGET_SCHEMA if {"budget_binding", "budget_pool"} & data.keys() else SCHEMA)
-    if version in {PRODUCTION_SCHEMA, QUALITY_SCHEMA}:
+    if version in {PRODUCTION_SCHEMA, *QUALITY_SCHEMA_VERSIONS}:
         from .schedule_production import validate_event, validate_history
         validate_event(kind, data)
         validate_history(state["config"] if state else data, [*(state["events"] if state else []), {**event, "path": path}])

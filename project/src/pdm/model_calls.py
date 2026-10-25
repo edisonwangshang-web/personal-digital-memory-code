@@ -113,7 +113,12 @@ def output_schema(role, payload):
     from .knowledge_quality import QUALITY_SCHEMA, QUALITY_REVIEW_CHECK_SCHEMA
     result = (_object(dict(base["properties"], quality=QUALITY_SCHEMA)) if role == "extract"
               else _object(dict(base["properties"], checks=_array(QUALITY_REVIEW_CHECK_SCHEMA))))
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] == "knowledge-extract@9":
+        result["properties"]["reuse_refs"] = _array(_object({"path": _STRING, "content_version": _STRING}))
+        result["required"].append("reuse_refs")
+        if payload.get("output_contract") != "batch-v1":
+            result["properties"]["wiki"] = {"anyOf": [result["properties"]["wiki"], {"type": "null"}]}
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9"}:
         context = payload.get("quality_context")
         targets = context.get("targets") if isinstance(context, dict) else None
         if not isinstance(targets, list):
@@ -129,7 +134,7 @@ def output_schema(role, payload):
         return result
     if payload["skill_bundle"]["skills"][role]["ref"] in {
             "knowledge-extract@5", "knowledge-review@4", "knowledge-extract@6", "knowledge-review@5",
-            "knowledge-review@6"}:
+            "knowledge-review@6", "knowledge-review@7"}:
         return _reference_schema(result, role, payload)
     return result
 
@@ -153,6 +158,10 @@ def _reference_schema(schema, role, payload):
         fields = result["properties"]["quality"]["properties"]
         restrict(fields["coverage_disposition"]["items"]["properties"], "target_id", context.get("targets", []), "target_id")
         restrict(fields["statistic_claims"]["items"]["properties"], "stat_id", context.get("statistics", []), "stat_id")
+        if "reuse_refs" in result["properties"]:
+            documents = [document for item in payload.get("related", []) for document in item.get("documents", [])]
+            for name in ("path", "content_version"):
+                restrict(result["properties"]["reuse_refs"]["items"]["properties"], name, documents, name)
     else:
         fields = result["properties"]["checks"]["items"]["properties"]
         for name in ("check_id", "scope_sha256"):
@@ -194,8 +203,8 @@ def render_model_request(role, payload):
             wire_instructions = KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
             encoder = encode_shared_json_v2
         elif bundle["skills"][role]["ref"] in {
-                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8",
-                "knowledge-review@5", "knowledge-review@6"}:
+                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9",
+                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7"}:
             from .skill_wire_v2 import WIRE_INSTRUCTIONS as KEY_INSTRUCTIONS
             from .skill_wire_v3 import WIRE_INSTRUCTIONS as TABLE_INSTRUCTIONS, encode_shared_json_v3
             wire_instructions = TABLE_INSTRUCTIONS + "\n\n" + KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
@@ -227,6 +236,8 @@ def request_binding(role, payload):
 
 def _valid(value: Any, schema: Dict[str, Any]) -> bool:
     """Validate the deliberately small JSON Schema subset used above."""
+    if "anyOf" in schema:
+        return any(_valid(value, child) for child in schema["anyOf"])
     expected = schema.get("type")
     if isinstance(expected, list):
         return any(_valid(value, dict(schema, type=kind)) for kind in expected)

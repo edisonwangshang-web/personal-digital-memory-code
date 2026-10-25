@@ -842,7 +842,7 @@ def build_review_checks(candidate, context, scope=None):
     bundle = candidate.get("skill_bundle")
     roles = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     review = roles.get("review") if isinstance(roles, dict) else None
-    context_readability = isinstance(review, dict) and review.get("ref") == "knowledge-review@6"
+    context_readability = isinstance(review, dict) and review.get("ref") in {"knowledge-review@6", "knowledge-review@7"}
     material = project_quality(context, scope)
     kind = "complete" if scope is None else scope["kind"]
     paths = sorted(objects) if scope is None else sorted(_unique_strings(scope.get("object_paths", []), "invalid_quality_scope"))

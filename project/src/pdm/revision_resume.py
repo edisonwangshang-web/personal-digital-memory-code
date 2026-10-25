@@ -13,7 +13,7 @@ import hashlib
 import os
 import re
 
-from .contracts import CaptureError, canonical
+from .contracts import CaptureError, REUSE_SCHEMA_VERSION, canonical
 
 CONTRACT = "unstarted-revision-resume-v1"
 _IDENTITY = ("schema_version", "pool_id", "authorization_sha256", "limit", "initial_used")
@@ -97,7 +97,7 @@ def _scope(git, run_id, context, source_paths, related_runs, reservation, *, at_
         if _hash(data) != pointer["sha256"] or git.read(head, path) != data:
             _fail("revision_resume_reservation_changed")
         artifacts[key] = _load(data, "processing_attempt" if key == "started" else "revision_attempt",
-                               "0.4" if key == "started" else "0.9")
+                               ("0.4" if key == "started" else "0.9", REUSE_SCHEMA_VERSION))
     started, pointer = artifacts["started"], artifacts["revision_attempt"]
     _time(started.get("started_at"))
     if not isinstance(reservation["processing_key"], str) or not re.fullmatch(r"sha256-[0-9a-f]{64}", reservation["processing_key"]):
