@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev20`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev21`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
 
 ## 当前实现与双仓边界
 
@@ -16,9 +16,13 @@ M1 整体尚未验收。目标 GPT 云端任务拟按 `Asia/Shanghai` 每日 22:
 
 <a id="m1-skill-quality"></a>
 
+### 退回后的处理
+
+精确未变知识的已受审统计义务由程序核对，新输出不能漏交。新10/8通过版本化质量视图区分模型需要理解的事实和程序完整性摘要，完整持久证据不变；先检查完整容量，再预约调用。完整final候选被退回时，生产编排沿现有返工接口带回实际意见，并对新plan重新审核及发布，不把普通重试当反馈返工。字段、执行边界和人工反例见第二层方案、实现明细及验收规范。
+
 ## M1 知识质量与 Skill 接入
 
-新任务默认固定 `knowledge-extract@9` 与 `knowledge-review@7`。模型接入层实际加载对应 `SKILL.md`、共享质量规范、知识语境规范及输出契约，保存完整快照并绑定请求、候选和审核结果。Skill 规定怎样组织和复查知识，程序检查可确定的结构与绑定；加载成功本身不能证明输出合格。
+新任务默认固定 `knowledge-extract@10` 与 `knowledge-review@8`。模型接入层实际加载对应 `SKILL.md`、共享质量规范、知识语境规范及输出契约，保存完整快照并绑定请求、候选和审核结果。Skill 规定怎样组织和复查知识，程序检查可确定的结构与绑定；加载成功本身不能证明输出合格。
 
 现行质量路径为：固定来源及 Skill 引用 → 程序准备资料清单与可复算统计 → 模型按加工 Skill 提取分类和组织知识 → 程序校验覆盖、数字、引用、时间和版本 → 独立模型按审核 Skill 逐项复查 → 完整证明与条件发布。Skill、必要依赖或检查失败时保留原因，不退回普通提示词绕过发布门禁。
 
@@ -32,7 +36,7 @@ M1 整体尚未验收。目标 GPT 云端任务拟按 `Asia/Shanghai` 每日 22:
 
 M1 可形成描述性期间知识：在含义、单位和可比条件明确时计算分段统计，标注算法、区间、有效样本、缺失与未完结日处理；派生值不得冒充原始报表字段。M2 才进一步结合个人问题解释原因和比较建议。来源中的旧状态只用于其当时语境，当前系统状态须另有固定版本或回执证明。
 
-新9/7合同运行使用 schema `0.11`，旧质量运行继续按 `0.10` 核验；原文／采集 `0.1`、正式知识 `0.2` 与 group wrapper `0.6` 保持。基础提示词仍为 extract v14／review v10／answer v7，新增质量规则由明确版本的 Skill 提供。历史请求及 Skill 精确保留，不回填“已加载 Skill”。传输使用完整可逆共享值、字段字典与列式编码；全部原文、规则、候选、真实意见和计算范围都计入实际请求字节，完整必要单元超限时停止。
+新10/8合同运行使用 schema `0.12`，旧9/7继续按 `0.11`、更早质量运行按 `0.10` 核验；原文／采集 `0.1`、正式知识 `0.2` 与 group wrapper `0.6` 保持。基础提示词仍为 extract v14／review v10／answer v7，新增质量规则由明确版本的 Skill 提供。历史请求及 Skill 精确保留，不回填“已加载 Skill”。传输使用完整可逆共享值、字段字典与列式编码；全部原文、规则、候选、真实意见和计算范围都计入实际请求字节，完整必要单元超限时停止。
 
 详细规则见[第二层](technical-plan/02-knowledge.md#m1-skill-quality)，字段、执行与验收分别见[数据规范](data-conventions.md#skill-quality-contract)、[实现明细](implementation-details.md#skill-quality-execution)与[场景验收](scenarios-and-acceptance.md#skill-quality-acceptance)。阶段退出条件见 [Roadmap](roadmap.md#m1-skill-quality)。
 

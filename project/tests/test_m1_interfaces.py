@@ -41,8 +41,8 @@ class M1InterfaceTests(unittest.TestCase):
     def assert_skill_binding(self, bundle):
         validate_skill_bundle(bundle)
         self.assertEqual(bundle, resolve_skill_refs())
-        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@9")
-        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@7")
+        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@10")
+        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@8")
 
     def test_environment_bind_and_verify_are_explicit_clone_local_operations(self):
         before = test_runtime.git(self.repo, "rev-parse", "HEAD")

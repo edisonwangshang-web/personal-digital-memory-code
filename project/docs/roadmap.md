@@ -6,11 +6,11 @@
 
 ## 当前阶段
 
-当前程序为 `0.2.0.dev20`，新任务默认 `knowledge-extract@9`／`knowledge-review@7`，基础规则为 extract v14／review v10／answer v7。M0 手动基础闭环已有历史验收；M1 已实现主要工程能力，**整体仍未验收**。M2—M4 尚未作为完整产品阶段交付。
+当前程序为 `0.2.0.dev21`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础规则为 extract v14／review v10／answer v7。M0 手动基础闭环已有历史验收；M1 已实现主要工程能力，**整体仍未验收**。M2—M4 尚未作为完整产品阶段交付。
 
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 
-公开工程已核对的快照为 [`8e461422712252ccffefe664466c1ba254fc97cf`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/8e461422712252ccffefe664466c1ba254fc97cf)，其 [CI 40163471251](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40163471251) 八任务成功，Python 3.11／3.12 各 1004 项及基础检查通过。该结果只属于这个提交，不能视为本页后续文档 HEAD 已通过。
+公开工程已核对的快照为 [`9ec7ccd31631d45345f609b5fe6ff78174d22420`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/9ec7ccd31631d45345f609b5fe6ff78174d22420)，其 [CI 40178015107](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40178015107) 八任务成功，Python 3.11／3.12 各 1023 项及基础检查通过。该结果只属于这个提交，不能视为本页后续文档 HEAD 已通过。
 
 公库 `dev` 开发、`master` 稳定交付；真实加工继续从私库工程副本加载。只读入口核对准确公开 CI 和两边完整核心工程，实际文件数以该版本核对报告为准；不自动复制或同步，不替代私库不同 SHA 的生产门禁。操作见[双仓库实际使用](dual-repository-operation.md)，CI 路线见[公开工程 CI](public-code-ci.md)。
 
@@ -65,7 +65,7 @@ M1 聚焦可日常维护的知识库。用户明确提交文章、对话、个�
 | M1-Q04 独立质量审核 | 对照原文、清单、统计、时间和候选逐项审核，完整证明绑定精确版本后由发布者消费 | 已实现；修订后重新审核，旧证明不放行新内容 |
 | M1-Q05 回归与业务验证 | 用人工反例检查加载、版本、分批、恢复、误算、漏项、误类和时态，再做限定真实业务验证 | 工程回归与真实业务证据分开；具体实跑记录保留私库 |
 
-当前默认 `knowledge-extract@9`／`knowledge-review@7` 与共享 `knowledge-quality-v1`、`knowledge-context-v1` 协作。新9/7质量链、queue／attempt、日程事件与分解 proof 为 schema `0.11`，旧质量链保持 `0.10`；来源 `0.1`、正式对象 `0.2`、group wrapper `0.6` 保持兼容，不自动迁移旧资料。
+当前默认 `knowledge-extract@10`／`knowledge-review@8` 与共享 `knowledge-quality-v1`、`knowledge-context-v1` 协作。新10/8质量链、queue／attempt、日程事件与分解 proof 为 schema `0.12`，旧9/7为 `0.11`、更早质量链保持 `0.10`；来源 `0.1`、正式对象 `0.2`、group wrapper `0.6` 保持兼容，不自动迁移旧资料。
 
 普通质量返工和分解恢复沿原规则继续；两个历史 `0.9` 人工 operator 入口不接收新质量链，缺少适用证明时停止。完整技术职责、字段与用例分别见[技术方案](technical-plan.md)、[数据规范](data-conventions.md)与[场景验收](scenarios-and-acceptance.md)。
 
@@ -89,6 +89,10 @@ M1 聚焦可日常维护的知识库。用户明确提交文章、对话、个�
 ## dev20增量输出修复
 
 新9/7合同以显式 `reuse_refs` 表达未变知识，由程序验证精确路径／版本并原样物化，再核完整质量、独立Review和发布条件。变化项仍返回全文；不增加加工阶段，不自动扩大资料范围或迁移旧知识。新运行格式0.11与旧0.10分开，原未知调用和有限尝试计数继续保留。验收见[显式复用引用](scenarios-and-acceptance.md#显式复用引用验收)，真实结果另存私库。
+
+## dev21返工与完整性修复
+
+本批在既有阶段内补统计义务完整性、模型质量视图、预约前完整容量预检、final审核退回后的带意见接续及安全错误分类。旧Skill／请求与数据保留，不新增加工阶段；draft／continuation自动返工仍未扩展。人工回归、准确提交CI、私库真实返工／发布／读取和远程恢复分别核验，任何一项未取得证据都不宣布完整链通过。
 
 ## M1 下一步
 

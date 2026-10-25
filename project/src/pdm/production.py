@@ -112,9 +112,9 @@ def _quality_schema(value):
     if bundle is not None:
         return quality_schema_version(bundle)
     marker = value.get("schema_version")
-    if marker is not None and marker != REUSE_SCHEMA_VERSION:
+    if marker is not None and marker not in QUALITY_SCHEMA_VERSIONS:
         _fail("invalid_queue_quality_binding")
-    return REUSE_SCHEMA_VERSION if marker is not None else QUALITY_SCHEMA
+    return marker if marker is not None else QUALITY_SCHEMA
 
 
 def _read(git, path, kind):
@@ -126,11 +126,8 @@ def _read(git, path, kind):
     if git.read(git.head(), path) != data:
         _fail("queue_state_changed")
     meta, body = parse_markdown(data)
-    if meta not in ({"schema_version": REUSE_SCHEMA_VERSION, "kind": kind},
-                    {"schema_version": QUALITY_SCHEMA, "kind": kind},
-                    {"schema_version": SCHEMA, "kind": kind},
-                    {"schema_version": "0.7", "kind": kind},
-                    {"schema_version": LEGACY_SCHEMA, "kind": kind}):
+    if meta not in tuple({"schema_version": version, "kind": kind}
+                         for version in (*QUALITY_SCHEMA_VERSIONS, SCHEMA, "0.7", LEGACY_SCHEMA)):
         _fail("invalid_queue_state")
     def unique(pairs):
         result = {}
@@ -261,6 +258,59 @@ def production_status(repo, queue_id):
                             else "operator_repair" if state["status"] in {"attempt_limit", "blocked_capacity", "blocked_context"} else "continue")}
 
 
+def _feedback_enabled(bundle):
+    """Only the new frozen contract changes a queue's retry semantics."""
+    skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
+    return (isinstance(skills, dict)
+            and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+                    for role, ref in (("extract", "knowledge-extract@10"),
+                                      ("review", "knowledge-review@8"))))
+
+
+def _revision_feedback(git, previous, state, projection, processing_paths, *, draft, merge_runs):
+    """Bind a verified rejection to the same immutable source work, not old rules.
+
+    New plan IDs may name a fresh current program snapshot. The complete old
+    candidate/Review remains immutable feedback, while the new candidate must
+    bind the new plan and independently pass its own publication proof.
+    """
+    from .pipeline import _candidate_bindings, _committed, _load, _stage_path
+    from .revision_context import build_revision_context
+
+    rejected = next((attempt for attempt in reversed(previous)
+                     if attempt["status"] == "needs_revision"), None)
+    if rejected is None:
+        return None
+    if draft or state["request"].get("continuation_context") is not None:
+        _fail("queue_revision_phase_unsupported")
+    candidate = _load(_committed(git, _stage_path(rejected["run_id"])), "candidate")
+    expected_sources = [{key: value for key, value in source.items() if key != "line_count"}
+                        for source in state["plan"]["sources"]]
+    old_context = candidate.get("batch_context")
+    material = candidate.get("batch_material", {})
+    if (sorted(item["path"] for item in _candidate_bindings(candidate)) != processing_paths
+            or _candidate_bindings(candidate) != expected_sources
+            or candidate.get("related_runs") != state["related_runs"]
+            or candidate.get("controls_digest") != state["plan"]["snapshot"]["controls_digest"]
+            or candidate.get("execution_context") is not None
+            or candidate.get("continuation_context") is not None
+            or not isinstance(old_context, dict)
+            or old_context.get("source_ranges") != projection["batch_context"]["source_ranges"]
+            or candidate.get("source_views") != projection["source_views"]
+            or material.get("draft_only") is not False
+            or sorted(item["run_id"] for item in candidate.get("merge_inputs", [])) != sorted(merge_runs)
+            or candidate.get("review_strategy", "legacy-v1") != state["request"].get("review_strategy", "legacy-v1")):
+        _fail("queue_revision_context_mismatch")
+    # This checks the full actual independent verdict, candidate computation,
+    # source/related scope, current controls and every frozen ancestor binding.
+    context = build_revision_context(git, rejected["run_id"], source_paths=processing_paths,
+                                     related_runs=state["related_runs"])
+    return {"run_id": rejected["run_id"], "context_sha256": _hash(context),
+            "candidate_binding": candidate["binding"],
+            "source_plan_id": old_context["plan_id"],
+            "target_plan_id": projection["batch_context"]["plan_id"]}
+
+
 def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(), execution_guard=None):
     from .budget import BudgetedModelCall
     from .model_calls import MAX_INPUT_BYTES, PROMPTS
@@ -274,6 +324,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     continuation = state["request"].get("continuation_context")
     strategy = state["request"].get("review_strategy", "legacy-v1")
     skill_bundle = state["request"].get("skill_bundle")
+    feedback_policy = _feedback_enabled(skill_bundle)
     processing_paths = plan["source_paths"]
     if skill_bundle is not None:
         # A quality draft profiles only the sources actually supplied to that
@@ -343,8 +394,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             _fail("queue_attempt_identity_conflict")
         if skill_bundle is not None:
             attempts["quality_contract"] = "skill-quality-v1"
-            if quality_schema_version(skill_bundle) == REUSE_SCHEMA_VERSION:
-                attempts["schema_version"] = REUSE_SCHEMA_VERSION
+            selected_schema = quality_schema_version(skill_bundle)
+            if selected_schema != QUALITY_SCHEMA:
+                attempts["schema_version"] = selected_schema
         for old in attempts["attempts"]:
             if old["run_id"] in registrations:
                 restored = registrations[old["run_id"]]
@@ -401,6 +453,16 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     if reusable(candidate):
                         reuse_extraction = old["run_id"]
                         break
+        feedback = None
+        if feedback_policy:
+            try:
+                feedback = _revision_feedback(git, attempts["attempts"], state, projection,
+                                              processing_paths, draft=draft, merge_runs=merge_runs)
+            except CaptureError as error:
+                if error.code not in {"queue_revision_phase_unsupported", "queue_revision_context_mismatch"}:
+                    raise
+                return {"status": "blocked_context", "error": error.code,
+                        "attempted_calls": 0, "model_calls": 0}
         # Account for prior candidates, control/related payload and actual rules at
         # the real transport boundary, before reserving a durable processing run.
         # The transport rechecks the exact full serialized payload for each role.
@@ -410,29 +472,82 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             overhead = max(len(render_model_request(role, {
                 "quality_contract": "skill-quality-v1", "skill_bundle": skill_bundle}))
                 for role in ("extract", "review"))
-        if projection["input_bytes"] + overhead > MAX_INPUT_BYTES:
+        if not feedback_policy and projection["input_bytes"] + overhead > MAX_INPUT_BYTES:
             return {"status": "blocked_capacity", "next_action": "replan"}
         current = {"run_id": run_id, "operation_id": operation, "attempt": number, "status": "reserved"}
-        attempts["attempts"].append(current)
-        _save(git, path, attempts, "production_attempts", head)
+        process_options = {"related_runs": [] if draft else state["related_runs"], "run_id": run_id,
+                           "batch_context": projection["batch_context"], "source_views": projection["source_views"],
+                           "draft_only": draft, "merge_runs": merge_runs, "reuse_extraction_run": reuse_extraction,
+                           "continuation_context": continuation,
+                           **({"skill_bundle": skill_bundle} if skill_bundle is not None else {}),
+                           **({"review_strategy": strategy} if strategy != "legacy-v1" else {})}
+        if feedback is not None:
+            process_options.update(revision_from_run=feedback["run_id"], reuse_extraction_run=None)
+            current.update(revision_from_run=feedback["run_id"],
+                           revision_context_sha256=feedback["context_sha256"],
+                           revision_candidate_binding=feedback["candidate_binding"],
+                           revision_source_plan_id=feedback["source_plan_id"],
+                           revision_target_plan_id=feedback["target_plan_id"])
+        if not feedback_policy:
+            attempts["attempts"].append(current)
+            _save(git, path, attempts, "production_attempts", head)
+    if feedback_policy:
+        # Render the complete request before claiming an attempt, audit roles or
+        # processing reservation. Avoid a reentrant Git lock around preparation.
+        from .pipeline import preflight_processing
+        checked = preflight_processing(repo, processing_paths, **process_options)
+        if checked["status"] != "ready":
+            if checked["status"] in {"unknown", "blocked_capacity"}:
+                return checked
+            if checked["status"] == "passed":
+                candidate, _, _ = _read_reviewed(git, checked["run_id"], historical=True)
+                if reusable(candidate):
+                    return checked
+            return {**checked, "status": "blocked_context",
+                    "error": checked.get("error", "queue_revision_existing_attempt"),
+                    "attempted_calls": 0, "model_calls": 0}
+        with git.lock():
+            head = git.check(head)
+            stored = _read(git, path, "production_attempts")
+            # ``attempts`` may carry the new quality schema marker, but its old
+            # entries must still match exactly. No competing claim may be lost.
+            expected = deepcopy(stored) if stored is not None else {"identity": identity, "attempts": []}
+            if skill_bundle is not None:
+                expected["quality_contract"] = "skill-quality-v1"
+                selected_schema = quality_schema_version(skill_bundle)
+                if selected_schema != QUALITY_SCHEMA:
+                    expected["schema_version"] = selected_schema
+            if expected != attempts:
+                _fail("queue_attempt_changed")
+            attempts["attempts"].append(current)
+            head = _save(git, path, attempts, "production_attempts", head)
+            process_options["expected_head"] = head
     delegate = _guarded(delegate, execution_guard, repo, state["queue_id"], run_id)
     try:
-        result = process_sources(repo, processing_paths, model_call=delegate,
-                                 related_runs=[] if draft else state["related_runs"], run_id=run_id,
-                                 batch_context=projection["batch_context"], source_views=projection["source_views"],
-                                 draft_only=draft, merge_runs=merge_runs, reuse_extraction_run=reuse_extraction,
-                                 continuation_context=continuation,
-                                 **({"skill_bundle": skill_bundle} if skill_bundle is not None else {}),
-                                 **({"review_strategy": strategy} if strategy != "legacy-v1" else {}))
+        result = process_sources(repo, processing_paths, model_call=delegate, **process_options)
     except CaptureError as error:
         observed = delegate.ledger.operation(operation) if isinstance(delegate, BudgetedModelCall) else None
-        if error.code not in _CONTEXT_ERRORS or observed is not None and observed["started_calls"]:
-            raise
-        result = {"status": "blocked_context", "run_id": run_id, "error": error.code,
-                  "attempted_calls": 0, "model_calls": 0}
+        if (feedback_policy and error.code in {"input_limit", "head_conflict"}
+                and (observed is None or not observed["started_calls"])):
+            result = {"status": "blocked_capacity" if error.code == "input_limit" else "blocked_context",
+                      "run_id": run_id, "error": error.code,
+                      "attempted_calls": 0, "model_calls": 0}
+        else:
+            if error.code not in _CONTEXT_ERRORS or observed is not None and observed["started_calls"]:
+                raise
+            result = {"status": "blocked_context", "run_id": run_id, "error": error.code,
+                      "attempted_calls": 0, "model_calls": 0}
     except BaseException:
         # Leave the durable reservation for reconciliation, including interrupts.
         raise
+    if feedback_policy and result.get("run_id") != run_id:
+        # An explicitly started operator revision can share the feedback pointer.
+        # Never mark this reservation passed when another run was returned.
+        observed = delegate.ledger.operation(operation) if isinstance(delegate, BudgetedModelCall) else None
+        calls = observed["started_calls"] if observed is not None else result.get("attempted_calls", 0)
+        result = {"status": "unknown" if calls else "blocked_context", "run_id": run_id,
+                  "error": "queue_revision_run_mismatch", "observed_run_id": result.get("run_id"),
+                  "attempted_calls": calls, "model_calls": calls}
     status = result["status"]
     if status == "failed":
         status = "failed"

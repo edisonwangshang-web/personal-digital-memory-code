@@ -1,14 +1,24 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev20`，新任务默认 `knowledge-extract@9`／`knowledge-review@7`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev21`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
-来源及采集 `0.1`、正式对象 `0.2`、新9/7质量链 `0.11`，旧质量链 `0.10`；历史格式 `0.1`—`0.11` 按各自原契约读取，不批量迁移。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
+来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；历史格式 `0.1`—`0.12` 按各自原契约读取，不批量迁移。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。extract@9／review@7 还固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
 
+## dev21：质量完整性与反馈接续（schema `0.12`）
+
+10/8候选额外固定 `reuse_quality_requirements`，每项为 `{record_id, content_version, stat_ids}`，由已核验旧发布的精确记录及同定义统计重算。模型显式输出原格式statistic_claims，程序对同路径逐字未变正文核必需集合（仅改标题／标签也不豁免）；不存在可继承义务的资料允许空集合。raw输出不修补，伪造来源、版本、证明或遗漏须拒绝。
+
+渲染选择 `quality-model-projection-v1`，模型视图顶层 `quality_projection` 绑定完整原材料摘要，能重建的profile行表变为 `line_integrity`（契约、完整映射摘要、行数和重建规则）。持久 `quality_context` 不变；解投影用同包原始全局行恢复并核全部绑定，缺必要行的合法单元保留原表，未知版本或篡改拒绝。语义事实、目标、统计及完整反馈不减少。
+
+新queue／attempt、候选／Review及其他质量族header为0.12，首次started和revision_attempt也为0.12；来源0.1、formal0.2、group0.6、audit2不迁移。production的新attempt可固定 `revision_from_run`、原context摘要、原candidate绑定及旧／新planID，只允许同来源／范围／related／controls／merge兼容的真实退回；新proof绑定新plan，不消费旧passed替代。四次稳定尝试上限、unknown先对账和CAS保留。只有完整final候选自动接续，draft／continuation明确blocked_context。
+
+安全调用错误增加固定 `cli_auth_required`、`cli_permission_denied`、`cli_rate_limited`、`cli_service_unavailable`、`cli_network_failure`、`cli_request_rejected`；未知／冲突仍为 `cli_turn_failed`。不保存原message、stderr、URL或凭据，启动后失败仍保守记unknown，不自动重放。
+
 ## dev20：显式原样复用（schema `0.11`）
 
-新默认extract@9／review@7使用 `reuse_refs` 输出合同。引用项恰含 `path`、`content_version`；路径只允许本次实际提供且已验证发布依据的related record／topic，版本须与该固定对象完全一致。引用本身不携带可覆盖旧事实的正文，也不能增加来源权限。
+新默认extract@10／review@8使用 `reuse_refs` 输出合同。引用项恰含 `path`、`content_version`；路径只允许本次实际提供且已验证发布依据的related record／topic，版本须与该固定对象完全一致。引用本身不携带可覆盖旧事实的正文，也不能增加来源权限。
 
 新建／变化项继续输出全文；objects与wikis的原始数组可因明确引用而为空，普通wiki允许为空值，但物化后的完整输出仍须满足原记录数量、Wiki数量及精确成员版本。旧合同不接受新增键，也不能将缺省或空输出推断为reuse。重复引用、未知路径、错误版本、全文冲突及变化记录配旧Wiki均拒绝。
 
@@ -20,13 +30,13 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 
 <a id="skill-quality-contract"></a>
 
-## M1 Skill 引用与知识质量契约（旧schema `0.10`，新9/7为 `0.11`）
+## M1 Skill 引用与知识质量契约（10/8为 `0.12`，旧9/7为 `0.11`，更早为 `0.10`）
 
-显式bundle启用`quality_contract="skill-quality-v1"`，新9/7合同使用0.11，旧质量运行使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
+显式bundle启用`quality_contract="skill-quality-v1"`，新10/8合同使用0.12，旧9/7使用0.11，更早质量运行使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
 
 ### Skill 引用、展开与运行绑定
 
-CLI 分别提供 `--extract-skill`、`--review-skill`，加载器接口为 `resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；新任务默认 extract@9／review@7，历史 extract@1—@8 与 review@1—@6 保留原字节。底层 API 的 `None` 继续旧契约，不能借此给新质量链降级。引用解析为包含 `SKILL.md`、共同质量规范、输出契约和冻结基础提示词的完整 `skill_bundle`。两个角色共享 `knowledge-quality-v1`，来源正文不能改变本次引用或权限；未知版本、外部路径或未声明依赖不自动发现。
+CLI 分别提供 `--extract-skill`、`--review-skill`，加载器接口为 `resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；新任务默认 extract@10／review@8，历史 extract@1—@9 与 review@1—@7 保留原字节。底层 API 的 `None` 继续旧契约，不能借此给新质量链降级。引用解析为包含 `SKILL.md`、共同质量规范、输出契约和冻结基础提示词的完整 `skill_bundle`。两个角色共享 `knowledge-quality-v1`，来源正文不能改变本次引用或权限；未知版本、外部路径或未声明依赖不自动发现。
 
 `skill_bundle` 顶层为 `schema_version="skill-bundle-v1"`、`quality_contract`、`skills`、`shared_policy` 和 `sha256`。`skills.extract`／`skills.review` 各保存 `ref`、`role`、`version`、`manifest`、`files`、`base_prompt`；每个内容快照包含 `path`、`content`、`sha256`、`bytes`。manifest 和完整依赖按注册摘要核验，bundle摘要覆盖除其自身 `sha256` 外的规范JSON；角色和共享规范必须一致。设计阶段的 `skill_binding` 在实际格式中由完整bundle与请求绑定共同承担，不另存同名字段。
 
@@ -62,7 +72,7 @@ summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一�
 
 `pdm-shared-json-v1`是共享值的基础无损表示：`{format,root,shared}`保存输入根与完整共享值表，只有`{"$pdm_ref": id}`的对象指向共享表中的完整值。原资料对象含`$pdm_ref`或`$pdm_literal`保留键时，编码器使用`$pdm_literal`转义，避免把资料误解释成引用。只共享能减少字节的重复值，其余完整内联；原文、统计、上下文、候选和检查项均能解引用还原，不靠删除辅助材料或拆小语义范围满足容量。
 
-当前默认 `knowledge-extract@9`／`knowledge-review@7` 按显式角色版本渲染为 `pdm-columnar-shared-json-v3`：先还原列式结构，再还原 v2 字段字典和 v1 共享值。v1 基础及旧角色的历史渲染继续保留，不能把新任务全部视为 v1 请求。
+当前默认 `knowledge-extract@10`／`knowledge-review@8` 按显式角色版本渲染为 `pdm-columnar-shared-json-v3`：先还原列式结构，再还原 v2 字段字典和 v1 共享值。v1 基础及旧角色的历史渲染继续保留，不能把新任务全部视为 v1 请求。
 
 `encode_shared_json`在每次编码时调用`decode_shared_json`核对规范JSON与原输入相等；解码拒绝循环、悬空引用、非法结构及超限展开。模型请求同时提供解引用说明，模型输出仍按原业务schema，不能用共享ID代替真实来源、quote、正文或检查标识。`request_binding`和容量门禁核实际编码后的完整线上字节，包括规则与编码说明；编码前原payload审计和完整候选继续保留。旧契约请求维持原字节渲染，历史输出不追写共享引用。
 

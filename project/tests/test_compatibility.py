@@ -77,7 +77,7 @@ class CompatibilityTests(unittest.TestCase):
         result = inspect_memory_schema(self.repo)
         self.assertEqual(result["status"], status)
         self.assertEqual(result["writable"], status == "compatible")
-        self.assertEqual(result["supported_schema_versions"], ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11"])
+        self.assertEqual(result["supported_schema_versions"], ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12"])
         self.assertEqual(result["detected_known_versions"], versions)
         for key in ("scanned_metadata_files", "unknown_files", "ignored_files"):
             self.assertIsInstance(result[key], int)

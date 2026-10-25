@@ -29,6 +29,10 @@ def _hash(value):
     return "sha256-" + hashlib.sha256(value if isinstance(value, bytes) else canonical(value)).hexdigest()
 
 
+def _explicit_quality_schema(value):
+    return value.get("schema_version") in QUALITY_SCHEMA_VERSIONS and value["schema_version"] != QUALITY_SCHEMA
+
+
 def _document(kind, value):
     schema = value.get("schema_version", QUALITY_SCHEMA) if value.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
     return markdown({"schema_version": schema, "kind": kind, "run_id": value["run_id"]}, canonical(value).decode() + "\n")
@@ -44,8 +48,8 @@ def _read(git, path, kind, *, commit=None, immutable=True):
         _fail()
     value = _load(data, kind, schema)
     if ((schema in QUALITY_SCHEMA_VERSIONS) != (value.get("quality_contract") == QUALITY_CONTRACT)
-            or schema == REUSE_SCHEMA_VERSION and value.get("schema_version") != schema
-            or schema != REUSE_SCHEMA_VERSION and "schema_version" in value):
+            or schema in QUALITY_SCHEMA_VERSIONS and schema != QUALITY_SCHEMA and value.get("schema_version") != schema
+            or (schema not in QUALITY_SCHEMA_VERSIONS or schema == QUALITY_SCHEMA) and "schema_version" in value):
         _fail("decomposed_quality_contract_mismatch")
     return value, data
 
@@ -251,8 +255,8 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
         value.update(quality_contract=QUALITY_CONTRACT, prompt=frozen_prompt,
                      skill_bundle_sha256=candidate["skill_bundle"]["sha256"],
                      quality_context_sha256=_hash(candidate["quality_context"]))
-        if quality_schema_version(candidate["skill_bundle"]) == REUSE_SCHEMA_VERSION:
-            value["schema_version"] = REUSE_SCHEMA_VERSION
+        if quality_schema_version(candidate["skill_bundle"]) != QUALITY_SCHEMA:
+            value["schema_version"] = quality_schema_version(candidate["skill_bundle"])
     if request_contract is not None:
         inventory = _input_scope_inventory(candidate, payload)
         value.update(request_contract=request_contract, input_scope_inventory=inventory,
@@ -432,7 +436,7 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
     quality = plan.get("quality_contract") == QUALITY_CONTRACT
     if quality:
         expected.update({"quality_contract", "request_binding"})
-        if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
+        if _explicit_quality_schema(plan):
             expected.add("schema_version")
     if (set(result) != expected or result["run_id"] != plan["run_id"] or result["plan_id"] != plan["plan_id"]
             or result["unit_id"] != unit["unit_id"] or result["request_sha256"] != reservation["request_sha256"]
@@ -508,8 +512,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
             counter, _ = _read(git, counter_path, "decomposed_review_attempts")
         if counter["identity"] != identity or counter["audit_pool"] != _pool(model_call):
             _fail("decomposed_audit_identity_changed")
-        if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
-            counter.update(quality_contract=QUALITY_CONTRACT, schema_version=REUSE_SCHEMA_VERSION)
+        if _explicit_quality_schema(plan):
+            counter.update(quality_contract=QUALITY_CONTRACT, schema_version=plan["schema_version"])
         result, node, retry = None, None, None
         for attempt in counter["attempts"]:
             if attempt["request_sha256"] == request_sha and attempt["plan_id"] == plan["plan_id"]:
@@ -549,8 +553,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                            "counter": _snapshot(git, counter_path)}
             if plan.get("quality_contract") == QUALITY_CONTRACT:
                 reservation.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
-                if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
-                    reservation["schema_version"] = REUSE_SCHEMA_VERSION
+                if _explicit_quality_schema(plan):
+                    reservation["schema_version"] = plan["schema_version"]
             if git._existing(retry["reservation_path"]) is not None:
                 # A provably unstarted guard rejection keeps its original
                 # reservation snapshot and does not use a retry slot.
@@ -591,8 +595,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                                "attempted_calls": actual, "error": retry["error"]}
                     if plan.get("quality_contract") == QUALITY_CONTRACT:
                         failure.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
-                        if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
-                            failure["schema_version"] = REUSE_SCHEMA_VERSION
+                        if _explicit_quality_schema(plan):
+                            failure["schema_version"] = plan["schema_version"]
                     if not received and actual == 0:
                         retry["status"] = "reserved"
                         retry.pop("error", None)
@@ -617,8 +621,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                      "sha256": _hash(git.read(commit, retry["reservation_path"]))}, "call": call, "output": response["output"]}
             if plan.get("quality_contract") == QUALITY_CONTRACT:
                 saved.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
-                if plan.get("schema_version") == REUSE_SCHEMA_VERSION:
-                    saved["schema_version"] = REUSE_SCHEMA_VERSION
+                if _explicit_quality_schema(plan):
+                    saved["schema_version"] = plan["schema_version"]
             _write(git, retry["result_path"], saved, "decomposed_review_result")
             retry["status"] = saved["output"]["verdict"]
             _write(git, counter_path, counter, "decomposed_review_attempts", mutable=True)

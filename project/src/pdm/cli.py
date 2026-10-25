@@ -39,8 +39,8 @@ def _budget_arguments(command):
 
 
 def _skill_arguments(command):
-    command.add_argument("--extract-skill", help="显式提取 Skill 引用；新任务默认 knowledge-extract@9")
-    command.add_argument("--review-skill", help="显式审核 Skill 引用；新任务默认 knowledge-review@7")
+    command.add_argument("--extract-skill", help="显式提取 Skill 引用；新任务默认 knowledge-extract@10")
+    command.add_argument("--review-skill", help="显式审核 Skill 引用；新任务默认 knowledge-review@8")
 
 
 def _selected_skills(args, *, default=False):

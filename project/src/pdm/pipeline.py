@@ -358,8 +358,37 @@ def _time(value):
 
 def _reuse_refs_enabled(skill_bundle):
     skills = skill_bundle.get("skills", {}) if isinstance(skill_bundle, dict) else {}
+    return isinstance(skills, dict) and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+        for role, ref in pair) for pair in (
+            (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")),
+            (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8"))))
+
+
+def _feedback_quality_enabled(skill_bundle):
+    skills = skill_bundle.get("skills", {}) if isinstance(skill_bundle, dict) else {}
     return isinstance(skills, dict) and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
-        for role, ref in (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")))
+        for role, ref in (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")))
+
+
+def _processing_header(skill_bundle, fallback):
+    return quality_schema_version(skill_bundle) if _reuse_refs_enabled(skill_bundle) else fallback
+
+
+
+def _reuse_obligation_objects(objects, related):
+    """Keep old statistical obligations when a record body is reused verbatim."""
+    known = {doc["path"]: doc for item in related for doc in item["documents"]}
+    return [{"path": old["path"], "metadata": old["metadata"], "body": old["body"]}
+            for obj in objects for old in [known.get(obj["path"])]
+            if old is not None and obj["path"].startswith("memory/records/")
+            and obj["body"] == old["body"]]
+
+
+def _reuse_requirements(git, related, sources, context):
+    from .reuse_quality import collect_reuse_statistical_obligations, model_reuse_requirements
+    documents = [{"path": doc["path"], "metadata": doc["metadata"], "body": doc["body"]}
+                 for item in related for doc in item["documents"] if doc["path"].startswith("memory/records/")]
+    return model_reuse_requirements(collect_reuse_statistical_obligations(git, related, sources, context, documents))
 
 
 def _reuse_objects(refs, related, sources):
@@ -820,14 +849,14 @@ def _existing_revision_attempt(git, context, source_paths, related_runs):
         if _last_commit(git, git.head(), path):
             _error("revision_attempt_deleted")
         return None
-    value = _load(_committed(git, path), "revision_attempt", (REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION))
+    value = _load(_committed(git, path), "revision_attempt", (REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS))
     run = value.get("run_id")
     if value != {"run_id": run, "revision_context_sha256": _hash(context),
             "source_paths": source_paths, "related_runs": related_runs,
             "processing_key": value.get("processing_key")}:
         _error("revision_attempt_mismatch")
     _run_path(run, "review")
-    started = _load(_committed(git, _run_path(run, "started")), "processing_attempt", (M1_SCHEMA_VERSION, REUSE_SCHEMA_VERSION))
+    started = _load(_committed(git, _run_path(run, "started")), "processing_attempt", (M1_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS))
     if (started.get("processing_key") != value["processing_key"]
             or started.get("source_paths") != source_paths or started.get("related_runs") != related_runs
             or _last_commit(git, git.head(), _run_path(run, "started")) != _last_commit(git, git.head(), path)):
@@ -1129,6 +1158,8 @@ def _candidate_payload(git, candidate, sources):
     if _quality_enabled(candidate):
         payload.update({key: copy.deepcopy(candidate[key]) for key in
                         ("quality_contract", "skill_bundle", "quality_context")})
+        if _feedback_quality_enabled(candidate["skill_bundle"]):
+            payload["reuse_quality_requirements"] = copy.deepcopy(candidate["reuse_quality_requirements"])
     return payload
 
 
@@ -1161,6 +1192,13 @@ def _validate_candidate_quality(git, candidate, sources):
         reused = _reuse_objects(output.get("reuse_refs"), candidate["related"], sources)
         output = _reuse_quality_output(output, reused)
     validate_quality_output(output, context)
+    if _feedback_quality_enabled(candidate["skill_bundle"]):
+        from .reuse_quality import validate_reuse_quality
+        expected_requirements = _reuse_requirements(git, candidate["related"], sources, context)
+        if candidate.get("reuse_quality_requirements") != expected_requirements:
+            _error("reuse_quality_requirements_mismatch")
+        validate_reuse_quality(git, candidate["related"], sources, context,
+                               _reuse_obligation_objects(candidate["objects"], candidate["related"]), output)
     payload = _candidate_payload(git, candidate, sources)
     # Revalidation may adopt a new program version but must retain the actual
     # completed request, whose prior quality snapshot cannot be exchanged.
@@ -1307,17 +1345,29 @@ def process(repo, source_path, expected_head=None, *, model_call=call_model, ski
     return process_sources(repo, [source_path], expected_head, model_call=model_call, skill_bundle=skill_bundle)
 
 
+
+def preflight_processing(repo, source_paths, **options):
+    """Build the real full extraction request before reservations or run writes."""
+    if any(key in options for key in ("model_call", "_preflight_only", "_resume_unstarted", "_revalidate_completed")):
+        _error("invalid_preflight")
+    def no_call(*args, **kwargs):
+        _error("preflight_model_call_forbidden")
+    return process_sources(repo, source_paths, model_call=no_call, _preflight_only=True, **options)
+
+
 def process_sources(repo, source_paths, expected_head=None, *, model_call=call_model,
                     related_runs=None, run_id=None, execution_context=None,
                     batch_context=None, source_views=None, draft_only=False, merge_runs=(), reuse_extraction_run=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_from_run=None, _resume_unstarted=None,
-                    _revalidate_completed=None, skill_bundle=None):
+                    _revalidate_completed=None, skill_bundle=None, _preflight_only=False):
     """Process selected sources; explicit revision retains a rejected fixed Review.
 
     Revision is interpretation work, never another fact source or permission to
     restart an uncertain production operation. Its complete original selection
     and batch context are restored before any model invocation.
     """
+    if type(_preflight_only) is not bool or _preflight_only and (_resume_unstarted is not None or _revalidate_completed is not None):
+        _error("invalid_preflight")
     if _revalidate_completed is not None and (_resume_unstarted is not None or revision_from_run is None or run_id is None):
         _error("invalid_extraction_revalidation")
     if _resume_unstarted is not None and (revision_from_run is None or run_id is None):
@@ -1381,7 +1431,12 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
     _run_path(run_id, "review")
     git = PipelineGit(repo)
     with git.lock():
-        git.recover()
+        if _preflight_only:
+            journal = git._journal_path()
+            if journal.exists() or journal.is_symlink():
+                _error("preflight_recovery_required")
+        else:
+            git.recover()
         head = git.check(expected_head)
         _execution_guard(repo, execution_context, run_id=run_id, source_paths=source_paths, related_runs=related_runs)
         if continuation_context is not None:
@@ -1461,7 +1516,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle)
             existing = _existing_processing(git, key, source_paths, related_runs)
             if existing is not None:
-                if requested_run is not None:
+                if requested_run is not None and not _preflight_only:
                     reused = {"run_id": run_id, "status": "already_processed", "original_run_id": existing["run_id"],
                               "processing_key": key, "execution_context": copy.deepcopy(execution_context), "attempted_calls": 0}
                     path = _run_path(run_id, "reused")
@@ -1474,6 +1529,19 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             context_fields.update({"mode": "incremental", "related_runs": related_runs,
                               "controls_digest": controls["digest"], "processing_key": key,
                               "execution_context": copy.deepcopy(execution_context)})
+        if _feedback_quality_enabled(skill_bundle):
+            requirements = _reuse_requirements(git, related, sources, context_fields["quality_context"])
+            payload["reuse_quality_requirements"] = requirements
+            context_fields["reuse_quality_requirements"] = copy.deepcopy(requirements)
+        if _preflight_only or _feedback_quality_enabled(skill_bundle):
+            from .model_calls import MAX_INPUT_BYTES
+            admission = _model_request_binding("extract", payload)
+            if _preflight_only:
+                return {"status": "ready" if admission["bytes"] <= MAX_INPUT_BYTES else "blocked_capacity",
+                        "request_bytes": admission["bytes"], "request_sha256": admission["sha256"],
+                        "head": head, "model_calls": 0, "attempted_calls": 0}
+            if admission["bytes"] > MAX_INPUT_BYTES:
+                _error("input_limit")
         if _resume_unstarted is None and _revalidate_completed is None:
             _reserve_processing_calls(model_call)
         if incremental:
@@ -1484,13 +1552,13 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 started = {"run_id": run_id, "processing_key": key, "execution_context": copy.deepcopy(execution_context),
                            "source_paths": source_paths, "related_runs": related_runs, "reserved_calls": 2, "started_at": timestamp()}
                 started_bytes = _document("processing_attempt", started,
-                    REUSE_SCHEMA_VERSION if _reuse_refs_enabled(skill_bundle) else M1_SCHEMA_VERSION)
+                    _processing_header(skill_bundle, M1_SCHEMA_VERSION))
                 started_files = {started_path: started_bytes}
                 if revision_context is not None:
                     pointer = {"run_id": run_id, "revision_context_sha256": _hash(revision_context),
                                "source_paths": source_paths, "related_runs": related_runs, "processing_key": key}
                     started_files[_revision_attempt_path(revision_context)] = _document("revision_attempt", pointer,
-                        REUSE_SCHEMA_VERSION if _reuse_refs_enabled(skill_bundle) else REVISION_SCHEMA_VERSION)
+                        _processing_header(skill_bundle, REVISION_SCHEMA_VERSION))
                 head = git.write_files(started_files, head, "process: reserve immutable run before model calls")
             # The reservation advances HEAD; both model calls must receive the
             # control snapshot at the same base used by the fixed candidate.
@@ -1555,6 +1623,17 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
         else:
             _targets_clear(git, objects)
+        if _feedback_quality_enabled(skill_bundle):
+            from .reuse_quality import validate_reuse_quality
+            try:
+                validate_reuse_quality(git, related, sources, context_fields["quality_context"],
+                                       _reuse_obligation_objects(objects, related),
+                                       _reuse_quality_output(response["output"],
+                                           _reuse_objects(response["output"].get("reuse_refs"), related, sources)))
+            except CaptureError as error:
+                git.check(head)
+                return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
+                                current_call_count())
         try:
             _validate_domains(objects, related, context_fields.get("operations", {}), versions)
         except CaptureError as error:
@@ -1728,7 +1807,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         attempt_path = _run_path(run_id, "started")
         attempt_bytes = _committed(git, attempt_path)
         attempt = _load(attempt_bytes, "processing_attempt",
-            REUSE_SCHEMA_VERSION if _reuse_refs_enabled(candidate.get("skill_bundle")) else M1_SCHEMA_VERSION)
+            _processing_header(candidate.get("skill_bundle"), M1_SCHEMA_VERSION))
         if (candidate.get("attempt_path") != attempt_path or candidate.get("attempt_sha256") != _hash(attempt_bytes)
                 or _last_commit(git, git.head(), attempt_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])
                 or attempt != {"run_id": run_id, "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"]),
@@ -1756,7 +1835,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical)
         pointer_path = _revision_attempt_path(candidate["revision_context"])
         pointer = _load(_committed(git, pointer_path), "revision_attempt",
-            REUSE_SCHEMA_VERSION if _reuse_refs_enabled(candidate.get("skill_bundle")) else REVISION_SCHEMA_VERSION)
+            _processing_header(candidate.get("skill_bundle"), REVISION_SCHEMA_VERSION))
         if (pointer != {"run_id": run_id, "revision_context_sha256": _hash(candidate["revision_context"]),
                 "source_paths": [source["path"] for source in sources], "related_runs": candidate["related_runs"],
                 "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"])}

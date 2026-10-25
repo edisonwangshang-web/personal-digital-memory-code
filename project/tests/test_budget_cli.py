@@ -45,8 +45,8 @@ class BudgetCliTests(unittest.TestCase):
     def assert_skill_binding(self, bundle):
         validate_skill_bundle(bundle)
         self.assertEqual(bundle, resolve_skill_refs())
-        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@9")
-        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@7")
+        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@10")
+        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@8")
 
     def test_create_requires_explicit_initial_usage_and_never_overwrites(self):
         state = self.create(limit=7, initial_used=3)
