@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only check: a tested public code snapshot matches a private dev clone.
+"""Read-only check: public and private checkouts match on dev or master.
 
 No private source/knowledge bodies, reports, Git refs or worktree files are
 written. The CLI always queries GitHub; API injection exists only for unit tests.
@@ -61,6 +61,10 @@ def _text(repo, *args):
         return _git(repo, *args).decode("utf-8").strip()
     except UnicodeError:
         _fail("invalid_git_metadata")
+
+
+def _branch(repo):
+    return _text(repo, "rev-parse", "--abbrev-ref", "HEAD")
 
 
 def _repository(value):
@@ -126,14 +130,14 @@ def _metadata(api, name, private):
         _fail("data_repository_not_private" if private else "code_repository_not_public")
 
 
-def _approved_ci(api, name, commit, run_id):
+def _approved_ci(api, name, commit, branch, run_id):
     run = api(f"repos/{name}/actions/runs/{run_id}")
     if not isinstance(run, dict):
         _fail("ci_run_not_approved")
     attempt = run.get("run_attempt")
     if (run.get("id") != run_id or type(attempt) is not int or attempt < 1
             or run.get("head_sha") != commit or run.get("event") != "push"
-            or run.get("head_branch") not in {"dev", "master"}
+            or run.get("head_branch") != branch
             or run.get("path") != WORKFLOW or run.get("status") != "completed"
             or run.get("conclusion") != "success"
             or any(not isinstance(run.get(key), dict)
@@ -239,20 +243,23 @@ def check(code_repo, data_repo, code_ref, ci_run, *, api=None):
         _fail("repositories_not_separate")
     code_head = _text(code, "rev-parse", "--verify", "HEAD^{commit}")
     data_head = _text(data, "rev-parse", "--verify", "HEAD^{commit}")
+    code_branch, data_branch = _branch(code), _branch(data)
+    if code_branch not in {"dev", "master"} or data_branch not in {"dev", "master"}:
+        _fail("unsupported_branch")
+    if code_branch != data_branch:
+        _fail("repository_branch_mismatch")
     for repo in (code, data):
         if _git(repo, "status", "--porcelain", "--untracked-files=all"):
             _fail("dirty_repository")
     if code_head != code_ref:
         _fail("code_checkout_mismatch")
-    if _text(data, "symbolic-ref", "--quiet", "--short", "HEAD") != "dev":
-        _fail("private_dev_required")
     code_name, data_name = _origin(code), _origin(data)
     if code_name.casefold() == data_name.casefold():
         _fail("repositories_not_separate")
     api = _gh_api if api is None else api
     _metadata(api, code_name, False)
     _metadata(api, data_name, True)
-    attempt = _approved_ci(api, code_name, code_ref, int(ci_run))
+    attempt = _approved_ci(api, code_name, code_ref, code_branch, int(ci_run))
     code_files, data_files = _snapshot(code, code_head), _snapshot(data, data_head)
     if code_files.keys() != data_files.keys():
         _fail("core_path_mismatch")
@@ -264,16 +271,17 @@ def check(code_repo, data_repo, code_ref, ci_run, *, api=None):
     digest = hashlib.sha256(json.dumps(code_files, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     command = ["env", "PYTHONPATH=" + str(data / "project/src"), sys.executable,
                "-B", "-m", "pdm", "doctor", "--repo", str(data)]
-    for repo, head, name in ((code, code_head, code_name), (data, data_head, data_name)):
+    for repo, head, branch, name in ((code, code_head, code_branch, code_name),
+                                     (data, data_head, data_branch, data_name)):
         if (_text(repo, "rev-parse", "--verify", "HEAD^{commit}") != head
+                or _branch(repo) != branch
                 or _git(repo, "status", "--porcelain", "--untracked-files=all")
                 or _origin(repo).casefold() != name.casefold()):
             _fail("repository_changed_during_check")
-    if _text(data, "symbolic-ref", "--quiet", "--short", "HEAD") != "dev":
-        _fail("repository_changed_during_check")
     return {"status": "matched", "code_repository": code_name, "code_commit": code_ref,
+            "code_branch": code_branch,
             "ci_run": int(ci_run), "ci_attempt": attempt, "ci_jobs": 8,
-            "data_repository": data_name, "data_branch": "dev",
+            "data_repository": data_name, "data_branch": data_branch,
             "data_head": data_head, "private_program_commit": program_commit,
             "core_files": len(code_files), "core_sha256": digest,
             "private_doctor_command": shlex.join(command), "writes": 0, "model_calls": 0}

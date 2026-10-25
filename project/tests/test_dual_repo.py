@@ -98,6 +98,7 @@ class DualRepositoryTests(unittest.TestCase):
 
     def test_success_records_separate_commits_without_body_reads_or_writes(self):
         before = {repo: (self.git(repo, "rev-parse", "HEAD"),
+                         self.git(repo, "rev-parse", "--abbrev-ref", "HEAD"),
                          self.git(repo, "status", "--porcelain")) for repo in (self.code, self.data)}
         target = self.data / "project/src/pdm/__init__.py"
         info = target.stat()
@@ -115,6 +116,7 @@ class DualRepositoryTests(unittest.TestCase):
             result = self.check()
         self.assertEqual((self.data / ".git/index").read_bytes(), index_before)
         self.assertEqual(result["status"], "matched")
+        self.assertEqual((result["code_branch"], result["data_branch"]), ("dev", "dev"))
         self.assertEqual(result["core_files"], 4)
         self.assertEqual(result["private_program_commit"], self.program)
         self.assertNotEqual(result["code_commit"], result["private_program_commit"])
@@ -125,7 +127,32 @@ class DualRepositoryTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 4)
         for repo, state in before.items():
             self.assertEqual((self.git(repo, "rev-parse", "HEAD"),
+                              self.git(repo, "rev-parse", "--abbrev-ref", "HEAD"),
                               self.git(repo, "status", "--porcelain")), state)
+
+    def test_master_pair_with_master_ci_succeeds_without_changing_commits(self):
+        before = {repo: self.git(repo, "rev-parse", "HEAD") for repo in (self.code, self.data)}
+        for repo in before:
+            self.git(repo, "branch", "-m", "master")
+        self.responses["repos/fixture/code/actions/runs/123"]["head_branch"] = "master"
+        result = self.check()
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual((result["code_branch"], result["data_branch"]), ("master", "master"))
+        self.assertEqual(result["code_commit"], self.ref)
+        self.assertEqual(result["data_head"], before[self.data])
+        for repo, commit in before.items():
+            self.assertEqual(self.git(repo, "rev-parse", "HEAD"), commit)
+            self.assertEqual(self.git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "master")
+            self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+
+    def test_master_pair_still_rejects_committed_private_core_differences(self):
+        for repo in (self.code, self.data):
+            self.git(repo, "branch", "-m", "master")
+        self.responses["repos/fixture/code/actions/runs/123"]["head_branch"] = "master"
+        self.assertEqual(self.check()["status"], "matched")
+        self.write(self.data, "project/prompts/extract.md", "Different committed production rule.\n")
+        self.save(self.data)
+        self.blocked("core_content_mismatch")
 
     def test_core_byte_mismatch_blocks_even_when_private_change_is_committed(self):
         self.write(self.data, "project/prompts/extract.md", "Different committed rule.\n")
@@ -163,6 +190,29 @@ class DualRepositoryTests(unittest.TestCase):
                     return self.api(endpoint)
 
                 self.blocked("repository_changed_during_check", api=provider)
+
+    def test_branch_changes_during_check_are_rejected_even_when_heads_stay_equal(self):
+        for repos in ((self.code,), (self.data,), (self.code, self.data)):
+            for branch in ("master", "feature", "HEAD"):
+                with self.subTest(repos=[repo.name for repo in repos], branch=branch):
+                    before = {repo: self.git(repo, "rev-parse", "HEAD") for repo in repos}
+                    changed = False
+
+                    def provider(endpoint):
+                        nonlocal changed
+                        if not changed and endpoint.endswith("/runs/123"):
+                            changed = True
+                            for repo in repos:
+                                if branch == "HEAD":
+                                    self.git(repo, "checkout", "-q", "--detach")
+                                else:
+                                    self.git(repo, "checkout", "-q", "-B", branch)
+                                self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before[repo])
+                        return self.api(endpoint)
+
+                    self.blocked("repository_changed_during_check", api=provider)
+                    for repo in repos:
+                        self.git(repo, "checkout", "-q", "dev")
 
     def test_dirty_code_or_private_checkout_blocks(self):
         for repo in (self.code, self.data):
@@ -217,11 +267,45 @@ class DualRepositoryTests(unittest.TestCase):
                 self.blocked("ci_jobs_not_approved")
                 self.responses[key] = original
 
-    def test_checked_out_code_ref_and_private_dev_are_required(self):
+    def test_checked_out_code_ref_and_matching_branches_are_required(self):
         self.blocked("full_code_commit_required", code_ref="HEAD")
         self.blocked("code_checkout_mismatch", code_ref="0" * 40)
         self.git(self.data, "branch", "-m", "master")
-        self.blocked("private_dev_required")
+        self.blocked("repository_branch_mismatch")
+
+    def test_both_directions_of_crossed_checkout_branches_are_rejected(self):
+        for master_repo in (self.code, self.data):
+            with self.subTest(master_repo=master_repo.name):
+                self.git(master_repo, "branch", "-m", "master")
+                self.blocked("repository_branch_mismatch")
+                self.git(master_repo, "branch", "-m", "dev")
+        self.assertEqual(self.requests, [])
+
+    def test_unsupported_and_detached_branches_are_rejected_for_either_checkout(self):
+        for repo in (self.code, self.data):
+            for branch in ("main", "feature", "HEAD"):
+                with self.subTest(repo=repo.name, branch=branch):
+                    if branch == "HEAD":
+                        self.git(repo, "checkout", "-q", "--detach")
+                    else:
+                        self.git(repo, "branch", "-m", branch)
+                    self.blocked("unsupported_branch")
+                    if branch == "HEAD":
+                        self.git(repo, "checkout", "-q", "dev")
+                    else:
+                        self.git(repo, "branch", "-m", "dev")
+        self.assertEqual(self.requests, [])
+
+    def test_ci_branch_must_match_the_pair_even_when_code_sha_is_identical(self):
+        run = self.responses["repos/fixture/code/actions/runs/123"]
+        for branch, ci_branch in (("dev", "master"), ("master", "dev")):
+            with self.subTest(branch=branch, ci_branch=ci_branch):
+                if branch == "master":
+                    for repo in (self.code, self.data):
+                        self.git(repo, "branch", "-m", branch)
+                run["head_branch"] = ci_branch
+                self.assertEqual(run["head_sha"], self.git(self.code, "rev-parse", "HEAD"))
+                self.blocked("ci_run_not_approved")
 
     def test_core_symlink_and_mode_mismatch_are_rejected(self):
         path = self.data / "project/src/pdm/__init__.py"
