@@ -25,6 +25,8 @@ class ProcessingPreflightTests(unittest.TestCase):
         self.repo.mkdir()
         git(self.repo, 'init', '-b', 'dev')
         configure_test_repository(self.repo)
+        git(self.repo, 'config', 'user.name', 'Artificial Preflight Fixture')
+        git(self.repo, 'config', 'user.email', 'preflight@example.invalid')
         git(self.repo, 'commit', '--allow-empty', '-m', 'artificial baseline')
         self.path = capture(self.repo, {'source_key': 'artificial:learning:preflight',
             'source_type': 'note', 'platform': 'artificial', 'original_url': None,
