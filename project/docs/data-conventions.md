@@ -1,10 +1,34 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev21`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev22`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
-来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；历史格式 `0.1`—`0.12` 按各自原契约读取，不批量迁移。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
+来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；已支持格式 `0.1`—`0.13` 按各自 kind 契约读取，不批量迁移；`0.13` 仅用于下述专用已完成提取恢复门禁，普通10/8候选与质量链仍为 `0.12`。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
-current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。extract@9／review@7 还固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
+current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。当前10/8沿用固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
+
+<a id="quality-completed-recovery"></a>
+
+## dev22：已完成返工提取的受控恢复
+
+仅对固定10/8的原生返工提取适用：真实账本在原 pool／授权／operation 下仅有 `extract=completed`，原 failure 为 `candidate_too_large`，尚无 stage、Review 或正式发布。核对原 started、revision_attempt、完整输入、冻结 Skill／规则、原生请求字节、invocation、来源／related及控制；缺失、变化、已启动 Review 或 unknown 均不能恢复，更不能重新提取。
+
+专用证明契约为 `quality-completed-extraction-revalidation-v1`，原预约表示为 `quality-known-completed-reservation-v1`。`response_provenance` 必须明确为 `operator_attested_local_cache_no_prior_git_output_digest`：这是操作者核定并冻结的本地原始返回，不是旧 Git 已保存的输出 SHA，也不是服务端签名或服务端输出摘要。`original_response_sha256` 等新摘要只绑定本次核定材料，不能追认为过去已有的远端证明。
+
+证明固定原 payload／response、原生 request binding、四份缓存文件的独立核定摘要、原调用及账本身份／完整字节摘要、原 failure／started／revision 指针和提取版本。先准备目标新 plan，再生成证明固定 `validation_head`；到候选落盘前若 HEAD、账本或缓存变化即停止。账本和凭据仍在库外，不因恢复复制到公库或假装随 Git 恢复。
+
+恢复沿用原 run／operation，零新 extract，不清旧 failure、queue、counter或 unknown；候选分别记录原提取版本和当前校验版本。候选 stage 仍为 `0.12`，同时写入 `memory/runs/processes/<run_id>/quality-revalidation-guard.md`，kind 为 `quality_revalidation_guard`、schema 为 `0.13`。候选与门禁必须同一原子提交，候选保存门禁路径及摘要；门禁缺失、换版本或不同提交均拒绝。旧程序不认识0.13时须在写入前拒绝。
+
+预约前还检查已知当前核心与历史材料的存储下界；若下界已经超限则零调用停止。该检查不能预测未知模型输出，实际候选落盘时仍核完整核心与总量。仅此恢复契约的Review视图去掉candidate内重复的revision_context、revision_revalidation、revision_resume和quality_revalidation_guard_ref；请求根处的完整语义反馈、当前对象、目标、统计和required_checks保留，原始payload／response及完整历史继续在私库Git中受guard绑定，库外缓存原字节按独立摘要核验。超出模型容量仍按既有分解审核规则处理，不借存储例外提高模型输入上限。
+
+恢复后的实际内容仍须完整独立 Review；只有完整证明通过才可按目标 plan 发布。已有真实 group 的 marker，只有在 plan 完整值、固定 Skill、来源与候选证明均匹配后，新10/8队列才能持久保存 `published`、publication、revision及 adopted 记录。已有 `final_run` 不得换成另一证明；重复采用零写／零模型调用，原失败队列与计数保持。旧9/7仅返回 effective published 的历史行为不变。
+
+<a id="candidate-storage-limits"></a>
+
+### 候选历史存储与模型输入分开限额
+
+仅固定10/8、schema0.12且路径／run一致的 candidate，可使用最多 **4 MiB** 的完整存储包；剔除 `revision_context`、`revision_revalidation`、`revision_resume` 三类明确历史字段后的当前计算核心仍须不超过 **1 MiB**。该例外只承载可核验历史，不扩大事实正文或赋予发布权限；完整绑定及历史证明照常核验。
+
+其他受管Git文件仍最多1 MiB，来源输入最多1 MiB，完整模型请求仍最多256000字节，单次多文件事务仍最多8 MiB。不能把大正文移进历史字段、改路径／kind／Skill或只改版本号来获得例外；总量、核心大小和实际读写均检查，超限保留原记录并停止。
 
 ## dev21：质量完整性与反馈接续（schema `0.12`）
 
@@ -18,11 +42,11 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 
 ## dev20：显式原样复用（schema `0.11`）
 
-新默认extract@10／review@8使用 `reuse_refs` 输出合同。引用项恰含 `path`、`content_version`；路径只允许本次实际提供且已验证发布依据的related record／topic，版本须与该固定对象完全一致。引用本身不携带可覆盖旧事实的正文，也不能增加来源权限。
+显式 `reuse_refs` 输出由9/7引入，当前默认10/8沿用该结构并增加完整性检查。引用项恰含 `path`、`content_version`；路径只允许本次实际提供且已验证发布依据的related record／topic，版本须与该固定对象完全一致。引用本身不携带可覆盖旧事实的正文，也不能增加来源权限。
 
 新建／变化项继续输出全文；objects与wikis的原始数组可因明确引用而为空，普通wiki允许为空值，但物化后的完整输出仍须满足原记录数量、Wiki数量及精确成员版本。旧合同不接受新增键，也不能将缺省或空输出推断为reuse。重复引用、未知路径、错误版本、全文冲突及变化记录配旧Wiki均拒绝。
 
-原始模型JSON和调用输出摘要保持，物化对象及其关联解析进入固定候选并可从Git历史重新验证。quality的目标去向、统计和时态仍核完整物化正文；Review读取完整候选，不因reuse减少审核义务。新合同运行族使用 `0.11`，旧8/6质量链保持 `0.10`；来源0.1、正式对象0.2、group0.6及audit账本保持原格式。
+原始模型JSON和调用输出摘要保持，物化对象及其关联解析进入固定候选并可从Git历史重新验证。quality的目标去向、统计和时态仍核完整物化正文；Review读取完整候选，不因reuse减少审核义务。该9/7合同运行族使用 `0.11`，后继10/8使用 `0.12`，旧8/6质量链保持 `0.10`；来源0.1、正式对象0.2、group0.6及audit账本保持原格式。
 
 ## 无损模型传输契约
 
@@ -92,7 +116,7 @@ M1 的描述性概览可包含有记录天数及符合明确可比条件的分�
 
 新质量材料与 Skill 绑定共同进入候选、输入去重和审核证明，正式发布重验实际加载材料、覆盖处置、统计计算、时态依据以及最终候选的精确版本。单次和分解 Review 均消费同一固定规范及相应完整范围；一项必需检查失败或尚未完成，相关依赖组不得发布。能力／加载／容量问题记录为执行阻塞，不能伪装成内容审核通过或要求用户决定的知识问题。
 
-Skill bundle摘要进入processing key；工程版本绑定包含实际Skill资产，规则变更不能借旧Review发布。重试计数和未知调用身份继续保留，不因换Skill、run或队列清零。新9/7合同的候选／Review／manifest／receipt／failure、queue／attempt、日程事件和分解proof为0.11，旧8/6质量链仍为0.10；source0.1、formal0.2、group0.6及旧started／revision_attempt与稳定counter保持原格式；新9/7的首次预约也使用0.11，不能让旧writer在模型调用期间继续写新合同工作区。普通返工继承bundle，分解恢复核固定单元；历史0.9 operator的`resume-unstarted-revision`与`revalidate-completed-extraction`缺少原Skill请求证明，对新质量链明确报`skill_quality_recovery_attestation_required`。旧候选按原schema读回，不追写Skill证明，不自动重跑旧知识；兼容与拒写按公开验收定义检查，实际结果另行记录。
+Skill bundle摘要进入processing key；工程版本绑定包含实际Skill资产，规则变更不能借旧Review发布。重试计数和未知调用身份继续保留，不因换Skill、run或队列清零。当前10/8的候选／Review／manifest／receipt／failure、queue／attempt、日程事件和分解proof为0.12，旧9/7为0.11、旧8/6质量链为0.10；source0.1、formal0.2、group0.6及旧started／revision_attempt保持原格式，稳定counter身份与既有条目不清零；当前10/8首次预约使用0.12、旧9/7使用0.11，不能让旧writer在模型调用期间继续写新合同工作区。普通返工继承bundle，分解恢复核固定单元；历史0.9 operator的`resume-unstarted-revision`与`revalidate-completed-extraction`缺少原Skill请求证明，对新质量链明确报`skill_quality_recovery_attestation_required`。旧候选按原schema读回，不追写Skill证明，不自动重跑旧知识；兼容与拒写按公开验收定义检查，实际结果另行记录。
 
 ## dev11：auto与分解Review实际消费（schema `0.8`）
 
@@ -138,7 +162,7 @@ auto先以实际review.md正文、真实JSON序列化及连接文本计算完整
 
 ## dev10：确认登记与每日生产契约（schema `0.7`）
 
-本节定义0.7执行状态；后继普通分解链为0.8、显式返工链为0.9、旧质量链为0.10，新9/7合同另用0.11，旧0.1—0.6文件不批量迁移。原文及采集仍0.1、正式record／Wiki仍0.2、无continuation_context的普通batch链仍0.6、所有group wrapper／清单仍0.6，audit账本仍为库外独立schema2。新0.7用于下述扩大registry、登记marker、带continuation_context的普通加工链、新production queue／attempt及production-v1日程事件；不能据程序版本号改写旧schema。
+本节定义0.7执行状态；后继普通分解链为0.8、显式返工链为0.9、旧质量链为0.10，9/7合同另用0.11、当前10/8使用0.12、专用恢复门禁为0.13；旧0.1—0.6文件不批量迁移。原文及采集仍0.1、正式record／Wiki仍0.2、无continuation_context的普通batch链仍0.6、所有group wrapper／清单仍0.6，audit账本仍为库外独立schema2。新0.7用于下述扩大registry、登记marker、带continuation_context的普通加工链、新production queue／attempt及production-v1日程事件；不能据程序版本号改写旧schema。
 
 ### 扩大registry与持久登记结果
 
@@ -212,7 +236,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev20支持 `0.1`—`0.11`；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
+Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev22支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 

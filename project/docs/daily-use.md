@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文描述 `0.2.0.dev21` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本，再把模块加载位置和 `--repo` 一起指向私库。
+本文描述 `0.2.0.dev22` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本，再把模块加载位置和 `--repo` 一起指向私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -48,7 +48,7 @@ python -m pdm capture --repo . --input "$source_json" \
 
 ## 人工触发持久生产队列
 
-新任务默认使用 `knowledge-extract@10` 与 `knowledge-review@8`。程序准备资料清单、可复算描述统计和版本绑定，模型完成提取组织与独立语义审核；规则加载成功不能代替内容质量检查。未变的已提供旧对象可显式返回 `reuse_refs`，程序物化后仍做完整审核，不能用空输出省略旧记录。新合同使用0.11，旧任务沿用原Skill与格式，不通过重命名队列清空失败或未知调用。
+新任务默认使用 `knowledge-extract@10` 与 `knowledge-review@8`。程序准备资料清单、可复算描述统计和版本绑定，模型完成提取组织与独立语义审核；规则加载成功不能代替内容质量检查。未变的已提供旧对象可显式返回 `reuse_refs`，程序物化后仍做完整审核，不能用空输出省略旧记录。当前10/8合同使用0.12，专用已完成提取恢复另写0.13门禁；旧任务沿用原Skill与格式，不通过重命名队列清空失败或未知调用。
 
 ```bash
 python -m pdm production prepare --repo . --id "$queue_id" \
@@ -61,6 +61,8 @@ python -m pdm production status --repo . --id "$queue_id"
 多来源重复 `--source`；需要旧知识时，准备阶段通过 `--allowed-source` 和 `--allowed-run` 明确全部允许的依赖。程序保存分批计划、各批候选与审核、最终依赖组证明和多主题原子发布结果。普通完整 Review 请求超过 256000 字节时，`auto` 按需转为 object／coverage／global 分解审核；完整必要语义仍超容量时保持 `blocked_capacity`，不能截断材料后宣称完成。
 
 所有必要独立审核通过后才正式发布。已完成节点按原身份复验，未知先对账；首次执行后最多三次失败重试，跨日、重启或改队列名不清零。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
+
+已完成的10/8返工提取若仅因候选存储失败，不重新extract。先准备目标plan，再由操作者核原生completed账本、原始缓存及完整请求并固定validation_head，按[专用步骤](implementation-details.md#quality-completed-recovery-execution)恢复；unknown不适用。恢复仍需真正独立Review和完整发布证明，不能把候选或缓存核验当作完成。
 
 ## 单次加工与显式发布
 

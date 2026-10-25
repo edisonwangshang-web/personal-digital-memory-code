@@ -586,6 +586,10 @@ def _verify_queue_publication(git, state, publication):
         candidate, _, _ = _read_reviewed(git, proof["run_id"], historical=True)
         if candidate.get("skill_bundle") != state["request"].get("skill_bundle"):
             _fail("queue_publication_skill_mismatch")
+    if (_feedback_enabled(state["request"].get("skill_bundle")) and state["final_run"] is not None
+            and {proof["run_id"] for proof in manifest["proofs"]} != {state["final_run"]}):
+        _fail("queue_publication_run_mismatch")
+    return manifest
 
 
 def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=False, execution_guard=None):
@@ -629,13 +633,37 @@ def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=
     from .pipeline import _committed, _load, _hash as pipeline_hash
     marker_path = _marker_path(state["plan"])
     if git.path(marker_path).is_file():
+        marker_head = git.check()
         marker = _load(_committed(git, marker_path), "batch_group_inputs", "0.6")
         if marker.get("plan_id") != state["plan"]["plan_id"] or marker.get("plan_sha256") != pipeline_hash(state["plan"]):
             _fail("batch_group_marker_mismatch")
         publication = verify_group_publication(repo, marker["run_id"], source_paths=state["plan"]["source_paths"])
         # A plan's prior publication is reusable only under the same frozen
         # quality rules. A legacy passed Review is not a quality-mode Review.
-        _verify_queue_publication(git, state, publication)
+        manifest = _verify_queue_publication(git, state, publication)
+        if _feedback_enabled(state["request"].get("skill_bundle")):
+            # The marker proves an independently completed operator group for
+            # this exact plan/rules. Persist the queue's adoption, never rewrite
+            # failed attempts or infer a pass from a marker alone.
+            reviewed = sorted(proof["run_id"] for proof in manifest["proofs"])
+            adopted = deepcopy(state)
+            adopted.update(status="published", publication=publication,
+                           revision=state["revision"] + 1,
+                           last_result={"status": "published", "adopted": True,
+                                        "publication_run_id": publication["run_id"],
+                                        "reviewed_run_ids": reviewed,
+                                        "attempted_calls": 0, "model_calls": 0})
+            if len(reviewed) == 1:
+                adopted.update(final_run=reviewed[0], active_run_id=reviewed[0])
+            with git.lock():
+                head = git.check(marker_head)
+                if _read(git, path, "production_queue") != state:
+                    _fail("queue_state_changed")
+                _save(git, path, adopted, "production_queue", head)
+            _checkpoint(execution_guard, repo, adopted)
+            return {**production_status(repo, queue_id), "queue_status": "published",
+                    "reused": True, "adopted": True, "steps": 0,
+                    "external_wakeup": "not_provisioned"}
         _checkpoint(execution_guard, repo, state)
         return {**production_status(repo, queue_id), "queue_status": state["status"],
                 "status": "published", "publication": publication, "reused": True, "steps": 0,

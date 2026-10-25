@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev21`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev22`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
 
 新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
 
@@ -14,6 +14,19 @@
 - [Roadmap](roadmap.md)管理阶段成果、执行顺序、进度与通过证据；本页不重复阶段表。
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。公开工程检查不替代私库不同提交或真实资料验收。双仓当前只读核对核心文件和准确公开 CI，实际加载私库现有工程副本，不自动同步或迁移，见[双仓使用说明](dual-repository.md)。
+
+<a id="quality-completed-recovery-execution"></a>
+
+## dev22 已完成提取恢复与发布接续
+
+1. 确认是原生10/8返工提取已完成、只因候选存储过大失败，原 Review 尚未启动。原始返回和已消费调用保留，不再 extract，不把 unknown 当作已完成。
+2. 先准备目标新 plan，再核定原始缓存和原生请求，生成[专用恢复证明](data-conventions.md#quality-completed-recovery)并固定 `validation_head`。证明如实标为操作者核定的本地返回；不能宣称原 failure 或服务端已保存输出摘要。
+3. 核原 pool／授权／operation、completed invocation与payload、账本完整字节、四份缓存独立摘要、原 source／related／controls／Skill／规则和失败历史。冻结后出现 Git、账本或缓存变化时停止。
+4. 预约前先核已经确定的当前核心与历史材料存储下界；这不预测未知模型输出，实际落盘仍完整核验。使用当前 validator 校验原始结构化返回及全部质量义务，分别记录原提取版本与当前校验版本。只为合格候选承载完整历史，不更改原 JSON；完整包／当前核心分别核[4 MiB／1 MiB](data-conventions.md#candidate-storage-limits)，其余限额保持。
+5. 将 schema0.12 stage 与 schema0.13恢复门禁放在同一原子事务。原失败、预约和计数不改；不能先落新候选再补兼容门禁。
+6. 在原调用身份下执行真正独立 Review。仅此恢复契约去掉candidate内四键重复历史／程序provenance，根处完整语义反馈、当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；实际请求仍核256000字节，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
+7. 按目标 plan 发布完整合格 group，再由新10/8生产队列核 marker、完整证明、相同 plan／bundle与已固定候选，CAS持久采用发布。重复采用不调用模型、不写提交，也不把旧失败counter改成passed。尚无真实group则不采用。
+8. 私库推送、远程完整恢复与模型读取各核实际提交和证据；本节流程存在不等于已取得真实通过结果。
 
 ## dev21 受影响环节
 
@@ -67,7 +80,7 @@ ChatGPT 是交互入口，模型 API 不自动提供对应聊天应用的历史�
 
 加载器只接受已注册、角色匹配且摘要一致的版本，拒绝未知引用、外部路径和依赖变化。版本化文件位于 `project/skills/knowledge-extract/<version>/`、`knowledge-review/<version>/`，共同依赖位于 `project/skills/shared/`。当前两个默认角色共同引用 `knowledge-context-v1`。`skill_support.py` 核不可变 manifest 与实际内容；`model_calls.py` 展开冻结规则并计算真实字节和摘要；`knowledge_quality.py` 准备并核验质量材料；pipeline、production、scheduler 及分解 Review 消费同一绑定。
 
-新9/7合同的候选、Review、manifest／receipt、queue／attempt、日程事件和分解 proof 使用 `0.11`，旧8/6质量链保持 `0.10`；来源／采集 `0.1`、正式 record／topic `0.2`、group wrapper `0.6` 保持。分解审核及其 proof 的历史契约为 `0.8`，显式返工为 `0.9`，统一 registry 保留 `0.4`／`0.7`。历史格式按原契约读取，不回填“已加载 Skill”，稳定计数与预约身份不迁移。
+当前10/8合同的候选、Review、manifest／receipt、queue／attempt、日程事件和分解 proof 使用 `0.12`，旧9/7为 `0.11`、旧8/6质量链为 `0.10`；专用已完成提取恢复另写 `0.13` 门禁，来源／采集 `0.1`、正式 record／topic `0.2`、group wrapper `0.6` 保持。分解审核及其 proof 的历史契约为 `0.8`，显式返工为 `0.9`，统一 registry 保留 `0.4`／`0.7`。历史格式按原契约读取，不回填“已加载 Skill”，稳定计数与预约身份不迁移。
 
 ### 加工与审核
 

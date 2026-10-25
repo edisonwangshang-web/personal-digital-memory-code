@@ -2,7 +2,17 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前：0.2.0.dev21
+## 当前：0.2.0.dev22
+
+默认extract@10／review@8、普通质量链schema0.12、原文0.1、正式知识0.2、group0.6及既有提取字段保持。专用`quality-completed-extraction-revalidation-v1`只恢复原生返工提取completed、因candidate_too_large且无stage／Review的已知输出；新证明明确是操作者核定本地缓存，不虚构旧Git或服务端输出摘要。零新extract，原失败和调用历史保留，完整独立Review仍必需。
+
+候选当前计算核心仍≤1 MiB，仅revision_context／revision_revalidation／revision_resume历史使完整包可至4 MiB；其他受管文件1 MiB、模型请求256000字节、事务8 MiB不变。预约前核已知保存下界，最终输出仍完整检查。专用恢复stage0.12与schema0.13 guard原子提交，旧writer不支持guard即拒写；不把普通候选升级为0.13。
+
+先准备新plan，再固定validation_head与原始材料证明。恢复Review只去candidate内四键重复历史／程序provenance，根处完整语义反馈、当前对象、统计、目标及required_checks保留；原始payload／response及完整历史在私库Git受guard绑定，库外缓存按独立摘要核验。真实完整group匹配plan／bundle／候选后，新10/8队列持久采用published，重复零写／零模型，旧失败queue／counter不改。旧9/7的effective-only采用语义保留。
+
+本版不修改任何Skill字节或新增加工阶段；准确CI、真实质量和私库恢复仍各取实际证据，不据包版本宣称通过或M1完成。字段、执行及反例见[数据契约](data-conventions.md#quality-completed-recovery)、[执行步骤](implementation-details.md#quality-completed-recovery-execution)和[验收](scenarios-and-acceptance.md#quality-completed-recovery-acceptance)。
+
+## 历史：0.2.0.dev21
 
 新任务默认 extract@10／review@8，加工族使用 schema0.12。精确复用旧知识时，从已核验发布证明提取仍适用的统计义务，模型显式提交，程序在独立Review前核完整性；不补造声明、不强制使用全部统计。
 

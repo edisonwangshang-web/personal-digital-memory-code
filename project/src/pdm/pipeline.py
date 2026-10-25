@@ -52,7 +52,10 @@ def _parse_saved(value):
 
 
 def _load(value, kind, schema_version=None):
-    if len(value) > MAX_SAVED_BYTES:
+    if kind == "candidate":
+        from .storage_limits import validate_candidate_bytes
+        validate_candidate_bytes(value)
+    elif len(value) > MAX_SAVED_BYTES:
         _error()
     metadata, body = _parse_saved(value)
     try:
@@ -969,6 +972,19 @@ def _assert_revalidation_operation(candidate, model_call):
         _error("completed_extraction_not_known_completed")
 
 
+def _completed_extraction_module(context):
+    """Keep legacy and quality recovery authority in separate contracts."""
+    from . import known_extraction, quality_completed_extraction
+    contract = context.get("contract") if isinstance(context, dict) else None
+    if contract is None and isinstance(context, dict):
+        contract = context.get("attestation", {}).get("contract")
+    if contract == quality_completed_extraction.CONTRACT:
+        return quality_completed_extraction
+    if contract == known_extraction.CONTRACT:
+        return known_extraction
+    _error("invalid_extraction_revalidation")
+
+
 def _actual_calls(model_call):
     adapter = _budget_adapter(model_call)
     return adapter.observed_started_count if adapter is not None else None
@@ -1175,6 +1191,15 @@ def _review_payload(candidate, payload):
                                                "batch_context", "related", "merge_inputs", "extraction_output"}}
         request["candidate"]["extraction_output"] = {
             "quality": copy.deepcopy(candidate["extraction_output"]["quality"])}
+        if (candidate.get("revision_revalidation", {}).get("contract")
+                == "quality-completed-extraction-revalidation-v1"):
+            # This new recovery contract retains the original cache and full
+            # history in Git. The semantic feedback is already complete at the
+            # request root; its duplicate envelope and program-only recovery
+            # provenance are not additional facts for the model to review.
+            for key in ("revision_context", "revision_revalidation", "revision_resume",
+                        "quality_revalidation_guard_ref"):
+                request["candidate"].pop(key, None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
     return request
 
@@ -1405,8 +1430,13 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             skill_bundle = copy.deepcopy(original["skill_bundle"])
     if skill_bundle is not None:
         skill_bundle = _validated_skill_bundle(skill_bundle)
-        if _resume_unstarted is not None or _revalidate_completed is not None:
+        if _resume_unstarted is not None:
             _error("skill_quality_recovery_attestation_required")
+        if _revalidate_completed is not None:
+            from .quality_completed_extraction import CONTRACT
+            if (not _feedback_quality_enabled(skill_bundle)
+                    or _revalidate_completed.get("attestation", {}).get("contract") != CONTRACT):
+                _error("skill_quality_recovery_attestation_required")
     revalidation_call_baseline = _actual_calls(model_call) if _revalidate_completed is not None else None
     def current_call_count():
         observed = _actual_calls(model_call)
@@ -1456,8 +1486,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     reservation=_resume_unstarted["reservation"],
                     expected_reservation_sha256=_resume_unstarted["expected_reservation_sha256"])
             else:
-                from .known_extraction import verify_completed_extraction
-                _revalidate_completed = verify_completed_extraction(git, run_id, model_call=model_call,
+                recovery = _completed_extraction_module(_revalidate_completed)
+                _revalidate_completed = recovery.verify_completed_extraction(git, run_id, model_call=model_call,
                     source_paths=source_paths, related_runs=related_runs,
                     attestation=_revalidate_completed["attestation"],
                     expected_attestation_sha256=_revalidate_completed["expected_attestation_sha256"],
@@ -1536,10 +1566,25 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if _preflight_only or _feedback_quality_enabled(skill_bundle):
             from .model_calls import MAX_INPUT_BYTES
             admission = _model_request_binding("extract", payload)
+            storage_blocked = False
+            if _feedback_quality_enabled(skill_bundle):
+                from .storage_limits import (LEGACY_FILE_BYTES, MAX_CANDIDATE_BYTES,
+                                             candidate_storage_sizes)
+                # A lower bound from known immutable material, before any
+                # reservation or model call. The actual output still receives
+                # the complete bounded storage check below.
+                known = {"run_id": run_id, "base_head": head, **source_fields,
+                         "versions": versions, "related": related, **context_fields}
+                size = candidate_storage_sizes(known)
+                storage_blocked = (size["core_bytes"] > LEGACY_FILE_BYTES
+                                   or size["total_bytes"] > MAX_CANDIDATE_BYTES)
             if _preflight_only:
-                return {"status": "ready" if admission["bytes"] <= MAX_INPUT_BYTES else "blocked_capacity",
+                return {"status": "ready" if admission["bytes"] <= MAX_INPUT_BYTES and not storage_blocked else "blocked_capacity",
                         "request_bytes": admission["bytes"], "request_sha256": admission["sha256"],
-                        "head": head, "model_calls": 0, "attempted_calls": 0}
+                        "head": head, "model_calls": 0, "attempted_calls": 0,
+                        **({"error": "candidate_too_large"} if storage_blocked else {})}
+            if storage_blocked:
+                _error("candidate_too_large")
             if admission["bytes"] > MAX_INPUT_BYTES:
                 _error("input_limit")
         if _resume_unstarted is None and _revalidate_completed is None:
@@ -1645,14 +1690,31 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         candidate = {"run_id": run_id, "base_head": head, **source_fields, "versions": versions,
                      "related": related, "objects": objects, "extraction": extraction, "extraction_output": response["output"], "created_at": created,
                      **context_fields}
+        stage_files = {}
+        if _revalidate_completed is not None:
+            from .quality_completed_extraction import CONTRACT, RESPONSE_PROVENANCE, SCHEMA
+            if _revalidate_completed.get("contract") == CONTRACT:
+                guard_path = _run_path(run_id, "quality-revalidation-guard")
+                attestation = _revalidate_completed["attestation"]
+                guard = {"run_id": run_id, "contract": CONTRACT, "response_provenance": RESPONSE_PROVENANCE,
+                    "revalidation_context_sha256": _hash(_revalidate_completed),
+                    "original_failure": attestation["failure"],
+                    "original_call": {"invocation_id": extraction["invocation_id"],
+                                      "payload_sha256": attestation["original_payload_sha256"]}}
+                stage_files[guard_path] = _document("quality_revalidation_guard", guard, SCHEMA)
+                candidate["quality_revalidation_guard_ref"] = {"path": guard_path, "sha256": _hash(stage_files[guard_path])}
         candidate["binding"] = _candidate_binding(candidate)
         stage_path = _stage_path(run_id)
         stage_bytes = _document("candidate", candidate, schema_version)
-        if len(stage_bytes) > 1024 * 1024:
+        from .storage_limits import validate_file_bytes
+        try:
+            validate_file_bytes(stage_path, stage_bytes)
+        except CaptureError:
             return _failure(git, run_id, "extract", "candidate_too_large", head, _failure_call(None, response), schema_version,
                             current_call_count(),
                             failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
-        head = git.write_files({stage_path: stage_bytes}, head, "process: preserve fixed candidate")
+        stage_files[stage_path] = stage_bytes
+        head = git.write_files(stage_files, head, "process: preserve fixed candidate")
         stage_commit = head
         try:
             _assert_substantive_revision(candidate)
@@ -1841,12 +1903,16 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
                 "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"])}
                 or _last_commit(git, git.head(), pointer_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])):
             _error("revision_attempt_mismatch")
-        if "revision_resume" in candidate:
+        quality_revalidation = (candidate.get("revision_revalidation", {}).get("contract")
+                                == "quality-completed-extraction-revalidation-v1")
+        if "revision_resume" in candidate and not quality_revalidation:
             from .revision_resume import verify_revision_resume
             verify_revision_resume(git, candidate, historical=historical)
         if "revision_revalidation" in candidate:
-            from .known_extraction import verify_revalidated_extraction
-            verify_revalidated_extraction(git, candidate, historical=historical)
+            recovery = _completed_extraction_module(candidate["revision_revalidation"])
+            recovery.verify_revalidated_extraction(git, candidate, historical=historical)
+        elif "quality_revalidation_guard_ref" in candidate:
+            _error("invalid_extraction_revalidation")
         old = candidate["revision_context"]["candidate"]
         if (candidate.get("batch_context", {}).get("source_ranges") != old.get("batch_context", {}).get("source_ranges") or candidate.get("source_views") != old.get("source_views")
                 or candidate.get("merge_inputs", []) != old.get("merge_inputs", [])
@@ -1967,6 +2033,9 @@ def _computation_snapshots(git, candidate, visited=()):
     if run_id in visited or len(visited) >= 16:
         _error("publication_dependency_cycle")
     entries = []
+    if "revision_revalidation" in candidate:
+        recovery = _completed_extraction_module(candidate["revision_revalidation"])
+        entries.extend(recovery.verify_revalidated_extraction(git, candidate, historical=True))
     for name, path in (("stage", _stage_path(run_id)), ("review", _run_path(run_id, "review")),
                        ("failure", _run_path(run_id, "failure")), ("started", _run_path(run_id, "started")),
                        ("revalidation-failure", _run_path(run_id, "revalidation-failure")),

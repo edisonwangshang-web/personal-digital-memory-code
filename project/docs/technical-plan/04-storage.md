@@ -4,7 +4,7 @@
 
 本层以 Markdown、开放结构化文件和私有 Git 保存长期资料、知识及执行状态。私有远程仓库作为同步依据，本地副本用于读取和恢复；临时工作区不承担唯一存储职责，第一版不建设专门索引。公开工程仓库保存通用方案、程序、Skill、人工测试与 CI，真实原文、知识、审核、模型返回及运行绑定保留在独立私有工作区。
 
-当前程序为 `0.2.0.dev21`，新任务使用 `knowledge-extract@9`／`knowledge-review@7`。来源／采集 schema `0.1`、正式知识 `0.2` 保持，新9/7合同运行使用 `0.11`，旧Skill质量链仍使用 `0.10`；历史 registry、group、普通与显式返工链按其原 schema 核验，不把新格式升级当作重加工或资料迁移。具体版本在[数据规范](../data-conventions.md)维护。
+当前程序为 `0.2.0.dev22`，新任务使用 `knowledge-extract@10`／`knowledge-review@8`。来源／采集 schema `0.1`、正式知识 `0.2` 保持，10/8合同运行使用 `0.12`，旧9/7为 `0.11`、更早质量链为 `0.10`；专用已完成提取恢复另有 `0.13` 门禁，不把普通候选升级为0.13。历史 registry、group、普通与显式返工链按其原 schema 核验，不把新格式升级当作重加工或资料迁移。具体版本在[数据规范](../data-conventions.md)维护。
 
 ## 本层技术架构
 
@@ -51,3 +51,9 @@ dev 与 production 使用明确环境绑定、数据根和远程范围。clone �
 回退前暂停正式发布并核对未知调用、远程结果和数据兼容性。保留完整候选、Review、proof、registry、queue、audit、控制、计数及其祖先；旧程序不支持实际 schema 时必须写前拒绝。不能删 marker／event、改 schema、清零计数、重写旧运行或整库 reset 来恢复写入。
 
 从全新副本恢复来源、记录和主题，读回精确历史原文，以及目标云端持久恢复、两轮真实触发与第二模型读取，均按[场景与验收](../scenarios-and-acceptance.md)分别核验。人工加工和本地恢复检查不表示 M1 整体通过，进度见 [Roadmap](../roadmap.md)。
+
+## 候选历史包的有限存储例外
+
+当前10/8、schema0.12候选仅可为完整历史使用最多4 MiB存储包；移除revision_context、revision_revalidation、revision_resume后的当前核心仍最多1 MiB，其余文件1 MiB、模型请求256000字节、多文件事务8 MiB保持。路径、run、固定角色与完整证明都要核验，不能把正文挪入历史绕过限制，见[统一限额](../data-conventions.md#candidate-storage-limits)。
+
+专用已完成提取恢复的stage与schema0.13 guard须同一原子提交，使不支持门禁的旧writer拒写。旧failure、queue、counter和原始返回不覆盖；本地缓存的操作者核定证明与过去Git／服务端已存在的输出摘要明确区分。恢复后仍须独立Review和正式发布，候选不是正式知识。

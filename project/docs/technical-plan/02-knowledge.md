@@ -4,7 +4,7 @@
 
 ## 当前范围
 
-本层负责理解、归类、审核和回答，第一版聚焦知识库。当前程序为 `0.2.0.dev21`，新任务使用 `knowledge-extract@9`／`knowledge-review@7`，显式引用共同质量规范和 `knowledge-context-v1`，通用于健康&运动、工作事业、学习&能力提升。模型输出交第三层保存或发布，不直接修改正式知识。
+本层负责理解、归类、审核和回答，第一版聚焦知识库。当前程序为 `0.2.0.dev22`，新任务使用 `knowledge-extract@10`／`knowledge-review@8`，显式引用共同质量规范和 `knowledge-context-v1`，通用于健康&运动、工作事业、学习&能力提升。模型输出交第三层保存或发布，不直接修改正式知识。
 
 人工触发后的受控分类加工、独立审核、完整 proof 发布及限定读取已有工程实现；current 已支持按正式 record／topic 路径选择，主题自动带上精确版本的 record 依赖，`compact_sources` 可去掉重复原文副本。程序先核对发布、来源、控制和版本，再把必要证据交给模型；选择齐全与是否读遍全部资料分别报告。读取不改变原文、正式知识或来源权限，命令见[日常使用](../daily-use.md#selected-knowledge-reading)。
 
@@ -268,10 +268,12 @@ flowchart TD
 
 新候选有稳定返工身份、独立内容版本和完整独立 Review，只有质量映射变化也可属实质修订；完全无变化在 Review 前停止。来源或 related 范围不符、原链被改、控制变化、未知或未完成、生产预约上下文不符均拒绝。换规则、run、queue 或合同不清次数。普通返工和分解恢复继承固定 bundle；规则变化后旧审核不能充当新质量证明。
 
-以下两项是历史 `0.9` 专用 operator 恢复边界，当前对质量链 `0.10`／`0.11` 返回 `skill_quality_recovery_attestation_required`，缺专用证明不能降级或借旧入口调用：
+以下两项是历史 `0.9` 专用 operator 恢复边界，对质量链 `0.10`／`0.11`／`0.12` 仍返回 `skill_quality_recovery_attestation_required`，缺专用证明不能降级或借旧入口调用：
 
 - `resume-unstarted-revision` 只核确定未启动的原预约：原 run／operation、真实账本字节与经操作者核定的摘要一致，仅空调用状态允许，started／unknown／completed 均拒绝。模型前保持原 Git HEAD，不另写新预约；完成后把原预约及实际提取审计绑定新候选。私有账本不进入 Git，历史恢复依赖持久证明，不能重置尝试或另获调用身份。
 - `revalidate-completed-extraction` 只复验已完成原始结构化返回：核 completed 账本、原 JSON／完整 payload、failure、reservation 和可信 attestation，零新 extract，原返回和 failure 不改。新候选分别绑定原提取版本及当前 validator／Review 计划，所有实际内容重新独立审核。每对象引用容量与生产来源约束对齐，不放宽逐条原文或完整载荷检查，不虚构旧 Git 证明。
+
+dev22 的10/8已完成返工提取使用单独的[恢复证明契约](../data-conventions.md#quality-completed-recovery)，不借上述历史0.9证明降级。仅允许原生 completed 提取、原 Review 未启动且原 failure 为 `candidate_too_large`；原返回的来源如实标为操作者核定本地缓存，不虚构旧 Git 或服务端输出摘要。恢复不再提取，保留全部质量义务和真正独立 Review；模型请求上限与 Skill 字节不变。存储历史例外及原子门禁由第三／四层检查，不能当作内容免审。
 
 带显式预算身份的历史恢复入口仍精确核原 pool／auth／operation 和完整预算身份，不能换池重发未知。原模型返回、私有缓存、拼装提示词、认证、问答答案及调用账本不因恢复而进入公开工程；必要结构化证明仅按私有数据规范保存。
 

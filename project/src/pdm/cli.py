@@ -141,7 +141,7 @@ def parser() -> argparse.ArgumentParser:
     revision_resume.add_argument("--review-strategy", choices=("legacy-v1", "auto", "decomposed-v1"), default="decomposed-v1")
     _reading_arguments(revision_resume)
     _budget_arguments(revision_resume)
-    revalidate = commands.add_parser("revalidate-completed-extraction", help="历史0.9人工复验：原样核已完成提取并独立Review；当前不接收新Skill质量任务")
+    revalidate = commands.add_parser("revalidate-completed-extraction", help="人工核对已完成提取及原始缓存后独立Review；支持历史0.9和明确10/8恢复合同，禁止重放未知调用")
     revalidate.add_argument("--repo", type=Path, required=True)
     revalidate.add_argument("--run", required=True)
     revalidate.add_argument("--source", action="append", required=True)

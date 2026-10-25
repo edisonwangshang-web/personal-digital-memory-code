@@ -100,6 +100,19 @@ class ProcessingPreflightTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 'preflight_recovery_required')
         self.assertEqual(before, (self.snapshot(), journal.read_bytes()))
 
+    def test_known_storage_overflow_is_blocked_before_reservation_or_call(self):
+        before = self.snapshot()
+        with patch('pdm.storage_limits.MAX_CANDIDATE_BYTES', 64):
+            checked = preflight_processing(self.repo, [self.path], related_runs=[], skill_bundle=self.bundle)
+            self.assertEqual((checked['status'], checked['error']), ('blocked_capacity', 'candidate_too_large'))
+            with self.assertRaises(CaptureError) as raised:
+                process_sources(self.repo, [self.path], related_runs=[], skill_bundle=self.bundle,
+                                model_call=self.adapter)
+        self.assertEqual(raised.exception.code, 'candidate_too_large')
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual(self.roles, [])
+        self.assertEqual(self.ledger.snapshot()['started_calls'], 0)
+
     def test_preflight_cannot_accept_hidden_transport_or_resume_options(self):
         before = self.snapshot()
         for options in ({'model_call': self.adapter}, {'_preflight_only': False}, {'_resume_unstarted': {}}):

@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev21`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev22`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
 
 ## 当前实现与双仓边界
 
@@ -26,7 +26,7 @@ M1 整体尚未验收。目标 GPT 云端任务拟按 `Asia/Shanghai` 每日 22:
 
 现行质量路径为：固定来源及 Skill 引用 → 程序准备资料清单与可复算统计 → 模型按加工 Skill 提取分类和组织知识 → 程序校验覆盖、数字、引用、时间和版本 → 独立模型按审核 Skill 逐项复查 → 完整证明与条件发布。Skill、必要依赖或检查失败时保留原因，不退回普通提示词绕过发布门禁。
 
-增量输出在新9/7合同下支持 `reuse_refs`：模型只引用实际提供的旧路径和精确版本，程序核验后原样物化，变化项仍返回全文。物化后的完整候选继续接受相同质量检查和独立Review，不能把引用当成免审或新的事实来源。详见[第二层的原样复用](technical-plan/02-knowledge.md#增量加工中的原样复用)。
+增量输出自9/7合同引入 `reuse_refs`，当前10/8继续支持：模型只引用实际提供的旧路径和精确版本，程序核验后原样物化，变化项仍返回全文。物化后的完整候选继续接受相同质量检查和独立Review，不能把引用当成免审或新的事实来源。详见[第二层的原样复用](technical-plan/02-knowledge.md#增量加工中的原样复用)。
 
 | 层次 | 质量路径的职责 |
 | --- | --- |
@@ -37,6 +37,8 @@ M1 整体尚未验收。目标 GPT 云端任务拟按 `Asia/Shanghai` 每日 22:
 M1 可形成描述性期间知识：在含义、单位和可比条件明确时计算分段统计，标注算法、区间、有效样本、缺失与未完结日处理；派生值不得冒充原始报表字段。M2 才进一步结合个人问题解释原因和比较建议。来源中的旧状态只用于其当时语境，当前系统状态须另有固定版本或回执证明。
 
 新10/8合同运行使用 schema `0.12`，旧9/7继续按 `0.11`、更早质量运行按 `0.10` 核验；原文／采集 `0.1`、正式知识 `0.2` 与 group wrapper `0.6` 保持。基础提示词仍为 extract v14／review v10／answer v7，新增质量规则由明确版本的 Skill 提供。历史请求及 Skill 精确保留，不回填“已加载 Skill”。传输使用完整可逆共享值、字段字典与列式编码；全部原文、规则、候选、真实意见和计算范围都计入实际请求字节，完整必要单元超限时停止。
+
+dev22 为已完成但因存储超限未形成候选的10/8返工提取提供专用恢复证明，明确原输出来自操作者核定的本地缓存；零新提取，完整独立 Review 仍必需。候选当前核心仍限1 MiB，仅三类可核验历史使完整包允许到4 MiB；专用恢复stage0.12与guard0.13原子落盘。完整group核证后，新队列持久采用同plan发布，不改原失败计数。契约及限额见[数据规范](data-conventions.md#quality-completed-recovery)，本版CI和真实链通过须另取证据。
 
 详细规则见[第二层](technical-plan/02-knowledge.md#m1-skill-quality)，字段、执行与验收分别见[数据规范](data-conventions.md#skill-quality-contract)、[实现明细](implementation-details.md#skill-quality-execution)与[场景验收](scenarios-and-acceptance.md#skill-quality-acceptance)。阶段退出条件见 [Roadmap](roadmap.md#m1-skill-quality)。
 

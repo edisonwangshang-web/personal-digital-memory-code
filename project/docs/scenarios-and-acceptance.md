@@ -1,6 +1,26 @@
 # 场景与验收
 
-本文公开定义验收输入、步骤、反例和预期行为，不公布任何真实个人资料、私有运行标识、调用回执或私有验收结论。下文人工例子均为虚构，必须在临时数据仓库执行；真实端到端验收由获准资料及独立私有证据判断。当前程序 `0.2.0.dev21`，默认 extract@10／review@8；M1 尚未整体验收，目标定时 runner、两轮真实触发和第二模型仍缺实际通过证据。准确公库 CI 只证明其实际受测提交，不能代表另一个仓库或真实资料链。
+本文公开定义验收输入、步骤、反例和预期行为，不公布任何真实个人资料、私有运行标识、调用回执或私有验收结论。下文人工例子均为虚构，必须在临时数据仓库执行；真实端到端验收由获准资料及独立私有证据判断。当前程序 `0.2.0.dev22`，默认 extract@10／review@8；M1 尚未整体验收，目标定时 runner、两轮真实触发和第二模型仍缺实际通过证据。准确公库 CI 只证明其实际受测提交，不能代表另一个仓库或真实资料链。
+
+<a id="quality-completed-recovery-acceptance"></a>
+
+## dev22 已完成提取恢复与存储反例
+
+以下同样使用人工资料、临时Git及可重复的模型替身，不代表实际模型或业务验收：
+
+| 场景／反例 | 必须证明 |
+| --- | --- |
+| 10/8原生提取已completed、仅candidate_too_large、尚无stage／Review | 核原run／operation和全部原始材料；恢复零extract，原失败／counter不变，后继真正独立Review及完整group通过后才发布 |
+| 原返回只在操作者核定缓存中，没有旧Git输出摘要 | provenance明确为本地核定证明；新摘要不追认为旧Git或服务端证明；缓存四文件、外部核定摘要、invocation、payload／native binding任一不符，模型前拒绝 |
+| unknown／非completed／Review已启动、换pool／auth／operation或规则变化 | 不恢复、不新extract，不重放未知；专用证明不能降级成旧0.9入口或普通新任务 |
+| 新plan准备与validation_head | 先固定新plan，再生成证明；HEAD、账本或缓存变化后旧证明不能用；原stage与guard必须同一提交，缺guard／伪造摘要／不同父边拒绝 |
+| 完整候选含合法历史超过1 MiB | 只限固定10/8、schema0.12及正确stage路径；当前核心≤1 MiB、总包≤4 MiB可接受，其他文件仍≤1 MiB；把正文搬进历史／错角色／错run／总量或核心超限均拒绝 |
+| 存储下界与完整Review视图 | 已知下界超限时不预约／不调用；实际输出仍再核。恢复Review只去重复程序provenance，完整反馈、对象、统计、目标和检查项不减，全部请求≤256000字节或按原分解规则阻断／推进 |
+| 新stage0.12与恢复guard0.13 | 原子事务恢复后两者均完整；实际旧writer遇不支持的0.13先拒写，不能仅mock版本或删除guard放行 |
+| operator真实完整group由新10/8队列采用 | exact plan／Skill／source／proof核验后持久published；已有final_run不得换人，原失败queue及counter不改；重复采用零提交／零模型／零账本写 |
+| 错plan、错bundle、错候选与历史9/7采用 | 新合同拒写错误绑定；旧9/7仍仅返回effective published，其raw队列状态不被追改 |
+
+验收记录分别标注工程回归、准确提交CI及私有真实链结果；本节不宣称dev22已通过CI或真实加工。
 
 ## dev21 最小修复回归
 
