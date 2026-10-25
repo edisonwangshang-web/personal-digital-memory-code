@@ -45,6 +45,8 @@ class QualityCompletedExtractionTests(unittest.TestCase):
         self.saved = capture(self.repo, {"source_key": "artificial:completed", "source_type": "note",
             "acquisition_status": "full_text", "body": "date,load_kg\n2025-01-01,10\n2025-01-02,20\n"})
         self.bundle = resolve_skill_refs("knowledge-extract@10", "knowledge-review@8")
+        self.rejected_bundle = resolve_skill_refs("knowledge-extract@9", "knowledge-review@7")
+        self.assertNotEqual(self.rejected_bundle, self.bundle)
         self.ledger_path = self.root / "audit" / "calls.json"
         self.ledger_path.parent.mkdir(mode=0o700)
         BudgetLedger.create(self.ledger_path, None, 0, "artificial completed recovery", repo=self.repo, mode="audit")
@@ -67,7 +69,7 @@ class QualityCompletedExtractionTests(unittest.TestCase):
             batch_options = {"batch_context": projected["batch_context"], "source_views": projected["source_views"],
                              "review_strategy": "auto"}
         rejected = pipeline.process_sources(self.repo, [self.saved["path"]], model_call=self.adapter.for_operation("artificial:rejected"),
-                                            skill_bundle=self.bundle, **batch_options)
+                                            skill_bundle=self.rejected_bundle, **batch_options)
         self.assertEqual(rejected["status"], "needs_revision", rejected)
         self.rejected = rejected
         self.phase = "complete"
@@ -88,6 +90,9 @@ class QualityCompletedExtractionTests(unittest.TestCase):
         self.receipts = {name: hashlib.sha256((self.cache / name).read_bytes()).hexdigest()
                          for name in ("payload.json", "response.json", "request-binding.json", "request.bin")}
         self.payload = json.loads((self.cache / "payload.json").read_text())
+        self.assertEqual(self.payload["skill_bundle"], self.bundle)
+        self.assertEqual(self.payload["revision_context"]["candidate"]["quality_provenance"]["skill_bundle_sha256"],
+                         self.rejected_bundle["sha256"])
         self.response = json.loads((self.cache / "response.json").read_text())
         self.binding = json.loads((self.cache / "request-binding.json").read_text())
         # A later engineering commit is legal; sources, controls and old failure

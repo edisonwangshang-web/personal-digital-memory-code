@@ -10,7 +10,7 @@
 
 | 场景／反例 | 必须证明 |
 | --- | --- |
-| 10/8原生提取已completed、仅candidate_too_large、尚无stage／Review | 核原run／operation和全部原始材料；恢复零extract，原失败／counter不变，后继真正独立Review及完整group通过后才发布 |
+| 10/8原生提取已completed、仅candidate_too_large、尚无stage／Review | 核原run／operation和全部原始材料；恢复零extract，原失败／counter不变，后继真正独立Review及完整group通过后才发布。覆盖“旧9/7退回→已completed10/8→按原10/8 bundle恢复”，不得继承旧反馈候选的9/7 |
 | 原返回只在操作者核定缓存中，没有旧Git输出摘要 | provenance明确为本地核定证明；新摘要不追认为旧Git或服务端证明；缓存四文件、外部核定摘要、invocation、payload／native binding任一不符，模型前拒绝 |
 | unknown／非completed／Review已启动、换pool／auth／operation或规则变化 | 不恢复、不新extract，不重放未知；专用证明不能降级成旧0.9入口或普通新任务 |
 | 新plan准备与validation_head | 先固定新plan，再生成证明；HEAD、账本或缓存变化后旧证明不能用；原stage与guard必须同一提交，缺guard／伪造摘要／不同父边拒绝 |

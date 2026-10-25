@@ -1814,7 +1814,8 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
                     "review_path": review_path, "head": git.head(), "model_calls": 0, "attempted_calls": 0}
         return {"run_id": run_id, "status": "unknown", "next_action": "reconcile", "head": head,
                 "stage_path": stage_path, "model_calls": 0, "attempted_calls": 0}
-    return process_sources(repo, allowed_source_paths, expected_head, model_call=model_call,
+    bundle = _validated_skill_bundle(original_payload["skill_bundle"]) if _quality_enabled(original_payload) else None
+    return process_sources(repo, allowed_source_paths, expected_head, model_call=model_call, skill_bundle=bundle,
         run_id=run_id, related_runs=related_runs, batch_context=batch_context, source_views=source_views,
         review_strategy=review_strategy, revision_from_run=attestation.get("revision_from_run"),
         _revalidate_completed={"attestation": copy.deepcopy(attestation),
