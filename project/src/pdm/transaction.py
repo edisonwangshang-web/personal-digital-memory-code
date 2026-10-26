@@ -30,6 +30,11 @@ _HEX = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 class PipelineGit(GitAdapter):
     """调用者持有继承的 lock；不扩大采集适配器本身的写入范围。"""
 
+    def run(self, *args: str, index: str | None = None) -> bytes:
+        from .verification_cache import immutable_git_read
+        return immutable_git_read(self.repo, args, index,
+                                  lambda: super(PipelineGit, self).run(*args, index=index))
+
     def write_commit(self, relative: str, data: bytes, expected_head: str) -> str:
         raise CaptureError("invalid_transaction", "加工适配器只允许带恢复日志的 write_files 事务")
 

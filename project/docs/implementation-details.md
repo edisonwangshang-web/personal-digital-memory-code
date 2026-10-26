@@ -2,9 +2,9 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev25`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev26`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
 
-新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
+新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词为 extract v14／review v10／answer v8。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
 
 文档分工如下：
 
@@ -14,6 +14,16 @@
 - [Roadmap](roadmap.md)管理阶段成果、执行顺序、进度与通过证据；本页不重复阶段表。
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
+
+## dev26：多批容量回退与反馈接续
+
+各批草稿通过后，若完整原文并集可承载，继续原最终合并提取。只有合并输入容量受阻时，编排才尝试`verbatim-draft-finalization-v1`：完整核验原草稿及真实提取／Review，原样联合最终对象、来源、统计与关系，保存schema0.14候选及无新extract的来源证明，再沿既有object／coverage／global逐项独立审核。全部passed后由group publisher核完整plan和正式字节，原子发布。
+
+该回退限无related、答复续接或重建上下文的普通完整草稿，不支持原样reuse；同路径不同正文、质量范围／统计口径不一致、必要依赖缺失或审核单元超容量时保存明确原因，不截断原文或发布部分结果。原样final真实退回需实质修订而仍超容量时，下一次返回`assembly_revision_required`且0新调用，保留意见和次数等待处理，避免重复相同联合再审。候选、证明与错误边界见[数据规范](data-conventions.md#verbatim-draft-finalization)。
+
+正常10/8草稿与答复续接的`needs_revision`通过同一反馈路径重新提取／审核，原phase、完整答复、来源片段、merge和related范围保持精确绑定。草稿修订后仍不能直接发布；事项只有正式record采用全部有效回复后才resolve。旧9/7及更早phase拒绝、历史operator恢复入口和unknown对账规则保持，不换身份刷新有限次数。
+
+新质量候选固定`review_request_contract=current-draft-v1`：普通Review构建时只去掉指定返工／恢复历史，保留当前稿、质量检查及对应证据；持久candidate binding和完整历史proof不减少。被退回稿带同marker时，返工extract取最新稿、未解决意见和必要证据，完整真实Review仍存储核验，分解Review白名单保持。旧stage／resume不回填marker，旧投影和请求字节保持；未知值在调用前拒绝，具体字段见[当前稿审核合同](data-conventions.md#current-draft-review)。
 
 <a id="explicit-knowledge-rebuild"></a>
 
@@ -44,7 +54,7 @@
 3. 核原 pool／授权／operation、completed invocation与payload、账本完整字节、四份缓存独立摘要、原 source／related／controls／Skill／规则和失败历史。冻结后出现 Git、账本或缓存变化时停止。
 4. 预约前先核已经确定的当前核心与历史材料存储下界；这不预测未知模型输出，实际落盘仍完整核验。使用当前 validator 校验原始结构化返回及全部质量义务，分别记录原提取版本与当前校验版本。只为合格候选承载完整历史，不更改原 JSON；完整包／当前核心分别核[4 MiB／1 MiB](data-conventions.md#candidate-storage-limits)，其余限额保持。
 5. 将 schema0.12 stage 与 schema0.13恢复门禁放在同一原子事务。原失败、预约和计数不改；不能先落新候选再补兼容门禁。
-6. 在原调用身份下执行真正独立 Review。仅此恢复契约去掉candidate内四键重复历史／程序provenance，根处完整语义反馈、当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；实际请求仍核256000字节，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
+6. 在原调用身份下执行真正独立 Review。旧无marker恢复请求继续去掉candidate内四键重复历史／程序provenance、保留根处完整语义反馈的原视图；新生成并带`current-draft-v1`的恢复候选按当前稿合同取用。当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；实际请求仍核256000字节，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
 7. 按目标 plan 发布完整合格 group，再由新10/8生产队列核 marker、完整证明、相同 plan／bundle与已固定候选，CAS持久采用发布。重复采用不调用模型、不写提交，也不把旧失败counter改成passed。尚无真实group则不采用。
 8. 私库推送、远程完整恢复与模型读取各核实际提交和证据；本节流程存在不等于已取得真实通过结果。
 
@@ -53,7 +63,7 @@
 1. 提取前从同版本旧受审链重算统计义务索引，放入本次完整请求。模型显式提交依据，程序在Review前拒遗漏；对复用及全文同字正文执行同一检查。
 2. `preflight_processing` 复用实际payload构造，在新attempt及调用预约前计量全部规则、事实、关联和反馈。预检的control快照早于run预约，最终调用按预约后的快照记录实际binding并再次核容量。超限不启动模型，不以截断或提高256000上限放行。
 3. 新10/8请求用版本化质量视图处理仅程序使用的逐行SHA；从同包精确行重建，持久完整context保留，旧请求按原渲染器回放。
-4. final被实际Review退回后，队列显式传 `revision_from_run`，保留完整反馈并绑定新plan和新证明。预约前检查原指针／unknown，预约后CAS及返回run身份双核；普通重试不代替返工。draft／continuation不支持时明确阻断。
+4. final被实际Review退回后，队列显式传 `revision_from_run`，保留完整反馈并绑定新plan和新证明。预约前检查原指针／unknown，预约后CAS及返回run身份双核；普通重试不代替返工。dev26对10/8补草稿／答复续接，旧不支持的phase仍明确阻断，完整边界见页首说明。
 5. 模型出错仅从结构化code／HTTP status白名单分类，不记录错误原文；已有unknown不因诊断升级追认或清除。
 
 ## 1. 采集保存：先让原始资料可找回
@@ -378,6 +388,8 @@ M1 验收包含“启用 → 暂停 → 核对在途结果 → 修复或恢复�
 新日程显式使用 `execution_policy=continuous-v1`、`processing_engine=production-v1` 并绑定 audit 账本，`max_calls=null`、`max_attempts=4`。单 slice 的 `max_items` 和一次 drain 的 `max_slices`／`window_seconds` 只控制推进粒度。根触发发现并固定允许的 `source_paths`，后继 slice 与 continuation 从根事件恢复该范围，不在续跑中隐式加入新版本；来源版本的持久 `item_key` 不随规则、日期或 trigger 名称变化。
 
 `schedule drain` 要求 `--repo`、`--id`、`--trigger`、`--budget-ledger`、`--operation-id`，可设 `--max-slices 8`、`--window-seconds 300` 及 `--continuation <continuation-template.json>`。返回 `next_action`、`remaining` 和 continuation；执行窗口结束即持久保存进度。继续令牌不能扩大原来源范围，也不代表平台已安排唤醒。旧有限日程与 0.4／0.5 事件继续按原契约核验，真实 GPT 平台能力与两轮触发单独验收。
+
+`run`与`drain`统一把`reconcile`、`repair_accounting`或`attention_required`归为非零退出码4；结果中的未知、容量阻塞或达到尝试上限因此不能被shell当作成功。正常`continue`、`idle`和等待确认保持各自结果，不能仅以退出码0推断本轮已全部发布。
 
 ## 6. 失败恢复：先核对已经发生的结果
 

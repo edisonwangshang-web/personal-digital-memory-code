@@ -131,7 +131,8 @@ def _proofs(git, plan, reviewed_runs, allowed_paths, *, historical):
                 metadata = old["metadata"]
                 origins[path] = {"run_id": metadata["generated_by"]["run_id"], "review_path": metadata["review_ref"]}
             else:
-                origins[path] = {"run_id": run, "review_path": review_path}
+                origins[path] = {"run_id": (obj["metadata"]["generated_by"]["run_id"]
+                                             if "assembly" in candidate else run), "review_path": review_path}
     _coverage(plan, candidates)
     # Each Wiki's exact record dependencies must have been read together by at
     # least its own independent Review, not merely unioned after local Reviews.

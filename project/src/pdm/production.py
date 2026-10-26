@@ -312,38 +312,36 @@ def _revision_feedback(git, previous, state, projection, processing_paths, *, dr
         break
     if rejected is None:
         return None
-    if draft or state["request"].get("continuation_context") is not None:
-        _fail("queue_revision_phase_unsupported")
     candidate = _load(_committed(git, _stage_path(rejected["run_id"])), "candidate")
     expected_sources = [{key: value for key, value in source.items() if key != "line_count"}
-                        for source in state["plan"]["sources"]]
+                        for source in state["plan"]["sources"] if source["path"] in processing_paths]
     old_context = candidate.get("batch_context")
     material = candidate.get("batch_material", {})
     if (sorted(item["path"] for item in _candidate_bindings(candidate)) != processing_paths
             or _candidate_bindings(candidate) != expected_sources
-            or candidate.get("related_runs") != state["related_runs"]
+            or candidate.get("related_runs") != ([] if draft else state["related_runs"])
             or candidate.get("rebuild_context") != state["request"].get("rebuild_context")
             or candidate.get("controls_digest") != state["plan"]["snapshot"]["controls_digest"]
             or candidate.get("execution_context") is not None
-            or candidate.get("continuation_context") is not None
+            or candidate.get("continuation_context") != state["request"].get("continuation_context")
             or not isinstance(old_context, dict)
             or old_context.get("source_ranges") != projection["batch_context"]["source_ranges"]
             or candidate.get("source_views") != projection["source_views"]
-            or material.get("draft_only") is not False
+            or material.get("draft_only") is not draft
             or sorted(item["run_id"] for item in candidate.get("merge_inputs", [])) != sorted(merge_runs)
             or candidate.get("review_strategy", "legacy-v1") != state["request"].get("review_strategy", "legacy-v1")):
         _fail("queue_revision_context_mismatch")
     # This checks the full actual independent verdict, candidate computation,
     # source/related scope, current controls and every frozen ancestor binding.
     context = build_revision_context(git, rejected["run_id"], source_paths=processing_paths,
-                                     related_runs=state["related_runs"])
+                                     related_runs=[] if draft else state["related_runs"])
     return {"run_id": rejected["run_id"], "context_sha256": _hash(context),
             "candidate_binding": candidate["binding"],
             "source_plan_id": old_context["plan_id"],
             "target_plan_id": projection["batch_context"]["plan_id"]}
 
 
-def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(), execution_guard=None):
+def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(), execution_guard=None, assembly=False):
     from .budget import BudgetedModelCall
     from .model_calls import MAX_INPUT_BYTES, PROMPTS
     from .pipeline import (_committed, _load, _read_reviewed, _run_path,
@@ -356,7 +354,11 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     identity = {"fragments": sorted(item["fragment_id"] for item in projection["batch_context"]["source_ranges"]),
                 "phase": "draft" if draft else "final", "related_runs": state["related_runs"] if not draft else []}
     continuation = state["request"].get("continuation_context")
-    strategy = state["request"].get("review_strategy", "legacy-v1")
+    if assembly and (state["related_runs"] or continuation is not None
+                     or state["request"].get("rebuild_context") is not None):
+        return {"status": "blocked_context", "error": "assembly_context_requires_merge",
+                "attempted_calls": 0, "model_calls": 0}
+    strategy = "decomposed-v1" if assembly else state["request"].get("review_strategy", "legacy-v1")
     skill_bundle = state["request"].get("skill_bundle")
     feedback_policy = _feedback_enabled(skill_bundle)
     processing_paths = plan["source_paths"]
@@ -398,7 +400,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
         identity["rebuild_context"] = deepcopy(rebuild_context)
         work_key = _hash(identity)
         path = ATTEMPTS + work_key + ".md"
-    admission_policy = feedback_policy or rebuild_context is not None
+    admission_policy = feedback_policy or rebuild_context is not None or assembly
     def reusable(candidate):
         return (candidate.get("versions") == plan["snapshot"]["versions"]
                 and candidate.get("controls_digest") == plan["snapshot"]["controls_digest"]
@@ -460,6 +462,12 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                 candidate, _, _ = _read_reviewed(git, old["run_id"], historical=True)
                 if reusable(candidate):
                     return {"status": "passed", "run_id": old["run_id"], "reused": True}
+            if assembly and old["status"] == "needs_revision":
+                # Re-reviewing the same verbatim union cannot repair a real
+                # global rejection. Preserve feedback, without another call.
+                return {"status": "blocked_context", "error": "assembly_revision_required",
+                        "next_action": "operator_repair", "run_id": old["run_id"],
+                        "attempted_calls": 0, "model_calls": 0}
                 continue
             if old["status"] in {"reserved", "unknown", "partial"}:
                 review_path = _run_path(old["run_id"], "review")
@@ -502,7 +510,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                         reuse_extraction = old["run_id"]
                         break
         feedback = None
-        if feedback_policy:
+        if feedback_policy and not assembly:
             try:
                 feedback = _revision_feedback(git, attempts["attempts"], state, projection,
                                               processing_paths, draft=draft, merge_runs=merge_runs)
@@ -520,7 +528,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             overhead = max(len(render_model_request(role, {
                 "quality_contract": "skill-quality-v1", "skill_bundle": skill_bundle}))
                 for role in ("extract", "review"))
-        if not feedback_policy and projection["input_bytes"] + overhead > MAX_INPUT_BYTES:
+        if not assembly and not feedback_policy and projection["input_bytes"] + overhead > MAX_INPUT_BYTES:
             return {"status": "blocked_capacity", "next_action": "replan"}
         current = {"run_id": run_id, "operation_id": operation, "attempt": number, "status": "reserved"}
         process_options = {"related_runs": [] if draft else state["related_runs"], "run_id": run_id,
@@ -544,8 +552,16 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     if admission_policy:
         # Render the complete request before claiming an attempt, audit roles or
         # processing reservation. Avoid a reentrant Git lock around preparation.
-        from .pipeline import preflight_processing
-        checked = preflight_processing(repo, processing_paths, **process_options)
+        if assembly:
+            from .assembly_final import preflight_assembly
+            try:
+                checked = preflight_assembly(repo, plan, merge_runs, run_id)
+            except CaptureError as error:
+                return {"status": "blocked_capacity" if error.code == "candidate_too_large" else "blocked_context",
+                        "error": error.code, "attempted_calls": 0, "model_calls": 0}
+        else:
+            from .pipeline import preflight_processing
+            checked = preflight_processing(repo, processing_paths, **process_options)
         if checked["status"] != "ready":
             if checked["status"] in {"unknown", "blocked_capacity"}:
                 return checked
@@ -574,7 +590,11 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             process_options["expected_head"] = head
     delegate = _guarded(delegate, execution_guard, repo, state["queue_id"], run_id)
     try:
-        result = process_sources(repo, processing_paths, model_call=delegate, **process_options)
+        if assembly:
+            from .assembly_final import finalize_drafts
+            result = finalize_drafts(repo, plan, merge_runs, run_id, model_call=delegate)
+        else:
+            result = process_sources(repo, processing_paths, model_call=delegate, **process_options)
     except CaptureError as error:
         observed = delegate.ledger.operation(operation) if isinstance(delegate, BudgetedModelCall) else None
         if (admission_policy and error.code in {"input_limit", "head_conflict"}
@@ -779,11 +799,16 @@ def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=
             projection = merge_batch_sources(repo, state["plan"], [batch["batch_id"] for batch in batches],
                                               source_paths=state["request"]["allowed_source_paths"],
                                               max_bytes=state["plan"]["max_input_bytes"])
-            if not projection["coverage"]["complete"]:
-                state["status"] = "blocked_capacity"
-                break
+            assembly = not projection["coverage"]["complete"]
+            if assembly:
+                from .assembly_final import review_projection
+                if set(projection["coverage"]["blocked_reasons"]) != {"merge_input_limit"}:
+                    state["status"] = "blocked_capacity"
+                    break
+                projection = review_projection(repo, state["plan"])
             result = _attempt(repo, state, projection, "final", model_call, draft=False,
-                              merge_runs=sorted(set(state["completed_batches"].values())), execution_guard=execution_guard)
+                              merge_runs=sorted(set(state["completed_batches"].values())), execution_guard=execution_guard,
+                              assembly=assembly)
             state.update(last_result=deepcopy(result), active_run_id=result.get("run_id"))
             steps += 1
             if result["status"] == "passed":

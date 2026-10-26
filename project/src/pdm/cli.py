@@ -573,7 +573,10 @@ def main(argv: list[str] | None = None) -> int:
                                          validation_ref=args.validation_ref, execution_stopped=args.execution_stopped)
             exit_code = 4 if result.get("status") in {
                 "failed", "incomplete", "budget_exhausted", "budget_blocked", "remote_unconfirmed"} else 0
-            if args.schedule_command == "drain" and result.get("next_action") in {"reconcile", "repair_accounting", "attention_required"}:
+            if args.schedule_command in {"run", "drain"} and (
+                    result.get("status") in {"unknown", "reconciliation_required", "registration_required",
+                                             "blocked_capacity", "blocked_context", "attempt_limit", "attention_required"}
+                    or result.get("next_action") in {"reconcile", "repair_accounting", "repair_registration", "attention_required"}):
                 exit_code = 4
         elif args.command == "environment":
             from .runtime import bind_environment, require_environment

@@ -234,8 +234,14 @@ def render_model_request(role, payload):
 
 
 def request_binding(role, payload):
-    raw = render_model_request(role, payload)
-    return {"sha256": "sha256-" + hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+    def rendered():
+        raw = render_model_request(role, payload)
+        return {"sha256": "sha256-" + hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+    if (type(role) is str and role in {"extract", "review"} and type(payload) is dict
+            and payload.get("quality_contract") == "skill-quality-v1" and "skill_bundle" in payload):
+        from .verification_cache import frozen_request_binding
+        return frozen_request_binding(role, payload, rendered)
+    return rendered()
 
 
 def _valid(value: Any, schema: Dict[str, Any]) -> bool:

@@ -19,6 +19,7 @@ from .model_calls import OUTPUT_SCHEMAS, USAGE_FIELDS, _valid, call_model
 from .pending_evidence import build_pending_context
 from .pipeline import control_guard, load_source, normalize_source_paths, verify_publication
 from .transaction import PipelineGit
+from .verification_cache import scoped_immutable_reads
 
 # Includes every source representation and metadata in the serialized evidence.
 # The transport has a separate 256,000-byte bound including question and rules.
@@ -133,6 +134,7 @@ def _formal_reference_matches(ref, source, sources, provided_lines=None):
             and quote in "".join(lines[int(match[1]) - 1:int(match[2])]))
 
 
+@scoped_immutable_reads
 def evidence(repo: Path, source_path: str, run_id: str | None = None) -> dict:
     git = PipelineGit(repo)
     with git.lock():
@@ -201,6 +203,7 @@ def _check_publication_sources(publication, sources):
         raise CaptureError("evidence_source_mismatch", "发布来源集合与选定版本不一致")
 
 
+@scoped_immutable_reads
 def build_evidence_sources(repo: Path, source_paths: list[str], run_id: str | None = None) -> dict:
     """Read 1–8 exact source versions without discovery or implicit latest reads.
 
@@ -261,6 +264,7 @@ def build_evidence_sources(repo: Path, source_paths: list[str], run_id: str | No
         return result
 
 
+@scoped_immutable_reads
 def _recheck_sources(repo, selected, paths, run_id):
     git = PipelineGit(repo)
     with git.lock():
@@ -655,6 +659,12 @@ def _peek_publication(git, run_id, head):
             incremental = candidate.get("mode") == "incremental"
             revision = "revision_context" in candidate
             continuation = "continuation_context" in candidate
+            from .revision_context import supports_phase_revision
+            continued_revision = (revision and isinstance(candidate["revision_context"], dict)
+                and supports_phase_revision(candidate)
+                and supports_phase_revision(candidate["revision_context"].get("candidate"))
+                and candidate.get("continuation_context")
+                    == candidate["revision_context"].get("candidate", {}).get("continuation_context"))
             strategy = candidate.get("review_strategy", "legacy-v1")
             if (not isinstance(candidate.get("quality_context"), dict)
                     or not isinstance(candidate.get("extraction_request_binding"), dict)
@@ -662,7 +672,8 @@ def _peek_publication(git, run_id, head):
                     or strategy not in {"legacy-v1", "auto", "decomposed-v1"}
                     or strategy != "legacy-v1" and not batch
                     or (batch or revision) and not incremental
-                    or revision and (not isinstance(candidate["revision_context"], dict) or continuation)
+                    or revision and (not isinstance(candidate["revision_context"], dict)
+                                     or continuation and not continued_revision)
                     or continuation and (not batch or not isinstance(candidate["continuation_context"], dict))
                     or batch and (not isinstance(candidate.get("source_views"), list)
                                   or not candidate["source_views"]
@@ -850,6 +861,7 @@ def _object_reference_fragments(source, numbers):
     return [_fragment(source, start, end, "object_reference", source_lines=lines) for start, end in ranges]
 
 
+@scoped_immutable_reads
 def build_current_evidence(repo: Path, source_paths: list[str], run_ids=None, *,
                            history=False, max_bytes=MAX_EVIDENCE_BYTES,
                            source_views=None, batch_context=None, object_paths=None,

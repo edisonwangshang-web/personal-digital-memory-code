@@ -1,10 +1,34 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev25`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev26`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
-来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；已支持格式 `0.1`—`0.13` 按各自 kind 契约读取，不批量迁移；`0.13` 仅用于下述专用已完成提取恢复门禁，普通10/8候选与质量链仍为 `0.12`。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
+<a id="verbatim-draft-finalization"></a>
+
+## dev26：容量受限时的原样最终候选（schema `0.14`）
+
+`production`的完整原文合并超过计划输入容量时，可在现有最终候选阶段使用`verbatim-draft-finalization-v1`。程序核验同一完整plan下全部草稿、来源片段覆盖、规则和控制，原样联合对象、引用、统计声明与已有关系；不生成新正文或新关系，不新增一次extract调用，也不把不同来源或领域当作独立性的证明。最后仍执行真正的object／coverage／global独立审核，全部通过后由现有group publisher原子发布。
+
+专用candidate、started及其最终Review使用`0.14`；普通10/8质量候选、queue／attempt和分解审核unit仍按各自原`0.12`合同，来源0.1、formal0.2、group0.6、audit2及历史恢复guard0.13不迁移。旧writer不支持0.14时拒写，不能删证明或改header绕过。没有新CLI参数，单批与可承载的原合并提取路径保持。
+
+候选`assembly`固定`contract`、`mode=verbatim_assembly_no_model_extract`、完整`plan`、`inputs`及`knowledge_changed=false`。每项input保存原run、candidate binding、stage与Review的path／commit／SHA、真实`extraction`回执及`review_calls`实际审核调用元数据；候选没有虚构的新`extraction`或`extraction_request_binding`。`extraction_output`明确为确定性原样联合结果，正式对象保留原生成者，最终`review_ref`指向新的真正final Review；审核者必须独立于全部实际提取和原草稿审核调用。专用`processing_attempt`的`reserved_calls=0`，最终各独立Review仍逐次审计。恢复时从固定草稿及完整证明重建相同联合结果，再核engine来源、候选字节、规则与来源；不是只读取一份自报通过的清单。
+
+当前回退只接无related、无答复续接、无显式重建上下文的完整普通草稿；这些上下文需完整合并但超容量时返回`assembly_context_requires_merge`，不接`reuse_refs`。同路径不同对象返回`assembly_object_conflict`；合并后质量目标或统计口径不一致返回`assembly_quality_scope_mismatch`。来源覆盖不全、原证明变化、必要关联缺席或必要审核单元超容量均保留具体阻塞，不裁剪或部分发布。专用候选必须由完整group0.6发布；直接`publish`拒绝`assembly_requires_group_publication`，不能跳过完整plan覆盖与精确依赖检查。
+
+原样最终候选真实Review退回后保留原意见。若需实质跨批修订而现有请求仍不能承载，后续返回`blocked_context`／`assembly_revision_required`及零新调用，不重复原样再审或刷新次数。正常可承载final、10/8草稿及答复续接仍按下文有限反馈返工。该安全回退不代表已经实现任意大规模跨批语义修订。
+
+来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；已支持格式 `0.1`—`0.14` 按各自 kind 契约读取，不批量迁移；`0.13` 仅用于下述专用已完成提取恢复门禁，`0.14` 用于原样最终候选，普通10/8候选与质量链仍为 `0.12`。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。当前10/8沿用固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
+
+<a id="current-draft-review"></a>
+
+## dev26：普通审核只取当前稿材料
+
+新生成的非assembly质量候选固定`review_request_contract="current-draft-v1"`，该字段随完整candidate binding核验。普通Review保留当前对象、操作、质量声明、`required_checks`及对应必要证据；不再发送candidate内的`revision_context`、`revision_revalidation`、`revision_resume`、`quality_revalidation_guard_ref`，也不发送请求根部的`revision_context`。完整候选、原始返回、真实反馈、恢复门禁及全部proof仍持久保存，发布时继续核验；减少模型输入不删除或改写历史。
+
+首次提取沿原路径取角色材料；仅被退回稿带同一`current-draft-v1`时，返工取最新稿、未解决意见和必要证据，模型反馈的`review_record`只保留run／review ID、binding、stage path／commit／SHA及真实`output`：保留`verdict`／`reasons`，`checks`仅保留`needs_revision`／`needs_confirmation`完整项，不携带`call`、`request_binding`或`decomposed_proof`。完整`context.review_record`和proof不改，旧无marker投影按原字节；已有分解Review白名单保持，不增加合同、模型阶段、Skill版本或schema。
+
+新生成的恢复候选可带同一marker；旧已有stage或resume不回填，无marker的请求仍按其原逻辑和原字节重建。未知marker、非quality候选或assembly候选使用该marker时返回`invalid_review_request_contract`，不能忽略后继续调用。assembly0.14沿其专用分解审核合同，不混用普通Review marker。
 
 <a id="explicit-knowledge-rebuild"></a>
 
@@ -39,7 +63,7 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 
 恢复沿用原 run／operation，零新 extract，不清旧 failure、queue、counter或 unknown；候选分别记录原提取版本和当前校验版本。候选 stage 仍为 `0.12`，同时写入 `memory/runs/processes/<run_id>/quality-revalidation-guard.md`，kind 为 `quality_revalidation_guard`、schema 为 `0.13`。候选与门禁必须同一原子提交，候选保存门禁路径及摘要；门禁缺失、换版本或不同提交均拒绝。旧程序不认识0.13时须在写入前拒绝。
 
-预约前还检查已知当前核心与历史材料的存储下界；若下界已经超限则零调用停止。该检查不能预测未知模型输出，实际候选落盘时仍核完整核心与总量。仅此恢复契约的Review视图去掉candidate内重复的revision_context、revision_revalidation、revision_resume和quality_revalidation_guard_ref；请求根处的完整语义反馈、当前对象、目标、统计和required_checks保留，原始payload／response及完整历史继续在私库Git中受guard绑定，库外缓存原字节按独立摘要核验。超出模型容量仍按既有分解审核规则处理，不借存储例外提高模型输入上限。
+预约前还检查已知当前核心与历史材料的存储下界；若下界已经超限则零调用停止。该检查不能预测未知模型输出，实际候选落盘时仍核完整核心与总量。无`review_request_contract`的历史恢复请求继续原视图：去掉candidate内重复的revision_context、revision_revalidation、revision_resume和quality_revalidation_guard_ref，根处完整语义反馈、当前对象、目标、统计和required_checks保留。新生成且带`current-draft-v1`的恢复候选按上文只取当前稿材料；原始payload／response及完整历史继续在私库Git中受guard绑定，库外缓存原字节按独立摘要核验。超出模型容量仍按既有分解审核规则处理，不借存储例外提高模型输入上限。
 
 恢复后的实际内容仍须完整独立 Review；只有完整证明通过才可按目标 plan 发布。已有真实 group 的 marker，只有在 plan 完整值、固定 Skill、来源与候选证明均匹配后，新10/8队列才能持久保存 `published`、publication、revision及 adopted 记录。已有 `final_run` 不得换成另一证明；重复采用零写／零模型调用，原失败队列与计数保持。旧9/7仅返回 effective published 的历史行为不变。
 
@@ -71,7 +95,9 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 渲染选择 `quality-model-projection-v1`，模型视图顶层 `quality_projection` 绑定完整原材料摘要，能重建的profile行表变为 `line_integrity`（契约、完整映射摘要、行数和重建规则）。持久 `quality_context` 不变；解投影用同包原始全局行恢复并核全部绑定，缺必要行的合法单元保留原表，未知版本或篡改拒绝。语义事实、目标、统计及完整反馈不减少。
 
-新queue／attempt、候选／Review及其他质量族header为0.12，首次started和revision_attempt也为0.12；来源0.1、formal0.2、group0.6、audit2不迁移。production的新attempt可固定 `revision_from_run`、原context摘要、原candidate绑定及旧／新planID，只允许同来源／范围／related／controls／merge兼容的真实退回；新proof绑定新plan，不消费旧passed替代。四次稳定尝试上限、unknown先对账和CAS保留。只有完整final候选自动接续，draft／continuation明确blocked_context。
+新queue／attempt、候选／Review及其他质量族header为0.12，首次started和revision_attempt也为0.12；来源0.1、formal0.2、group0.6、audit2不迁移。production的新attempt可固定 `revision_from_run`、原context摘要、原candidate绑定及旧／新planID，只允许同来源／范围／related／controls／merge兼容的真实退回；新proof绑定新plan，不消费旧passed替代。四次稳定尝试上限、unknown先对账和CAS保留。dev21仅自动接续完整final；dev26对固定10/8质量链扩展draft与continuation反馈接续，旧9/7及更早保持原phase拒绝行为。
+
+10/8 phase返工不新增字段或schema：原候选与新候选的`draft_only`精确值、完整`continuation_context`、`source_views`／来源片段、merge输入及related范围必须相符，完整核验真实旧`needs_revision`及祖先后，带实际意见重新提取和独立Review。改变phase或答复、缺失旧证明、范围不符及unknown不能借此续接。draft返工通过不使其可直接发布；continuation必须经正式record采用全部有效回复后才可resolve。历史operator恢复入口不因此获得新权限。
 
 安全调用错误增加固定 `cli_auth_required`、`cli_permission_denied`、`cli_rate_limited`、`cli_service_unavailable`、`cli_network_failure`、`cli_request_rejected`；未知／冲突仍为 `cli_turn_failed`。不保存原message、stderr、URL或凭据，启动后失败仍保守记unknown，不自动重放。
 
@@ -271,7 +297,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev25支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
+Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev26支持 `0.1`—`0.14`，0.13为专用恢复门禁、0.14为原样最终候选；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 
@@ -390,11 +416,15 @@ Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SC
 
 对象模式coverage增加`requested_object_paths`、`dependency_object_paths`、`read_object_paths`、`not_selected_object_paths`、`object_selection_complete`、`not_needed_source_paths`及`not_needed_runs`；片段范围仍由`provided_source_ranges`、缺失行及未读范围表达。`object_selection_complete=true`只证明对象与依赖选择齐备，不证明读遍所选来源或全库。`compact_sources`去掉source.body与lines的重复正文，不改原行号、引用含义、授权或完整证据预算。
 
-### 回答中的本库处理状态（answer v7）
+单次证据构建的Git读取缓存只接收完整SHA且图解释稳定的只读命令结果，最多64MiB及8192项；其他情况和满额时回退普通读取，不改变输出字段或schema。缓存不跨构建、不落盘，不缓存当前HEAD、工作区状态／字节、控制判定、pending投影或完整proof结果。全部当前约束与历史证明继续核验；问答前后各自独立构建证据，不能用前一次缓存略过第二次变更检查。
+
+### 回答中的本库处理状态与陈述引用（answer v8）
 
 内容事实继续回到实际原文。来源已核验采集提交／回执可证明该来源版本已本地保存；`publication`／`publications`中已核验的run_id、commit_sha、files及knowledge_status可证明明确选定版本已审核发布，可说明这是本次evidence.head快照核验的处理状态，不为它伪造原文引文。旧来源“未导入／未提交”等自述仅代表描述当时，不能覆盖后来核验的状态。
 
 未提供发布证据不等于从未发布，历史发布不等于当前有效；本地保存／发布不证明原始附件全部入库、远程已同步、上传其他服务或用户目标已完成。未提供pending时不能编造用户待办或推断全库没有事项；来源缺口与确需用户确认分别表达。只读问答不能自称新保存或发布。
+
+answer v8沿用v7的状态边界和原JSON字段，不改变数据schema。模型在返回前逐句检查“陈述→正文编号→citations坐标→实际原文行”；不同位置的依据拆句或分别引用，多来源结论带齐必要来源。标题、包头和日期范围不支持仅在正文出现的限制、决定或完成情况；依据不足时缩小陈述并说明limitations。现有程序仍仅核结构、编号、来源版本、实际行范围与控制，不据此宣称语义支持已被自动证明。历史读取包固定自带回答规则及摘要，按原内容核验，不改写为v8，也不触发旧知识重加工。
 
 ### 问答中的限定待确认上下文（dev6）
 
@@ -810,7 +840,7 @@ Review 通过表示达到内容整理与发布要求，不等于独立事实核�
 
 ### dev12显式返工schema0.9
 
-`revision_context`的contract为`review-feedback-v1`，绑定旧stage/Review的commit/path/hash、原candidate binding、sources、related、controls以及完整旧candidate/actualReview。`model_context`为确定可重建的完整语义投影：全对象/operations/versions和完整Review保留，当前payload已有的旧raw副本省去。其binding、投影及当前完整原文共同进入新加工请求/候选/plan验证，不把反馈quote当source引用。深度上限8，循环拒绝。
+`revision_context`的contract为`review-feedback-v1`，绑定旧stage/Review的commit/path/hash、原candidate binding、sources、related、controls以及完整旧candidate/actualReview。旧无marker的`model_context`按原字节保留全对象/operations/versions和完整Review、仅省去当前payload已有的旧raw副本；带`current-draft-v1`的被退回稿按[阶段材料](#current-draft-review)只将未解决检查送入返工模型，完整持久Review不改。其binding、投影及当前完整原文共同进入新加工请求/候选/plan验证，不把反馈quote当source引用。深度上限8，循环拒绝。
 
 新的revision_attempt为schema0.9稳定不可变指针，与started同commit保存；unknown或重复不能换code/rules/run重发。原样输出排除generated_by/recorded_at/review标记后仍相同则revision_unchanged，保存实际提取及失败但不开始Review。新candidate/Review/manifest/receipt/failure按0.9核验；source/capture0.1、正式0.2、普通proof0.8与group0.6不迁移，不支持0.9的旧writer拒写。当前／历史发布核验闭包包含完整旧退回authority snapshots，证据构建与读取包生成前复用此核验；包内提供选定证据、引用和版本摘要，不能仅凭包完整性证明发布真实性。新候选仅在Review passed并正式发布后作为正式派生知识；原文仍按明确范围和状态参与回答。
 

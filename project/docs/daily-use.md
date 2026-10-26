@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文描述 `0.2.0.dev25` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本；当前目录和模块加载路径指向公库，`--repo` 指向私库，代码更新不复制回私库。
+本文描述 `0.2.0.dev26` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本；当前目录和模块加载路径指向公库，`--repo` 指向私库，代码更新不复制回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -91,6 +91,8 @@ python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 ```
 
 多来源重复 `--source`；需要旧知识时，准备阶段通过 `--allowed-source` 和 `--allowed-run` 明确全部允许的依赖。程序保存分批计划、各批候选与审核、最终依赖组证明和多主题原子发布结果。普通完整 Review 请求超过 256000 字节时，`auto` 按需转为 object／coverage／global 分解审核；完整必要语义仍超容量时保持 `blocked_capacity`，不能截断材料后宣称完成。
+
+普通多批的完整原文合并超容量时，程序可自动把已核完整草稿原样组成0.14最终候选，再真正独立分解审核；不增加extract调用或新的CLI参数。当前只接无旧关联、答复或重建上下文的普通草稿；对象、统计口径冲突或必要审核仍超容量时保留具体阻塞。若该原样最终候选审核要求实质修订且仍不能承载，后续`assembly_revision_required`表示需要处理，不能反复运行同一联合期待自动修好。完整边界见[数据规范](data-conventions.md#verbatim-draft-finalization)。
 
 所有必要独立审核通过后才正式发布。已完成节点按原身份复验，未知先对账；首次执行后最多三次失败重试，跨日、重启或改队列名不清零。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
 
@@ -185,6 +187,8 @@ python -P -B -m pdm schedule status --repo "$PDM_DATA_REPO" --id "$schedule_id"
 ```
 
 `drain` 在有限窗口内推进持久队列，续跑使用返回的 `--continuation "$continuation_json"` 和原身份。答复关联为 `answered` 后，同一日程会携带完整必要回复继续加工。`remote_mode=required` 需要实际条件 push、fetch 和精确读回；`local_only` 仅供隔离演练。完整来源并集超过支持范围或必要语义超容量时停止，不截断。
+
+查看JSON中的`status`、`next_action`及剩余范围。`run`和`drain`需对账、账本修复或人工处理时均返回退出码4，应先核已有结果或修复前置；合法等待确认和可继续进度不会因此变成完成，退出码0也不表示所有资料均已发布。
 
 ```bash
 python -P -B -m pdm schedule pause --repo "$PDM_DATA_REPO" --id "$schedule_id" --reason "$pause_reason"

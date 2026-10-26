@@ -75,6 +75,33 @@ class ReadingPackageTests(unittest.TestCase):
         self.assertNotIn("人工未选资料", value)
         self.assertNotIn(other["source_id"], value)
 
+    def test_frozen_answer_rules_verify_without_loading_current_prompt(self):
+        # A historical package keeps its own rules bytes, not the current
+        # prompt file. The synthetic label is not an actual old model result.
+        historical = "# 人工历史规则 v7\n仅按包中限定证据作答。\n"
+        with patch("pdm.portable.Path.read_text", return_value=historical):
+            prepared = self.prepare()
+        original = self.output.read_bytes()
+        payload = json.loads(original)["payload"]
+        self.assertEqual(payload["answer_rules"], historical)
+        self.assertEqual(payload["answer_rules_sha256"],
+                         hashlib.sha256(historical.encode()).hexdigest())
+        with patch("pdm.portable.Path.read_text",
+                   side_effect=AssertionError("verification must not reload current rules")):
+            verified = verify_reading_package(
+                self.output, expected_sha256=prepared["sha256"])
+        self.assertEqual(verified["status"], "integrity_verified")
+        self.assertEqual(verified["second_model_reading"], "unverified")
+        self.assertEqual(self.output.read_bytes(), original)
+
+        # Rehashing only the envelope cannot silently replace the frozen rules.
+        package = json.loads(original)
+        package["payload"]["answer_rules"] = "# 人工替换规则 v8\n"
+        package["payload_sha256"] = hashlib.sha256(canonical(package["payload"])).hexdigest()
+        self.output.write_bytes(canonical(package) + b"\n")
+        with self.assertRaises(CaptureError):
+            verify_reading_package(self.output)
+
     def test_questions_reject_answer_objects_duplicates_and_empty_input(self):
         for questions in ([], [""], ["same", "same"], [{"question": "Q", "expected": "A"}], ["x" * 4097]):
             with self.subTest(questions=type(questions[0]).__name__ if questions else "empty"):

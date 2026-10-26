@@ -4,7 +4,7 @@
 
 ## 当前公开检查结果
 
-已核对的公开工程快照为 [`8e461422712252ccffefe664466c1ba254fc97cf`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/8e461422712252ccffefe664466c1ba254fc97cf)，对应 [Actions 40163471251](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40163471251)：八个任务成功，Python 3.11／3.12 各 1004 项测试，以及运行环境、源码归档排除和代码包核验通过。
+已核对的公开工程快照为 [`97a2f2a8c882024c2171af6d521916046af817ab`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/97a2f2a8c882024c2171af6d521916046af817ab)，对应 [Actions 40276696721](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40276696721)：八个任务成功，Python 3.11／3.12 各 1190 项测试，以及运行环境、源码归档排除和代码包核验通过。
 
 这是该准确提交的固定结果。后续文档或工程提交均有自己的 HEAD，不能把这次运行写成新提交已经通过，也不能据此声称 `master` 或 PR 的另一轮检查成功。
 

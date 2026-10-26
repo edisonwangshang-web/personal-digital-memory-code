@@ -100,6 +100,44 @@ class ControlsTests(unittest.TestCase):
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
         self.assert_code("control_key_conflict", lambda: record_control(self.repo, self.correction(action="supersedes")))
 
+    def test_control_count_limit_preserves_reads_and_idempotent_retries(self):
+        with patch("pdm.controls.MAX_CONTROLS", 1):
+            first = record_control(self.repo, self.correction())
+            head = git(self.repo, "rev-parse", "HEAD")
+            controls = read_controls(self.repo)
+            before = {str(path.relative_to(self.repo)): path.read_bytes()
+                      for path in (self.repo / "memory").rglob("*") if path.is_file()}
+            repeated = record_control(self.repo, self.correction())
+            self.assertEqual(repeated["control_id"], first["control_id"])
+            self.assertTrue(repeated["reused"])
+            self.assert_code("control_key_conflict", lambda: record_control(
+                self.repo, self.correction(action="supersedes")))
+            self.assert_code("control_limit", lambda: record_control(self.repo, {
+                "request_key": "fixture:over-capacity", "action": "delete", "source_paths": [self.paths[2]]}))
+            self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+            self.assertEqual(read_controls(self.repo), controls)
+            self.assertIn("无关人工内容", load_source(self.repo, self.paths[2])["body"])
+            after = {str(path.relative_to(self.repo)): path.read_bytes()
+                     for path in (self.repo / "memory").rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+            self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+
+    def test_control_count_limit_rejects_deletion_without_removing_current_views(self):
+        published = self.publish_old()
+        with patch("pdm.controls.MAX_CONTROLS", 1):
+            record_control(self.repo, {"request_key": "fixture:first-control", "action": "delete",
+                                      "source_paths": [self.paths[2]]})
+            head = git(self.repo, "rev-parse", "HEAD")
+            objects = {path: (self.repo / path).read_bytes() for path in published["files"]}
+            self.assert_code("control_limit", lambda: record_control(self.repo, {
+                "request_key": "fixture:over-capacity-deletion", "action": "delete",
+                "source_paths": [self.paths[0]], "object_paths": sorted(objects)}))
+            self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+            self.assertEqual({path: (self.repo / path).read_bytes() for path in objects}, objects)
+            self.assertEqual(len(read_controls(self.repo)["events"]), 1)
+            self.assertIn("旧人工数值", load_source(self.repo, self.paths[0])["body"])
+            self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+
     def test_replacement_cycle_is_rejected_without_new_commit(self):
         record_control(self.repo, self.correction())
         head = git(self.repo, "rev-parse", "HEAD")

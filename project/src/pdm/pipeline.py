@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime
 from pathlib import Path
 
-from .contracts import CaptureError, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version, source_contract, timestamp
+from .contracts import CaptureError, ASSEMBLY_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version, source_contract, timestamp
 from .domains import DOMAIN_LABELS, DOMAIN_POLICY_VERSION, domain_policy
 from .model_calls import ModelCallError, USAGE_FIELDS, call_model
 from .transaction import PipelineGit
@@ -32,6 +32,7 @@ SAFE_REVIEW_PRELAUNCH_ERRORS = frozenset({
     "publication_paused", "remote_unconfirmed", "remote_head_changed", "remote_sync_required",
 })
 REVIEW_STRATEGIES = frozenset({"legacy-v1", "auto", "decomposed-v1"})
+CURRENT_DRAFT_REVIEW_CONTRACT = "current-draft-v1"
 
 
 def _error(code="invalid_pipeline_data"):
@@ -63,7 +64,7 @@ def _load(value, kind, schema_version=None):
                             parse_constant=lambda value: _error())
     except (ValueError, TypeError, RecursionError):
         _error()
-    supported = ((PIPELINE_SCHEMA, MULTISOURCE_PIPELINE_SCHEMA, M1_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS)
+    supported = ((PIPELINE_SCHEMA, MULTISOURCE_PIPELINE_SCHEMA, M1_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS, ASSEMBLY_SCHEMA_VERSION)
                  if schema_version is None else schema_version if isinstance(schema_version, tuple) else (schema_version,))
     if metadata.get("schema_version") not in supported or metadata.get("kind") != kind or not isinstance(result, dict):
         _error()
@@ -230,6 +231,9 @@ def _source_fields(sources):
 
 
 def _pipeline_schema(candidate):
+    if "assembly" in candidate:
+        from .assembly_final import SCHEMA
+        return SCHEMA
     if _quality_enabled(candidate):
         return quality_schema_version(candidate.get("skill_bundle"))
     if "revision_context" in candidate:
@@ -1196,7 +1200,18 @@ def _candidate_payload(git, candidate, sources):
     return payload
 
 
+def _current_draft_review(candidate):
+    """New candidates pin the smaller Review input; old bytes stay reproducible."""
+    if "review_request_contract" not in candidate:
+        return False
+    if (candidate["review_request_contract"] != CURRENT_DRAFT_REVIEW_CONTRACT
+            or not _quality_enabled(candidate) or "assembly" in candidate):
+        _error("invalid_review_request_contract")
+    return True
+
+
 def _review_payload(candidate, payload):
+    current_draft = _current_draft_review(candidate)
     request = {**payload, "candidate": candidate}
     if _quality_enabled(candidate):
         from .knowledge_quality import build_review_checks
@@ -1209,14 +1224,18 @@ def _review_payload(candidate, payload):
         request["candidate"]["extraction_output"] = {
             "quality": copy.deepcopy(candidate["extraction_output"]["quality"])}
         from .quality_completed_extraction import CONTRACTS
-        if candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS:
-            # This new recovery contract retains the original cache and full
-            # history in Git. The semantic feedback is already complete at the
-            # request root; its duplicate envelope and program-only recovery
-            # provenance are not additional facts for the model to review.
+        if current_draft or candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS:
+            # The original recovery contract already omits repeated program
+            # provenance. The new current-draft contract uses that same narrow
+            # omission without changing any unmarked historical request.
             for key in ("revision_context", "revision_revalidation", "revision_resume",
                         "quality_revalidation_guard_ref"):
                 request["candidate"].pop(key, None)
+        if current_draft:
+            # Review independently checks the current draft against its actual
+            # evidence. Previous drafts and feedback remain in the bound stage
+            # and publication proof, not in this model request.
+            request.pop("revision_context", None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
     return request
 
@@ -1301,8 +1320,9 @@ def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, outp
         sources = _candidate_sources(git, candidate, historical=True)
         request = _review_payload(candidate, _candidate_payload(git, candidate, sources))
     _review_output(output, quality=quality, required_checks=request["required_checks"] if request else None)
+    from .assembly_final import extraction_invocations
     if (_call_metadata({**review_call, "output": output}) != review_call
-            or review_call["invocation_id"] == candidate["extraction"]["invocation_id"]):
+            or review_call["invocation_id"] in extraction_invocations(candidate)):
         _error("review_not_independent")
     review_path = _run_path(run_id, "review")
     review = {"run_id": run_id, "review_id": "rev-" + uuid.uuid4().hex, "binding": candidate["binding"],
@@ -1443,17 +1463,29 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         _error("invalid_revision_resume")
     if revision_from_run is not None:
         _run_path(revision_from_run, "review")
-        if (execution_context is not None or continuation_context is not None or draft_only
-                or reuse_extraction_run is not None):
+        if execution_context is not None or reuse_extraction_run is not None:
             _error("invalid_revision_context")
         scope = normalize_source_paths(source_paths, allow_versions=True, max_sources=256)
         peek = _load(_committed(PipelineGit(repo), _stage_path(revision_from_run)), "candidate")
+        from .revision_context import supports_phase_revision
+        phase_revision = supports_phase_revision(peek)
+        if (not phase_revision and (continuation_context is not None or draft_only)
+                or draft_only != peek.get("batch_material", {}).get("draft_only", False)
+                or continuation_context != peek.get("continuation_context")):
+            _error("invalid_revision_context")
+        if phase_revision and (_resume_unstarted is not None or _revalidate_completed is not None):
+            # Dedicated operator attestations still cover final candidates
+            # without a pending continuation; phase repair uses normal calls.
+            if draft_only or continuation_context is not None:
+                _error("invalid_revision_context")
         if rebuild_context != peek.get("rebuild_context"):
             _error("invalid_rebuild_context")
         if peek.get("binding") != _candidate_binding(peek) or sorted(item["path"] for item in _candidate_bindings(peek)) != scope:
             _error("revision_source_scope")
         if skill_bundle is None and _quality_enabled(peek):
             skill_bundle = copy.deepcopy(peek["skill_bundle"])
+        if (draft_only or continuation_context is not None) and not _feedback_quality_enabled(skill_bundle):
+            _error("invalid_revision_context")
         if "batch_context" in peek:
             if batch_context is None and source_views is None:
                 batch_context, source_views = copy.deepcopy(peek["batch_context"]), copy.deepcopy(peek["source_views"])
@@ -1755,6 +1787,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         candidate = {"run_id": run_id, "base_head": head, **source_fields, "versions": versions,
                      "related": related, "objects": objects, "extraction": extraction, "extraction_output": response["output"], "created_at": created,
                      **context_fields}
+        if skill_bundle is not None:
+            candidate["review_request_contract"] = CURRENT_DRAFT_REVIEW_CONTRACT
         stage_files = {}
         if _revalidate_completed is not None:
             from .quality_completed_extraction import CONTRACTS, RESPONSE_PROVENANCE, SCHEMA
@@ -1918,6 +1952,11 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     _load(stage_bytes, "candidate", schema_version)
     if candidate.get("run_id") != run_id or candidate.get("binding") != _candidate_binding(candidate):
         _error("candidate_mismatch")
+    _current_draft_review(candidate)
+    if "assembly" in candidate:
+        from .assembly_final import read_assembled_candidate
+        return read_assembled_candidate(git, run_id, candidate, stage_bytes, source_paths=source_paths,
+                                        historical=historical, visited=visited)
     if ("revision_resume" in candidate or "revision_revalidation" in candidate) and "revision_context" not in candidate:
         _error("invalid_revision_resume")
     strategy = candidate.get("review_strategy", "legacy-v1")
@@ -1989,11 +2028,20 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             candidate["related_runs"], at_commit=candidate["base_head"],
             draft_only=candidate.get("batch_material", {}).get("draft_only", False))
     if "revision_context" in candidate:
-        if not incremental or candidate.get("execution_context") is not None or "continuation_context" in candidate or "extraction_reused_from" in candidate:
+        if not incremental or candidate.get("execution_context") is not None or "extraction_reused_from" in candidate:
             _error("invalid_revision_context")
-        from .revision_context import verify_revision_context
+        if not isinstance(candidate["revision_context"], dict):
+            _error("invalid_revision_context")
+        from .revision_context import supports_phase_revision, verify_revision_context
+        old = candidate["revision_context"].get("candidate", {})
+        phased = (candidate.get("batch_material", {}).get("draft_only", False)
+                  or candidate.get("continuation_context") is not None)
+        if phased and (not supports_phase_revision(candidate) or not supports_phase_revision(old)
+                       or "revision_resume" in candidate or "revision_revalidation" in candidate):
+            _error("invalid_revision_context")
         verify_revision_context(git, candidate["revision_context"], source_paths=[source["path"] for source in sources],
-            related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical)
+            related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical,
+            include_snapshots=False)
         pointer_path = _revision_attempt_path(candidate["revision_context"])
         pointer = _load(_committed(git, pointer_path), "revision_attempt",
             _processing_header(candidate.get("skill_bundle"), REVISION_SCHEMA_VERSION))
@@ -2015,7 +2063,9 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         old = candidate["revision_context"]["candidate"]
         if (candidate.get("batch_context", {}).get("source_ranges") != old.get("batch_context", {}).get("source_ranges") or candidate.get("source_views") != old.get("source_views")
                 or candidate.get("merge_inputs", []) != old.get("merge_inputs", [])
-                or candidate.get("batch_material", {}).get("draft_only", False)):
+                or candidate.get("batch_material", {}).get("draft_only", False)
+                    != old.get("batch_material", {}).get("draft_only", False)
+                or candidate.get("continuation_context") != old.get("continuation_context")):
             _error("revision_batch_context_changed")
     if batch:
         from .batching import validate_source_views, assert_fragment_refs
@@ -2080,13 +2130,14 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
         _error("review_binding_mismatch")
     call = _call_metadata({**review["call"], "output": review["output"]})
     _review_output(review["output"], quality=_quality_enabled(candidate))
-    if call != review["call"] or call["invocation_id"] == candidate["extraction"]["invocation_id"]:
+    from .assembly_final import SCHEMA as ASSEMBLY_SCHEMA, extraction_invocations
+    if call != review["call"] or call["invocation_id"] in extraction_invocations(candidate):
         _error("review_not_independent")
     if not isinstance(review.get("review_id"), str) or not re.fullmatch(r"rev-[0-9a-f]{32}", review["review_id"]):
         _error("review_binding_mismatch")
     proof = review.get("decomposed_proof")
     if proof is not None:
-        if schema_version not in {DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS} or candidate.get("review_strategy") not in {"auto", "decomposed-v1"}:
+        if schema_version not in {DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS, ASSEMBLY_SCHEMA} or candidate.get("review_strategy") not in {"auto", "decomposed-v1"}:
             _error("review_binding_mismatch")
         from .decomposed_review import verify_decomposed_review
         _ancestor(git, stage_commit, review_commit)
@@ -2326,6 +2377,8 @@ def publish(repo, run_id, expected_head=None):
         else:
             control_guard(git)
             candidate, review, review_commit = _read_reviewed(git, run_id)
+            if "assembly" in candidate:
+                _error("assembly_requires_group_publication")
             if candidate.get("batch_material", {}).get("draft_only"):
                 _error("batch_requires_final_review")
             _execution_guard(repo, candidate.get("execution_context"), run_id=run_id)

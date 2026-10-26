@@ -513,7 +513,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                 return {"status": "blocked_capacity", "proof": _proof(plan, [], "blocked_capacity"),
                         "attempted_calls": 0, "head": git.head(), "error": "decomposed_input_limit"}
     nodes, certificates, calls = [], [], 0
-    invocations = {candidate["extraction"]["invocation_id"]}
+    from .assembly_final import extraction_invocations
+    invocations = extraction_invocations(candidate)
     for unit in plan["units"]:
         request = _request(plan, unit, candidate, payload, certificates)
         request_sha, size = _hash(request), _input_bytes(request, plan["prompt"])
@@ -679,7 +680,8 @@ def verify_decomposed_review(git, candidate, review, payload, sources, historica
     authority = [_snapshot(git, expected_path)]
     if "rebuild_context" in plan:
         authority.append(deepcopy(plan["rebuild_context"]))
-    invocations = {candidate["extraction"]["invocation_id"]}
+    from .assembly_final import extraction_invocations
+    invocations = extraction_invocations(candidate)
     if not isinstance(proof.get("nodes"), list) or not proof["nodes"] or len(proof["nodes"]) > len(plan["units"]):
         _fail("decomposed_incomplete_proof")
     last = None

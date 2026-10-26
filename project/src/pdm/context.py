@@ -163,6 +163,7 @@ def _pending_origin(git, item, run):
 
 
 def _pending_origin_data(git, item, run):
+    from .assembly_final import extraction_invocations as _extraction_invocations
     from .pipeline import (_call_metadata, _candidate_binding, _candidate_bindings,
                            _committed, _hash, _last_commit, _load, _review_output, _read_reviewed)
 
@@ -197,7 +198,7 @@ def _pending_origin_data(git, item, run):
             or review.get("stage_sha256") != _hash(stage)
             or git.text("rev-parse", stage_commit + "^") != candidate.get("base_head")
             or not extended_review and git.text("rev-parse", review_commit + "^") != stage_commit
-            or call != review["call"] or call["invocation_id"] == candidate["extraction"]["invocation_id"]
+            or call != review["call"] or call["invocation_id"] in _extraction_invocations(candidate)
             or review["output"]["verdict"] != "needs_confirmation"
             or item["question"] != "\n".join(review["output"]["reasons"])
             or refs != item["source_refs"] or objects != item["object_refs"]):

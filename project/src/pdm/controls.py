@@ -514,6 +514,11 @@ def record_control(repo, payload, expected_head=None):
                 if _event_payload(event) != value:
                     _error("control_key_conflict")
                 return {"control_id": identifier, "path": f"memory/runs/controls/{identifier}.md", "head": head, "reused": True}
+        # A committed event must remain readable. Check the collection bound
+        # before writing either the event or any declared current-view deletion;
+        # retries of an existing event remain valid at the capacity boundary.
+        if len(snapshot["events"]) >= MAX_CONTROLS:
+            _error("control_limit")
         plan = _plan(git, value, snapshot)
         if plan["missing_object_paths"] or plan["missing_source_paths"]:
             error = CaptureError("control_dependencies", "控制范围未覆盖全部来源或直接依赖；请查看控制计划")
