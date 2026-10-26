@@ -272,7 +272,11 @@ class QualityCompletedExtractionTests(unittest.TestCase):
         request = self.review_requests[-1]
         self.assertFalse({"revision_context", "revision_revalidation", "revision_resume", "quality_revalidation_guard_ref"}
                          .intersection(request["candidate"]))
-        self.assertEqual(request["revision_context"], self.payload["revision_context"])
+        self.assertEqual(candidate["review_request_contract"], pipeline.CURRENT_DRAFT_REVIEW_CONTRACT)
+        self.assertNotIn("revision_context", request)
+        self.assertEqual(candidate["revision_context"]["model_context"], self.payload["revision_context"])
+        self.assertEqual(candidate["revision_revalidation"]["original_payload"], self.payload)
+        self.assertEqual(request["candidate"]["binding"], candidate["binding"])
         self.assertEqual(request["candidate"]["extraction_output"]["quality"], self.response["output"]["quality"])
         self.assertEqual(json.loads((self.cache / "response.json").read_text()), self.response)
         self.assertEqual((self.cache / "request.bin").read_bytes(), render_model_request("extract", self.payload))
@@ -281,7 +285,11 @@ class QualityCompletedExtractionTests(unittest.TestCase):
         shutil.rmtree(self.cache.parent.parent)
         self.ledger_path.unlink()
         self.assertTrue(verify_revalidated_extraction(self.git, candidate, historical=True))
-        self.assertEqual(pipeline.verify_publication(self.repo, result["run_id"], historical=True)["files"], published["files"])
+        proof = pipeline.verify_publication(self.repo, result["run_id"], historical=True)
+        self.assertEqual(proof["files"], published["files"])
+        required_history = set(protected) | {candidate["revision_context"]["stage"]["path"],
+                                              candidate["revision_context"]["review"]["path"]}
+        self.assertTrue(required_history <= {item["path"] for item in proof["authority_snapshots"]})
         for path, raw in protected.items():
             self.assertEqual((self.repo / path).read_bytes(), raw)
 
