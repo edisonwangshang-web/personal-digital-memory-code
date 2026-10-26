@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from pdm.budget import BudgetBlocked, BudgetLedger, BudgetedModelCall
 from pdm.cli import main
-from pdm.skill_support import resolve_skill_refs, validate_skill_bundle
+from pdm.skill_support import (DEFAULT_EXTRACT_SKILL_REF, DEFAULT_REVIEW_SKILL_REF,
+                               resolve_skill_refs, validate_skill_bundle)
 
 
 class BudgetCliTests(unittest.TestCase):
@@ -108,8 +109,8 @@ class BudgetCliTests(unittest.TestCase):
     def assert_skill_binding(self, bundle):
         validate_skill_bundle(bundle)
         self.assertEqual(bundle, resolve_skill_refs())
-        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@10")
-        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@8")
+        self.assertEqual(bundle["skills"]["extract"]["ref"], DEFAULT_EXTRACT_SKILL_REF)
+        self.assertEqual(bundle["skills"]["review"]["ref"], DEFAULT_REVIEW_SKILL_REF)
 
     def test_create_requires_explicit_initial_usage_and_never_overwrites(self):
         state = self.create(limit=7, initial_used=3)

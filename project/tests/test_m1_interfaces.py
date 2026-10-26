@@ -11,7 +11,8 @@ import test_runtime
 from pdm.budget import BudgetLedger
 from pdm.capture import capture
 from pdm.cli import main
-from pdm.skill_support import resolve_skill_refs, validate_skill_bundle
+from pdm.skill_support import (DEFAULT_EXTRACT_SKILL_REF, DEFAULT_REVIEW_SKILL_REF,
+                               resolve_skill_refs, validate_skill_bundle)
 
 
 class M1InterfaceTests(unittest.TestCase):
@@ -41,8 +42,8 @@ class M1InterfaceTests(unittest.TestCase):
     def assert_skill_binding(self, bundle):
         validate_skill_bundle(bundle)
         self.assertEqual(bundle, resolve_skill_refs())
-        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@10")
-        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@8")
+        self.assertEqual(bundle["skills"]["extract"]["ref"], DEFAULT_EXTRACT_SKILL_REF)
+        self.assertEqual(bundle["skills"]["review"]["ref"], DEFAULT_REVIEW_SKILL_REF)
 
     def test_environment_bind_and_verify_are_explicit_clone_local_operations(self):
         before = test_runtime.git(self.repo, "rev-parse", "HEAD")
