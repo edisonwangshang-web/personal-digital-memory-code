@@ -6,9 +6,11 @@
 
 ## 当前阶段
 
-当前程序为 `0.2.0.dev24`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础规则为 extract v14／review v10／answer v7。M0 手动基础闭环已有历史验收；M1 已实现主要工程能力，**整体仍未验收**。M2—M4 尚未作为完整产品阶段交付。
+当前程序为 `0.2.0.dev25`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础规则为 extract v14／review v10／answer v7。M0 手动基础闭环已有历史验收；M1 已实现主要工程能力，**整体仍未验收**。M2—M4 尚未作为完整产品阶段交付。
 
 本批补显式清理后从原文重建：固定清理意图与范围，原子保存清理回执，仅从选定原文重新提取、分类、独立审核和发布；旧来源、证明、unknown及有限计数保留。当前入口限单批完整来源，准确工程 CI、实际新知识质量、发布读取与私有恢复仍须分别验证，不能把清理成功或新候选产生记为 M1 通过。契约与操作见[重建规范](data-conventions.md#explicit-knowledge-rebuild)及[日常使用](daily-use.md#explicit-knowledge-rebuild)。
+
+dev25修复通用中文日期核对，并增加同一重建generation中、已完成提取因日期校验失败的显式 V2 零 extract 重验。原始模型返回和失败保留，歧义、当前状态与完整独立审核门禁继续生效；默认V1边界保持。准确CI及真实重验、审核、发布、读取和私有恢复分别取证，详见[V2合同](data-conventions.md#quality-completed-recovery-v2)。
 
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 

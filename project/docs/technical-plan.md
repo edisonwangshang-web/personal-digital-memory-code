@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev24`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev25`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
 
 ## 当前实现与双仓边界
 

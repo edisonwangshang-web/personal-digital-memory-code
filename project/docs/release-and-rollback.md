@@ -1,6 +1,6 @@
 # 工程迭代、发布与回滚
 
-当前程序 `0.2.0.dev24`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`。本文规定公开工程交付及私有资料运行的共同门禁，私有真实验收不在公库发布。程序版本、规则版本、数据格式及实际资料版本分别固定；代码发布不等于服务部署或M1验收。M1仍缺目标定时runner、两轮真实触发和第二模型等实际证据。
+当前程序 `0.2.0.dev25`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`。本文规定公开工程交付及私有资料运行的共同门禁，私有真实验收不在公库发布。程序版本、规则版本、数据格式及实际资料版本分别固定；代码发布不等于服务部署或M1验收。M1仍缺目标定时runner、两轮真实触发和第二模型等实际证据。
 
 [执行方案](m0-m1-execution-plan.md) · [数据规范](data-conventions.md) · [场景验收](scenarios-and-acceptance.md) · [Roadmap](roadmap.md) · [双仓操作](dual-repository-operation.md)
 

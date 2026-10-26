@@ -993,7 +993,7 @@ def _completed_extraction_module(context):
     contract = context.get("contract") if isinstance(context, dict) else None
     if contract is None and isinstance(context, dict):
         contract = context.get("attestation", {}).get("contract")
-    if contract == quality_completed_extraction.CONTRACT:
+    if contract in quality_completed_extraction.CONTRACTS:
         return quality_completed_extraction
     if contract == known_extraction.CONTRACT:
         return known_extraction
@@ -1208,8 +1208,8 @@ def _review_payload(candidate, payload):
                                                "batch_context", "related", "merge_inputs", "extraction_output"}}
         request["candidate"]["extraction_output"] = {
             "quality": copy.deepcopy(candidate["extraction_output"]["quality"])}
-        if (candidate.get("revision_revalidation", {}).get("contract")
-                == "quality-completed-extraction-revalidation-v1"):
+        from .quality_completed_extraction import CONTRACTS
+        if candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS:
             # This new recovery contract retains the original cache and full
             # history in Git. The semantic feedback is already complete at the
             # request root; its duplicate envelope and program-only recovery
@@ -1413,9 +1413,17 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
     """
     if type(_preflight_only) is not bool or _preflight_only and (_resume_unstarted is not None or _revalidate_completed is not None):
         _error("invalid_preflight")
-    if rebuild_context is not None and (related_runs not in (None, [])
+    from .quality_completed_extraction import CONTRACT_V2
+    rebuild_revalidation = (_revalidate_completed is not None
+        and isinstance(_revalidate_completed, dict)
+        and _revalidate_completed.get("attestation", {}).get("contract") == CONTRACT_V2)
+    if rebuild_revalidation and (rebuild_context is None
+            or _revalidate_completed["attestation"].get("rebuild_context") != rebuild_context
+            or _revalidate_completed.get("original_payload", {}).get("rebuild_context") != rebuild_context):
+        _error("invalid_rebuild_context")
+    if rebuild_context is not None and (related_runs not in (None, [], ())
             or continuation_context is not None or draft_only or merge_runs or reuse_extraction_run is not None
-            or _resume_unstarted is not None or _revalidate_completed is not None):
+            or _resume_unstarted is not None or _revalidate_completed is not None and not rebuild_revalidation):
         _error("invalid_rebuild_context")
     if _revalidate_completed is not None and (_resume_unstarted is not None or revision_from_run is None or run_id is None):
         _error("invalid_extraction_revalidation")
@@ -1459,9 +1467,9 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if _resume_unstarted is not None:
             _error("skill_quality_recovery_attestation_required")
         if _revalidate_completed is not None:
-            from .quality_completed_extraction import CONTRACT
+            from .quality_completed_extraction import CONTRACTS
             if (not _feedback_quality_enabled(skill_bundle)
-                    or _revalidate_completed.get("attestation", {}).get("contract") != CONTRACT):
+                    or _revalidate_completed.get("attestation", {}).get("contract") not in CONTRACTS):
                 _error("skill_quality_recovery_attestation_required")
     revalidation_call_baseline = _actual_calls(model_call) if _revalidate_completed is not None else None
     def current_call_count():
@@ -1684,6 +1692,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         except (ModelCallError, CaptureError) as error:
             git.check(head)
             if _revalidate_completed is not None:
+                if rebuild_revalidation:
+                    return _failure(git, run_id, "extract", error.code, head,
+                        _failure_call(error, response), schema_version, current_call_count(),
+                        failure_name="revalidation-failure")
                 return {"run_id": run_id, "status": "failed", "error": error.code,
                         "failure_path": _run_path(run_id, "failure"), "head": head,
                         "attempted_calls": 0, "model_calls": 0, "extract_calls": 0}
@@ -1718,7 +1730,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             except CaptureError as error:
                 git.check(head)
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
-                                current_call_count())
+                                current_call_count(),
+                                failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
         try:
             _validate_domains(objects, related, context_fields.get("operations", {}), versions)
         except CaptureError as error:
@@ -1732,11 +1745,11 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                      **context_fields}
         stage_files = {}
         if _revalidate_completed is not None:
-            from .quality_completed_extraction import CONTRACT, RESPONSE_PROVENANCE, SCHEMA
-            if _revalidate_completed.get("contract") == CONTRACT:
+            from .quality_completed_extraction import CONTRACTS, RESPONSE_PROVENANCE, SCHEMA
+            if _revalidate_completed.get("contract") in CONTRACTS:
                 guard_path = _run_path(run_id, "quality-revalidation-guard")
                 attestation = _revalidate_completed["attestation"]
-                guard = {"run_id": run_id, "contract": CONTRACT, "response_provenance": RESPONSE_PROVENANCE,
+                guard = {"run_id": run_id, "contract": _revalidate_completed["contract"], "response_provenance": RESPONSE_PROVENANCE,
                     "revalidation_context_sha256": _hash(_revalidate_completed),
                     "original_failure": attestation["failure"],
                     "original_call": {"invocation_id": extraction["invocation_id"],
@@ -1822,7 +1835,8 @@ def resume_unstarted_revision(repo, run_id, *, allowed_source_paths, model_call,
 def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model_call,
                                     attestation, expected_attestation_sha256, original_payload,
                                     response, original_resume_context, related_runs=(), expected_head=None,
-                                    batch_context=None, source_views=None, review_strategy="decomposed-v1"):
+                                    batch_context=None, source_views=None, review_strategy="decomposed-v1",
+                                    rebuild_context=None):
     """Revalidate the exact known completed response; never invoke extraction.
 
     Independent Review remains mandatory. The original failure, operation,
@@ -1830,6 +1844,14 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
     """
     if not isinstance(attestation, dict):
         _error("invalid_extraction_revalidation")
+    from .quality_completed_extraction import CONTRACT_V2
+    if attestation.get("contract") == CONTRACT_V2:
+        original_rebuild = attestation.get("rebuild_context")
+        if original_rebuild is None or rebuild_context is not None and rebuild_context != original_rebuild:
+            _error("invalid_rebuild_context")
+        rebuild_context = copy.deepcopy(original_rebuild)
+    elif rebuild_context is not None:
+        _error("invalid_rebuild_context")
     git = PipelineGit(repo)
     stage_path = _stage_path(run_id)
     if git.path(stage_path).is_file():
@@ -1840,7 +1862,8 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
         if (context.get("expected_attestation_sha256") != expected_attestation_sha256
                 or context.get("attestation") != attestation or context.get("original_payload") != original_payload
                 or context.get("original_response") != response
-                or context.get("original_resume_context") != original_resume_context):
+                or context.get("original_resume_context") != original_resume_context
+                or candidate.get("rebuild_context") != rebuild_context):
             _error("extraction_revalidation_changed")
         _assert_revalidation_operation(candidate, model_call)
         git.check(head)
@@ -1858,6 +1881,7 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
     return process_sources(repo, allowed_source_paths, expected_head, model_call=model_call, skill_bundle=bundle,
         run_id=run_id, related_runs=related_runs, batch_context=batch_context, source_views=source_views,
         review_strategy=review_strategy, revision_from_run=attestation.get("revision_from_run"),
+        rebuild_context=rebuild_context,
         _revalidate_completed={"attestation": copy.deepcopy(attestation),
             "expected_attestation_sha256": expected_attestation_sha256,
             "original_payload": copy.deepcopy(original_payload), "response": copy.deepcopy(response),
@@ -1898,11 +1922,17 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     sources = _candidate_sources(git, candidate, historical=historical or incremental)
     rebuild_context = candidate.get("rebuild_context")
     if "rebuild_context" in candidate:
+        from .quality_completed_extraction import CONTRACT_V2
+        recovery = candidate.get("revision_revalidation", {})
+        rebuild_revalidation = recovery.get("contract") == CONTRACT_V2
         if (rebuild_context is None or not incremental or candidate.get("related_runs") != []
                 or candidate.get("related") != [] or candidate.get("merge_inputs", [])
                 or candidate.get("batch_material", {}).get("draft_only", False)
-                or any(key in candidate for key in ("continuation_context", "extraction_reused_from",
-                                                    "revision_resume", "revision_revalidation"))):
+                or any(key in candidate for key in ("continuation_context", "extraction_reused_from"))
+                or not rebuild_revalidation and any(key in candidate for key in ("revision_resume", "revision_revalidation"))):
+            _error("invalid_rebuild_context")
+        if rebuild_revalidation and (recovery.get("attestation", {}).get("rebuild_context") != rebuild_context
+                or recovery.get("original_payload", {}).get("rebuild_context") != rebuild_context):
             _error("invalid_rebuild_context")
         revision = candidate.get("revision_context")
         if revision is not None and (not isinstance(revision, dict)
@@ -1960,8 +1990,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
                 "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"])}
                 or _last_commit(git, git.head(), pointer_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])):
             _error("revision_attempt_mismatch")
-        quality_revalidation = (candidate.get("revision_revalidation", {}).get("contract")
-                                == "quality-completed-extraction-revalidation-v1")
+        from .quality_completed_extraction import CONTRACTS
+        quality_revalidation = candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS
         if "revision_resume" in candidate and not quality_revalidation:
             from .revision_resume import verify_revision_resume
             verify_revision_resume(git, candidate, historical=historical)

@@ -2,7 +2,15 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前：0.2.0.dev24
+## 当前：0.2.0.dev25
+
+修复通用 `source_time` 日期核对：接受 ISO 与中文年月日；中文月日只在实际来源引文中可唯一确定同一完整日期时成立。不从当前时间或采集时间补年份，歧义、无真实日期依据及冒充当前系统状态仍拒绝。模型原始返回、正文和旧 Skill 字节保持，不替模型改写时间声明。
+
+增加显式 `quality-completed-extraction-revalidation-v2`，只对同一明确重建 generation 的原生已完成提取、`quality_temporal_mismatch` 且尚无候选／Review 的情况做零 extract 重验。操作者核定固定原始缓存和调用绑定，使用原回执、原来源、完整同轮反馈及当前校验版本，合格候选仍须真实独立 Review。旧 V1 继续仅接 `candidate_too_large`，默认恢复合同不改；候选0.12、guard0.13与调用计数边界保持。原 failure 只有调用摘要时不能倒称已有输出 SHA，原始失败、unknown和模型输出均保留。
+
+本批沿用人工触发与原加工阶段，不新增模型环节。准确 CI、真实重验／审核／发布／读取和私有恢复分别留证；本页不宣称业务通过或 M1 完成。字段与执行见[日期规范](data-conventions.md#skill-quality-contract)、[V2重验](data-conventions.md#quality-completed-recovery-v2)和[实现明细](implementation-details.md#quality-completed-recovery-v2-execution)。
+
+## 历史：0.2.0.dev24
 
 新增显式清理后从原文重建入口。操作者给出稳定意图、来源范围和正式目标，`rebuild-prepare` 在同一提交删除选定正式文件并保存不可变回执；原文、旧候选、审核、控制、调用记录和 Git 历史保留。相同意图重放不再次删除，普通删除保护继续生效。
 

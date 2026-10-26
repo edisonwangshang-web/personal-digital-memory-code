@@ -80,6 +80,11 @@ _TEMPORAL_WORDS = re.compile(r"当前|目前|尚未|已经|截至|现已|未导�
 _SOURCE_TIME_WORDS = re.compile(r"当时|导出时|导出说明|来源时间|原文.*时|截至|as of|at (?:export|source) time", re.I)
 _UNKNOWN_TIME_WORDS = re.compile(r"未知|不明|无法确定|未核实|未确认|unknown|unverified", re.I)
 _EXPLICIT_DATE = re.compile(r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])")
+_CHINESE_DATE = re.compile(
+    r"(?<![0-9])(?:([0-9]+)[ \t]*年[ \t]*)?([0-9]+)[ \t]*月[ \t]*([0-9]+)[ \t]*日(?![0-9])")
+_CHINESE_YEAR = re.compile(r"(?<![0-9])[0-9]+[ \t]*年")
+_SOURCE_DATE_ATTRIBUTION = re.compile(r"原表|源表|原文|来源")
+_UNFINISHED_SOURCE_STATE = re.compile(r"未完结|未完成|未结束")
 _CURRENT_TIME_WORDS = re.compile(r"当前|目前|现在|现已|\bcurrently\b|\bnow\b", re.I)
 _SENTENCE_BOUNDARY = re.compile(r"[。！？!?；;\n]|\.(?:\s+|$)")
 
@@ -589,29 +594,67 @@ def _record_refs_cover(record, refs):
 
 
 def _source_date_qualified(statement, refs):
-    """Accept explicit source dates without borrowing another sentence's date."""
+    """Bind date expressions to cited dates, never the clock or another sentence.
+
+    A yearless Chinese month/day additionally needs same-sentence source
+    attribution and one unambiguous complete date in this claim's own quotes.
+    """
     if _CURRENT_TIME_WORDS.search(statement):
         return False
-    stated = _EXPLICIT_DATE.findall(statement)
-    if not stated:
-        return False
-    try:
-        dates = {date.fromisoformat(value) for value in stated}
-    except ValueError:
-        return False
+
+    def complete_dates(text):
+        values = [date.fromisoformat(value) for value in _EXPLICIT_DATE.findall(text)]
+        for match in _CHINESE_DATE.finditer(text):
+            year, month, day = match.groups()
+            if year is not None:
+                if len(year) != 4:
+                    raise ValueError("invalid source date year")
+                values.append(date(int(year), int(month), int(day)))
+        return set(values)
+
     quoted = set()
     for ref in refs:
-        for value in _EXPLICIT_DATE.findall(ref["quote"]):
+        # Preserve the existing treatment of malformed dates inside a larger
+        # quotation: ignore that token, not another valid cited date.
+        for match in list(_EXPLICIT_DATE.finditer(ref["quote"])) + list(_CHINESE_DATE.finditer(ref["quote"])):
             try:
-                quoted.add(date.fromisoformat(value))
+                quoted.update(complete_dates(match.group()))
             except ValueError:
                 continue
-    if not dates <= quoted:
-        return False
+    stated = set()
+    chinese = bool(_CHINESE_DATE.search(statement))
     for sentence in _SENTENCE_BOUNDARY.split(statement):
-        if _TEMPORAL_WORDS.search(sentence) and not _EXPLICIT_DATE.search(sentence):
+        try:
+            dates = complete_dates(sentence)
+        except ValueError:
             return False
-    return True
+        expressions = list(_CHINESE_DATE.finditer(sentence))
+        partial = [match for match in expressions if match[1] is None]
+        if partial:
+            if not _SOURCE_DATE_ATTRIBUTION.search(sentence):
+                return False
+            full_spans = [match.span() for match in expressions if match[1] is not None]
+            # Do not treat an unparsed, separate year as permission to guess
+            # which year a short date means (e.g. "2025年，5月9日").
+            if any(not any(start <= year.start() and year.end() <= end for start, end in full_spans)
+                   for year in _CHINESE_YEAR.finditer(sentence)):
+                return False
+            for match in partial:
+                try:
+                    month, day = int(match[2]), int(match[3])
+                except ValueError:
+                    return False
+                matches = {value for value in quoted if (value.month, value.day) == (month, day)}
+                if len(matches) != 1:
+                    return False
+                dates.update(matches)
+        if not dates <= quoted:
+            return False
+        if (_TEMPORAL_WORDS.search(sentence)
+                or chinese and _UNFINISHED_SOURCE_STATE.search(sentence)) and not dates:
+            return False
+        stated.update(dates)
+    return bool(stated)
 
 
 def validate_quality_output(output, context):

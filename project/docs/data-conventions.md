@@ -1,6 +1,6 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev24`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev25`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
 来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；已支持格式 `0.1`—`0.13` 按各自 kind 契约读取，不批量迁移；`0.13` 仅用于下述专用已完成提取恢复门禁，普通10/8候选与质量链仍为 `0.12`。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
@@ -42,6 +42,18 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 预约前还检查已知当前核心与历史材料的存储下界；若下界已经超限则零调用停止。该检查不能预测未知模型输出，实际候选落盘时仍核完整核心与总量。仅此恢复契约的Review视图去掉candidate内重复的revision_context、revision_revalidation、revision_resume和quality_revalidation_guard_ref；请求根处的完整语义反馈、当前对象、目标、统计和required_checks保留，原始payload／response及完整历史继续在私库Git中受guard绑定，库外缓存原字节按独立摘要核验。超出模型容量仍按既有分解审核规则处理，不借存储例外提高模型输入上限。
 
 恢复后的实际内容仍须完整独立 Review；只有完整证明通过才可按目标 plan 发布。已有真实 group 的 marker，只有在 plan 完整值、固定 Skill、来源与候选证明均匹配后，新10/8队列才能持久保存 `published`、publication、revision及 adopted 记录。已有 `final_run` 不得换成另一证明；重复采用零写／零模型调用，原失败队列与计数保持。旧9/7仅返回 effective published 的历史行为不变。
+
+<a id="quality-completed-recovery-v2"></a>
+
+### dev25：同一重建内的日期校验重验
+
+`quality-completed-extraction-revalidation-v2` 是独立、显式选择的恢复合同，只接同一 `rebuild_context` 的原生 `extract=completed`、原失败为 `quality_temporal_mismatch` 且未保存候选／Review／发布的调用。原来源、批次、同轮真实反馈、原请求及 Skill、重建回执、控制、operation／pool与调用记录必须完整匹配；unknown、已启动审核、换 generation 或其他错误均拒绝。旧 V1 仍只接 `candidate_too_large`，默认调用不升级为 V2。
+
+V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 `prepare_attestation(..., contract=CONTRACT_V2)` 准备。证明在原字段上固定精确 `rebuild_context` 引用，原 payload／response和完整同轮反馈不改写。`response_provenance` 仍为 `operator_attested_local_cache_no_prior_git_output_digest`：操作者核定并冻结原始缓存及摘要，不把原 failure 的 invocation／model／elapsed 摘要追认为原输出正文 SHA 或服务端签名。
+
+恢复沿原 run／operation，零新 extract，以当前程序重新核原输出；不补填模型字段、不清除原失败／unknown或计数。同轮反馈只有在原调用中实际提供且同回执绑定时才保留，不能替换原文或变造原响应。有效候选仍为 schema0.12，使用原 `quality_revalidation_guard`、schema0.13，guard 的合同标记为 V2；stage 与 guard 仍原子保存，字段及历史证明按合同分支校验，不新增格式迁移。
+
+合格只表示通过当前程序检查，随后仍须真实独立 Review、完整发布及读取验证。日期歧义或其他质量问题再次出现时按失败处理，不能覆盖原失败、放宽普通质量检查或直接发布。
 
 <a id="candidate-storage-limits"></a>
 
@@ -93,7 +105,7 @@ CLI 分别提供 `--extract-skill`、`--review-skill`，加载器接口为 `reso
 
 extract@7 起的动态输出 Schema 按当前 targets 实际数量约束 `coverage_disposition` 长度；目标 ID 非空且唯一，清单可为空或超过256，不引入额外资料上限。长度不替代逐目标唯一性和实质正文校验，旧提取1—6及审核1—5的 Schema 与请求原样保留。
 
-summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一记录提供多段不同精确正文，必须覆盖全部 ID，额外 ID 或重复 `(record_id,text)` 拒绝。`source_time` 可用明确 ISO 日期，须有核真的同日期来源行，状态句也须有日期限定；不能借日期陈述当前系统状态。质量声明修复可构成实质返工，但须绑定真实拒收候选与实际审核，不能手改模型输出。
+summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一记录提供多段不同精确正文，必须覆盖全部 ID，额外 ID 或重复 `(record_id,text)` 拒绝。`source_time` 接受明确 ISO 日期和中文年月日；中文月日只在实际来源引文中可唯一确定同一完整日期时成立，状态句也须有对应日期限定。无日期依据、年份歧义及冒充当前系统状态仍拒绝，不从当前时间或采集时间补年份。质量声明修复可构成实质返工，但须绑定真实拒收候选与实际审核，不能手改模型输出。
 
 `quality_context` 由 `prepare_quality(sources, source_views=None)` 确定性生成，顶层包含 `contract`、`policy_version="source-quality-v1"`、`statistics_policy="descriptive-v1"`、`sources`、`targets`、`statistics`、`statistic_definitions`、`system_facts` 和 `scope_note`。候选读回时按固定原文及实际片段重算，不能把模型自报清单当程序事实。共享范围描述避免逐条重复同一元数据，实际请求容量仍以展开后的完整字节判断。
 
@@ -257,7 +269,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev24支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
+Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev25支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 

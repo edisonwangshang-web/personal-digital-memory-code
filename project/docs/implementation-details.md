@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev24`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev25`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
 
 新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
 
@@ -26,6 +26,14 @@
 5. 生产与分解审核身份仅在该回执存在时加入其绑定，同一意图跨队列、日期和程序升级仍沿用同一有限计数。旧 unknown、失败及计数不改。实际成功后再更新私库导航，并分别核真实读取与远程恢复；清理回执本身不证明加工通过。
 
 字段与命令分别见[数据规范](data-conventions.md#explicit-knowledge-rebuild)和[日常使用](daily-use.md#explicit-knowledge-rebuild)。
+
+<a id="quality-completed-recovery-v2-execution"></a>
+
+## dev25：同轮日期校验失败的零提取重验
+
+仅对同一显式重建回执的原生已完成提取、原 `quality_temporal_mismatch` 且尚无候选／Review 使用[独立V2合同](data-conventions.md#quality-completed-recovery-v2)。操作者固定原始缓存和原调用摘要，核原完整payload／response、请求字节、原来源、同轮真实反馈、重建回执与pool／operation；unknown或变更范围不得进入。默认V1仍仅处理其原存储失败。
+
+使用当前日期校验器重验原响应，原始JSON及失败保留；中文月日必须在实际来源引文中唯一确定同一完整日期，歧义、缺依据与当前状态冒用继续拒绝。零新extract，合格候选和schema0.13的V2 guard原子保存；随后仍执行真正独立Review、完整发布和读取。重验成功不代表审核或M1已通过，不新增模型阶段或修改旧Skill。
 
 <a id="quality-completed-recovery-execution"></a>
 
