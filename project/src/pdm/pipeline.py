@@ -609,10 +609,19 @@ def _candidate_binding(candidate):
     return _hash({key: value for key, value in candidate.items() if key != "binding"})
 
 
-def _targets_clear(git, objects):
+def _targets_clear(git, objects, rebuild_context=None, *, at_commit=None):
+    allowed = set()
+    if rebuild_context is not None:
+        from .rebuild import allow_rebuild_targets
+        allowed = allow_rebuild_targets(git, objects, rebuild_context, at_commit=at_commit)
     for obj in objects:
         path = obj["path"]
-        if git.path(path).exists() or git.text("log", "-1", "--format=%H", "--", path):
+        if path in allowed:
+            continue
+        exists = (git.path(path).exists() if at_commit is None
+                  else bool(git.run("ls-tree", at_commit, "--", path)))
+        history = git.text("log", "-1", "--format=%H", *([at_commit] if at_commit else []), "--", path)
+        if exists or history:
             _error("target_exists_or_deleted")
 
 
@@ -691,7 +700,7 @@ def _related_context(git, related_runs, sources, *, at_commit=None, visited=(), 
     return result
 
 
-def _updated_objects(git, objects, related, *, check_current=False):
+def _updated_objects(git, objects, related, *, check_current=False, rebuild_context=None):
     known = {document["path"]: document for item in related for document in item["documents"]}
     if check_current:
         returned = {obj["path"] for obj in objects}
@@ -733,8 +742,8 @@ def _updated_objects(git, objects, related, *, check_current=False):
                 _error("correction_evidence_missing")
         previous = known.get(path)
         if previous is None:
-            if check_current:
-                _targets_clear(git, [obj])
+            if check_current and rebuild_context is None:
+                _targets_clear(git, [obj], rebuild_context)
             operations[path] = {"action": "create", "before_sha256": None, "before_content_version": None}
         else:
             if obj["metadata"]["id"] != previous["metadata"].get("id") or obj["metadata"]["type"] != previous["metadata"].get("type"):
@@ -743,6 +752,9 @@ def _updated_objects(git, objects, related, *, check_current=False):
             action = "reuse" if obj["metadata"]["content_version"] == previous["content_version"] else "update"
             operations[path] = {"action": action, "before_sha256": previous["sha256"],
                                 "before_content_version": previous["content_version"]}
+    if check_current and rebuild_context is not None:
+        _targets_clear(git, [obj for obj in objects if operations[obj["path"]]["action"] == "create"],
+                       rebuild_context)
     return operations
 
 
@@ -802,7 +814,7 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
 
 def _processing_key(source_fields, versions, controls_digest, batch_context=None, batch_material=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_context=None, revision_resume=None,
-                    revision_revalidation=None, skill_bundle=None):
+                    revision_revalidation=None, skill_bundle=None, rebuild_context=None):
     bindings = [source_fields["source"], *source_fields.get("additional_sources", [])]
     material = {"sources": [{"source_id": item["source_id"], "source_version": item["source_version"]} for item in bindings],
                 "rules_version": versions["rules_version"], "controls_digest": controls_digest}
@@ -821,6 +833,8 @@ def _processing_key(source_fields, versions, controls_digest, batch_context=None
         material["revision_revalidation"] = {key: revision_revalidation[key] for key in ("contract", "expected_attestation_sha256")}
     if skill_bundle is not None:
         material["skill_bundle_sha256"] = skill_bundle["sha256"]
+    if rebuild_context is not None:
+        material["rebuild_context"] = rebuild_context
     return _hash(material)
 
 
@@ -1161,6 +1175,8 @@ def _candidate_payload(git, candidate, sources):
     payload = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                "related": [], "controls": {}, "rules_version": candidate["versions"]["rules_version"],
                "domain_policy": domain_policy()}
+    if "rebuild_context" in candidate:
+        payload["rebuild_context"] = copy.deepcopy(candidate["rebuild_context"])
     if "continuation_context" in candidate:
         payload["continuation_context"] = copy.deepcopy(candidate["continuation_context"])
     if "revision_context" in candidate:
@@ -1258,6 +1274,9 @@ def _assert_fixed_current(git, candidate, sources, stage_bytes):
     if incremental and (control_guard(git)["digest"] != candidate["controls_digest"]
             or _related_context(git, candidate["related_runs"], sources, max_runs=256 if batch else 8) != candidate["related"]):
         _error("processing_context_changed")
+    if "rebuild_context" in candidate:
+        from .rebuild import validate_rebuild_context
+        validate_rebuild_context(git, candidate["rebuild_context"], source_paths=source_paths)
 
 
 def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, output,
@@ -1385,7 +1404,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     related_runs=None, run_id=None, execution_context=None,
                     batch_context=None, source_views=None, draft_only=False, merge_runs=(), reuse_extraction_run=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_from_run=None, _resume_unstarted=None,
-                    _revalidate_completed=None, skill_bundle=None, _preflight_only=False):
+                    _revalidate_completed=None, skill_bundle=None, rebuild_context=None, _preflight_only=False):
     """Process selected sources; explicit revision retains a rejected fixed Review.
 
     Revision is interpretation work, never another fact source or permission to
@@ -1394,6 +1413,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
     """
     if type(_preflight_only) is not bool or _preflight_only and (_resume_unstarted is not None or _revalidate_completed is not None):
         _error("invalid_preflight")
+    if rebuild_context is not None and (related_runs not in (None, [])
+            or continuation_context is not None or draft_only or merge_runs or reuse_extraction_run is not None
+            or _resume_unstarted is not None or _revalidate_completed is not None):
+        _error("invalid_rebuild_context")
     if _revalidate_completed is not None and (_resume_unstarted is not None or revision_from_run is None or run_id is None):
         _error("invalid_extraction_revalidation")
     if _resume_unstarted is not None and (revision_from_run is None or run_id is None):
@@ -1405,6 +1428,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             _error("invalid_revision_context")
         scope = normalize_source_paths(source_paths, allow_versions=True, max_sources=256)
         peek = _load(_committed(PipelineGit(repo), _stage_path(revision_from_run)), "candidate")
+        if rebuild_context != peek.get("rebuild_context"):
+            _error("invalid_rebuild_context")
         if peek.get("binding") != _candidate_binding(peek) or sorted(item["path"] for item in _candidate_bindings(peek)) != scope:
             _error("revision_source_scope")
         if skill_bundle is None and _quality_enabled(peek):
@@ -1450,7 +1475,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         _error("invalid_batch_context")
     if continuation_context is not None and not batch:
         _error("invalid_continuation_context")
-    incremental = related_runs is not None or batch or revision_from_run is not None
+    incremental = related_runs is not None or batch or revision_from_run is not None or rebuild_context is not None
     if execution_context is not None and not incremental:
         _error("invalid_execution_context")
     related_limit = 256 if batch else 8
@@ -1505,6 +1530,9 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if all(source["metadata"]["acquisition_status"] == "link_only" for source in sources):
             _error("source_has_no_text")
         source_fields = _source_fields(sources)
+        if rebuild_context is not None:
+            from .rebuild import validate_rebuild_context
+            validate_rebuild_context(git, rebuild_context, source_paths=source_paths)
         schema_version = (quality_schema_version(skill_bundle) if skill_bundle is not None else REVISION_SCHEMA_VERSION if revision_context is not None else DECOMPOSED_SCHEMA_VERSION if review_strategy != "legacy-v1" else ORCHESTRATED_SCHEMA_VERSION if continuation_context is not None else CONTINUOUS_SCHEMA_VERSION
                           if batch else M1_SCHEMA_VERSION if incremental else _pipeline_schema(source_fields))
         versions = execution_versions(git)
@@ -1512,6 +1540,9 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                    "related": [], "controls": {}, "rules_version": versions["rules_version"],
                    "domain_policy": domain_policy()}
         related, context_fields = [], {}
+        if rebuild_context is not None:
+            payload["rebuild_context"] = copy.deepcopy(rebuild_context)
+            context_fields["rebuild_context"] = copy.deepcopy(rebuild_context)
         if _resume_unstarted is not None:
             context_fields["revision_resume"] = copy.deepcopy(_resume_unstarted)
         if _revalidate_completed is not None:
@@ -1544,7 +1575,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             context_fields.update(quality)
         if incremental:
             controls = control_guard(git)
-            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle)
+            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle, rebuild_context)
             existing = _existing_processing(git, key, source_paths, related_runs)
             if existing is not None:
                 if requested_run is not None and not _preflight_only:
@@ -1555,6 +1586,11 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                             "process: persist zero-call reuse for reserved attempt")
                     existing.update(attempt_run_id=run_id, reuse_path=path, head=final)
                 return existing
+            if rebuild_context is not None:
+                from .rebuild import allow_rebuild_targets
+                # An already-published intent was handled above. A fresh call
+                # must still have every explicitly cleared target unwritten.
+                allow_rebuild_targets(git, [], rebuild_context)
             related = _related_context(git, related_runs, sources, max_runs=related_limit)
             payload.update(processing_mode="incremental", related=related, controls=controls)
             context_fields.update({"mode": "incremental", "related_runs": related_runs,
@@ -1661,7 +1697,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             if control_guard(git)["digest"] != context_fields["controls_digest"] or _related_context(git, related_runs, sources, max_runs=related_limit) != related:
                 _error("processing_context_changed")
             try:
-                context_fields["operations"] = _updated_objects(git, objects, related, check_current=not draft_only)
+                context_fields["operations"] = _updated_objects(git, objects, related, check_current=not draft_only,
+                                                               rebuild_context=rebuild_context)
             except CaptureError as error:
                 if error.code not in {"related_records_omitted", "related_identity_changed",
                                       "correction_evidence_missing", "required_related_context"}:
@@ -1670,7 +1707,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version, current_call_count(),
                     failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
         else:
-            _targets_clear(git, objects)
+            _targets_clear(git, objects, rebuild_context)
         if _feedback_quality_enabled(skill_bundle):
             from .reuse_quality import validate_reuse_quality
             try:
@@ -1859,6 +1896,22 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             _error("evidence_source_mismatch")
     incremental = candidate.get("mode") == "incremental"
     sources = _candidate_sources(git, candidate, historical=historical or incremental)
+    rebuild_context = candidate.get("rebuild_context")
+    if "rebuild_context" in candidate:
+        if (rebuild_context is None or not incremental or candidate.get("related_runs") != []
+                or candidate.get("related") != [] or candidate.get("merge_inputs", [])
+                or candidate.get("batch_material", {}).get("draft_only", False)
+                or any(key in candidate for key in ("continuation_context", "extraction_reused_from",
+                                                    "revision_resume", "revision_revalidation"))):
+            _error("invalid_rebuild_context")
+        revision = candidate.get("revision_context")
+        if revision is not None and (not isinstance(revision, dict)
+                or not isinstance(revision.get("candidate"), dict)
+                or revision.get("candidate", {}).get("rebuild_context") != rebuild_context):
+            _error("invalid_rebuild_context")
+        from .rebuild import validate_rebuild_context
+        validate_rebuild_context(git, rebuild_context, source_paths=[source["path"] for source in sources],
+                                 at_commit=candidate["base_head"])
     related = []
     if incremental:
         related_limit = 256 if "batch_context" in candidate else 8
@@ -1868,7 +1921,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         if (candidate.get("related") != related or candidate.get("controls_digest") != controls_digest
                 or candidate.get("processing_key") != _processing_key(_source_fields(sources), candidate["versions"], controls_digest,
                     candidate.get("batch_context"), candidate.get("batch_material"), candidate.get("continuation_context"), strategy, candidate.get("revision_context"), candidate.get("revision_resume"), candidate.get("revision_revalidation"),
-                    candidate.get("skill_bundle"))):
+                    candidate.get("skill_bundle"), rebuild_context)):
             _error("processing_context_changed")
         attempt_path = _run_path(run_id, "started")
         attempt_bytes = _committed(git, attempt_path)
@@ -1946,8 +1999,11 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     if batch:
         for obj in expected_objects:
             assert_fragment_refs(obj["metadata"]["sources"], candidate["source_views"])
-    if incremental and candidate.get("operations") != _updated_objects(git, expected_objects, related):
+    if incremental and candidate.get("operations") != _updated_objects(git, expected_objects, related,
+                                                                      rebuild_context=rebuild_context):
         _error("candidate_mismatch")
+    if rebuild_context is not None:
+        _targets_clear(git, expected_objects, rebuild_context, at_commit=candidate["base_head"])
     _validate_domains(expected_objects, related, candidate.get("operations", {}), candidate["versions"])
     if candidate.get("objects") != expected_objects:
         _error("candidate_mismatch")
@@ -2031,11 +2087,14 @@ def _incremental_manifest(candidate):
         if operation["action"] == "reuse":
             metadata = previous[path]["metadata"]
             origins[path] = {"run_id": metadata["generated_by"]["run_id"], "review_path": metadata["review_ref"]}
-    return {"mode": "incremental", "related_runs": candidate["related_runs"],
+    result = {"mode": "incremental", "related_runs": candidate["related_runs"],
             "operations": candidate["operations"], "object_origins": origins,
             "controls_digest": candidate["controls_digest"], "processing_key": candidate["processing_key"],
             "execution_context": candidate["execution_context"], "attempt_path": candidate["attempt_path"],
             "attempt_sha256": candidate["attempt_sha256"]}
+    if "rebuild_context" in candidate:
+        result["rebuild_context"] = copy.deepcopy(candidate["rebuild_context"])
+    return result
 
 
 def _computation_snapshots(git, candidate, visited=()):
@@ -2044,6 +2103,12 @@ def _computation_snapshots(git, candidate, visited=()):
     if run_id in visited or len(visited) >= 16:
         _error("publication_dependency_cycle")
     entries = []
+    if "rebuild_context" in candidate:
+        from .rebuild import validate_rebuild_context
+        ref = candidate["rebuild_context"]
+        validate_rebuild_context(git, ref, source_paths=[item["path"] for item in _candidate_bindings(candidate)],
+                                 at_commit=candidate["base_head"])
+        entries.append(copy.deepcopy(ref))
     if "revision_revalidation" in candidate:
         recovery = _completed_extraction_module(candidate["revision_revalidation"])
         entries.extend(recovery.verify_revalidated_extraction(git, candidate, historical=True))
@@ -2234,7 +2299,7 @@ def publish(repo, run_id, expected_head=None):
                                             max_runs=256 if "batch_context" in candidate else 8) != candidate["related"]):
                     _error("processing_context_changed")
             else:
-                _targets_clear(git, candidate["objects"])
+                _targets_clear(git, candidate["objects"], candidate.get("rebuild_context"))
             files = _publication_files(candidate, review)
             manifest = {"run_id": run_id, "binding": candidate["binding"], "review_path": _run_path(run_id, "review"),
                         "review_commit": review_commit, "source": candidate["source"], "versions": candidate["versions"],
@@ -2248,11 +2313,16 @@ def publish(repo, run_id, expected_head=None):
             if incremental:
                 known = {document["path"]: document for item in candidate["related"] for document in item["documents"]}
                 expected = {}
+                if "rebuild_context" in candidate:
+                    _targets_clear(git, [obj for obj in candidate["objects"]
+                                        if candidate["operations"][obj["path"]]["action"] == "create"],
+                                   candidate["rebuild_context"])
                 for path, operation in candidate["operations"].items():
                     if operation["action"] == "reuse":
                         files.pop(path)
                     elif operation["action"] == "create":
-                        _targets_clear(git, [obj for obj in candidate["objects"] if obj["path"] == path])
+                        if "rebuild_context" not in candidate:
+                            _targets_clear(git, [obj for obj in candidate["objects"] if obj["path"] == path])
                         expected[path] = None
                     else:
                         previous = known[path]

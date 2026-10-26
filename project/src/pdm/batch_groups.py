@@ -95,6 +95,15 @@ def _proofs(git, plan, reviewed_runs, allowed_paths, *, historical):
         if (candidate.get("versions") != plan["snapshot"]["versions"]
                 or candidate.get("controls_digest") != plan["snapshot"]["controls_digest"]):
             _fail("batch_group_snapshot_mismatch")
+        rebuild_context = candidate.get("rebuild_context")
+        if rebuild_context != plan["snapshot"].get("rebuild_context"):
+            _fail("batch_group_rebuild_context_mismatch")
+        if candidates and rebuild_context != candidates[0].get("rebuild_context"):
+            _fail("batch_group_rebuild_context_mismatch")
+        if rebuild_context is not None:
+            from .rebuild import validate_rebuild_context
+            validate_rebuild_context(git, rebuild_context, plan["source_paths"],
+                                     at_commit=candidate["base_head"])
         candidates.append(candidate)
         review_path = f"memory/runs/processes/{run}/review.md"
         entries.append({"run_id": run, "source_paths": bound, "binding": candidate["binding"],
@@ -174,6 +183,12 @@ def _authority(git, assembled, group_id, commit, manifest_path, marker_path, rec
         add(_last_commit(git, commit, source["receipt_path"]), source["receipt_path"])
     for proof, candidate in zip(assembled["proofs"], assembled["candidates"]):
         entries.extend(_computation_snapshots(git, candidate))
+        if candidate.get("rebuild_context") is not None:
+            from .rebuild import validate_rebuild_context
+            context = candidate["rebuild_context"]
+            validate_rebuild_context(git, context, [source["path"] for source in assembled["sources"]],
+                                     at_commit=candidate["base_head"])
+            add(context["commit_sha"], context["path"])
         add(proof["stage_commit"], proof["stage_path"])
         add(proof["review_commit"], proof["review_path"])
         add(_last_commit(git, candidate["base_head"], candidate["attempt_path"]), candidate["attempt_path"])
@@ -326,7 +341,8 @@ def publish_final_group(repo, plan, final_objects, reviewed_runs, *, source_path
                 _fail("batch_group_final_objects_mismatch")
             for candidate in assembled["candidates"]:
                 _execution_guard(repo, candidate.get("execution_context"), run_id=candidate["run_id"])
-                _updated_objects(git, candidate["objects"], candidate["related"], check_current=True)
+                _updated_objects(git, candidate["objects"], candidate["related"], check_current=True,
+                                 rebuild_context=candidate.get("rebuild_context"))
             group_id = group_id or "run-" + _hash({"plan_id": plan["plan_id"],
                 "files": {path: _hash(data) for path, data in assembled["files"].items()}})[7:39]
             manifest_path = _run_path(group_id, "manifest")
@@ -340,7 +356,8 @@ def publish_final_group(repo, plan, final_objects, reviewed_runs, *, source_path
                         _fail("batch_group_before_mismatch")
                     continue
                 if assembled["operations"][path]["action"] == "create":
-                    _targets_clear(git, [assembled["objects"][path]])
+                    _targets_clear(git, [assembled["objects"][path]],
+                                   rebuild_context=assembled["candidates"][0].get("rebuild_context"))
                 files[path], expected[path] = data, assembled["before"][path]
             files[manifest_path] = _document("batch_group_manifest", manifest, SCHEMA)
             files[marker_path] = _document("batch_group_inputs", {"run_id": group_id, "plan_id": plan["plan_id"],

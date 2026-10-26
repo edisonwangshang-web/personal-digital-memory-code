@@ -242,7 +242,7 @@ def _build(sources, snapshot, max_input_bytes, payload_overhead_bytes, max_sourc
 
 
 def plan_batches(repo, source_paths, *, max_input_bytes, payload_overhead_bytes=0,
-                 max_sources=MAX_BATCH_SOURCES, expected_head=None, purpose="current"):
+                 max_sources=MAX_BATCH_SOURCES, expected_head=None, purpose="current", rebuild_context=None):
     paths = _paths(source_paths)
     if (type(max_input_bytes) is not int or not 1 <= max_input_bytes <= MAX_BYTES
             or type(payload_overhead_bytes) is not int or not 0 <= payload_overhead_bytes < max_input_bytes
@@ -255,7 +255,12 @@ def plan_batches(repo, source_paths, *, max_input_bytes, payload_overhead_bytes=
         controls = control_guard(git)
         versions = execution_versions(git)
         sources = [load_source(repo, path, purpose=purpose) for path in paths]
-        result = _build(sources, {"head": head, "versions": versions, "controls_digest": controls["digest"]},
+        snapshot = {"head": head, "versions": versions, "controls_digest": controls["digest"]}
+        if rebuild_context is not None:
+            from .rebuild import validate_rebuild_context
+            validate_rebuild_context(git, rebuild_context, paths, at_commit=head)
+            snapshot["rebuild_context"] = dict(rebuild_context)
+        result = _build(sources, snapshot,
                         max_input_bytes, payload_overhead_bytes, max_sources, purpose)
         git.check(head)
         if control_guard(git)["digest"] != controls["digest"] or execution_versions(git) != versions:
@@ -272,6 +277,10 @@ def validate_plan(repo, plan, *, source_paths=None, require_current_versions=Tru
         with nullcontext() if _locked else git.lock():
             head = git.check()
             git.run("merge-base", "--is-ancestor", plan["snapshot"]["head"], head)
+            if "rebuild_context" in plan["snapshot"]:
+                from .rebuild import validate_rebuild_context
+                validate_rebuild_context(git, plan["snapshot"]["rebuild_context"], paths,
+                                         at_commit=plan["snapshot"]["head"])
             controls = control_guard(git, plan["snapshot"]["head"]) if historical else control_guard(git)
             versions = execution_versions(git)
             if (controls["digest"] != plan["snapshot"]["controls_digest"]

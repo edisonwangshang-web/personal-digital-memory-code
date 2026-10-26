@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev23`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev24`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
 
 新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词 extract v14／review v10／answer v7 保持。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
 
@@ -14,6 +14,18 @@
 - [Roadmap](roadmap.md)管理阶段成果、执行顺序、进度与通过证据；本页不重复阶段表。
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
+
+<a id="explicit-knowledge-rebuild"></a>
+
+## 显式清理后从原文重建
+
+1. 操作者明确本次稳定意图、获准原文与现有正式目标；`rebuild-prepare` 核对来源／控制和主题依赖闭包，在同一提交删除选定 record／topic 并写清理回执。来源、采集回执、旧候选、审核、运行和调用历史保留。重复同一意图只返回原引用，不再次删除。
+2. 将返回的 `rebuild_context` 三键引用交给 `process` 或 `production prepare`。程序核原子清理、不可变历史、原来源／控制及精确范围；首次加工输入的旧 related、revision、merge／prior 和复用均为空；新候选被退回时，仅允许同回执绑定的本轮新候选／实际审核反馈返工。新候选绑定该引用及实际公库工程版本，不取旧知识作事实输入。
+3. 当前只支持一批完整来源的重建。预约前完整核输入容量，模型重新提取和自动分类，程序校验后执行既有独立 Review；审核、覆盖和统计要求保持。没有通过完整审核就不发布。
+4. 只有回执明确清理、仍未被再次写入的路径可通过本次 create 历史检查；新路径沿原 create 检查，控制排除的对象／来源不能借重建恢复。发布及历史读取重建同一固定证据，普通无回执调用的删除保护不变。
+5. 生产与分解审核身份仅在该回执存在时加入其绑定，同一意图跨队列、日期和程序升级仍沿用同一有限计数。旧 unknown、失败及计数不改。实际成功后再更新私库导航，并分别核真实读取与远程恢复；清理回执本身不证明加工通过。
+
+字段与命令分别见[数据规范](data-conventions.md#explicit-knowledge-rebuild)和[日常使用](daily-use.md#explicit-knowledge-rebuild)。
 
 <a id="quality-completed-recovery-execution"></a>
 
@@ -197,7 +209,7 @@ Review 检查语义是否忠实、限定条件是否保留、时间和对象关�
 
 另有显式 `publish_final_group` 路径可提交同一完整 plan 的多个已审核 final run：每个均非 draft，来源／版本／控制绑定匹配，合计完整覆盖计划，同路径对象和操作无冲突，每篇 Wiki 的精确 record 依赖已在其所属候选的独立 Review 中共同受审。group 只核验并原子写入这些原样受审对象与 proof，不新增模型调用、合成正文或跨批关系，也不新增一次跨运行模型语义审核。需要改变正文或增加跨批关系时，仍须新候选及独立审核；不能凭组装自动证明全部跨来源事实一致。这不是默认 production 自动选择的优化。
 
-attempt 身份按片段、phase 与 related identity 全局持久，换队列、规则或日期不重置首次＋3 次上限；相同完整 context 的 passed 核验复用。只有能确定 Review 未启动的错误才可复用 extract 单独续审，`needs_revision` 必须实质修订后重新审核。
+attempt 身份按片段、phase 与 related identity 全局持久；显式清理重建还绑定有效回执。同一身份换队列、规则或日期不重置首次＋3 次上限；相同完整 context 的 passed 核验复用。只有能确定 Review 未启动的错误才可复用 extract 单独续审，`needs_revision` 必须实质修订后重新审核。
 
 日程发现前保存 `production_discovered` 范围快照，核获准旧 manifest 并选择当前依赖；answered 事项固定原问题、原运行、精确来源／对象与有效答复，形成稳定 work／queue。各批携相同 `continuation_context` 与完整必要答复，简短回复必须结合原问题；原问题不成为事实。必要来源并集或完整请求超容量时保存 `blocked_capacity`，不能删上下文硬跑。
 

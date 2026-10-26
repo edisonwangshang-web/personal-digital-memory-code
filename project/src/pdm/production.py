@@ -169,7 +169,7 @@ def _save(git, path, value, kind, head):
 def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=None,
                        allowed_run_ids=(), max_input_bytes=128000, payload_overhead_bytes=16000,
                        required_context_sources=(), continuation_context=None, review_strategy=None,
-                       skill_bundle=None, use_default_skills=False):
+                       skill_bundle=None, use_default_skills=False, rebuild_context=None):
     """Persist one immutable plan; the stable caller key cannot be repurposed."""
     from .batching import plan_batches
     from .context import discover_context
@@ -198,6 +198,12 @@ def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=Non
         request["continuation_context"] = deepcopy(continuation_context)
     git = PipelineGit(repo)
     head = git.check()
+    if rebuild_context is not None:
+        from .rebuild import validate_rebuild_context
+        if request["allowed_run_ids"] or required or continuation_context is not None:
+            _fail("invalid_queue_rebuild_context")
+        validate_rebuild_context(git, rebuild_context, source_paths=selected)
+        request["rebuild_context"] = deepcopy(rebuild_context)
     existing = _read(git, path, "production_queue")
     if type(use_default_skills) is not bool:
         _fail("invalid_skill_default_policy")
@@ -230,7 +236,10 @@ def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=Non
     if not context["coverage"]["complete"]:
         return {"queue_id": queue_id, "status": "blocked_context", "context": context, "head": head}
     plan = plan_batches(repo, context["source_paths"], max_input_bytes=max_input_bytes,
-                        payload_overhead_bytes=payload_overhead_bytes, purpose="history")
+                        payload_overhead_bytes=payload_overhead_bytes, purpose="history",
+                        **({"rebuild_context": rebuild_context} if rebuild_context is not None else {}))
+    if rebuild_context is not None and len(plan["batches"]) != 1:
+        _fail("queue_rebuild_requires_single_batch")
     state = {"queue_id": queue_id, "request": request, "plan": plan, "related_runs": context["related_runs"],
              "status": "ready" if plan["coverage"]["complete"] else "blocked_capacity",
              "completed_batches": {}, "final_run": None, "publication": None,
@@ -291,6 +300,7 @@ def _revision_feedback(git, previous, state, projection, processing_paths, *, dr
     if (sorted(item["path"] for item in _candidate_bindings(candidate)) != processing_paths
             or _candidate_bindings(candidate) != expected_sources
             or candidate.get("related_runs") != state["related_runs"]
+            or candidate.get("rebuild_context") != state["request"].get("rebuild_context")
             or candidate.get("controls_digest") != state["plan"]["snapshot"]["controls_digest"]
             or candidate.get("execution_context") is not None
             or candidate.get("continuation_context") is not None
@@ -317,6 +327,8 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     from .pipeline import (_committed, _load, _read_reviewed, _run_path,
                            process_sources, SAFE_REVIEW_PRELAUNCH_ERRORS, _validate_continuation_context)
     plan = state["plan"]
+    if state["request"].get("rebuild_context") != plan["snapshot"].get("rebuild_context"):
+        _fail("queue_rebuild_plan_mismatch")
     # Identity deliberately excludes queue name, rule version and calendar day.
     # Renaming a queue/trigger cannot erase attempts for the same source ranges.
     identity = {"fragments": sorted(item["fragment_id"] for item in projection["batch_context"]["source_ranges"]),
@@ -352,6 +364,19 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     work_key = _hash(identity)
     path = ATTEMPTS + work_key + ".md"
     git = PipelineGit(repo)
+    rebuild_context = state["request"].get("rebuild_context")
+    if rebuild_context is not None:
+        from .rebuild import validate_rebuild_context
+        if (state["related_runs"] or state["request"]["allowed_run_ids"]
+                or state["request"].get("required_context_sources") or continuation is not None):
+            _fail("invalid_queue_rebuild_context")
+        if draft or merge_runs or len(plan["batches"]) != 1:
+            _fail("queue_rebuild_requires_single_batch")
+        validate_rebuild_context(git, rebuild_context, source_paths=plan["source_paths"])
+        identity["rebuild_context"] = deepcopy(rebuild_context)
+        work_key = _hash(identity)
+        path = ATTEMPTS + work_key + ".md"
+    admission_policy = feedback_policy or rebuild_context is not None
     def reusable(candidate):
         return (candidate.get("versions") == plan["snapshot"]["versions"]
                 and candidate.get("controls_digest") == plan["snapshot"]["controls_digest"]
@@ -359,6 +384,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                 and candidate.get("batch_material", {}).get("draft_only") == draft
                 and sorted(item["run_id"] for item in candidate.get("merge_inputs", [])) == sorted(merge_runs)
                 and candidate.get("related_runs") == ([] if draft else state["related_runs"])
+                and candidate.get("rebuild_context") == rebuild_context
                 and candidate.get("continuation_context") == continuation
                 and candidate.get("skill_bundle") == skill_bundle
                 and candidate.get("review_strategy", "legacy-v1") == strategy)
@@ -442,7 +468,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
         operation = "batch:" + work_key + ":" + str(number)
         delegate = model_call.for_operation(operation) if isinstance(model_call, BudgetedModelCall) else model_call
         reuse_extraction = None
-        if isinstance(model_call, BudgetedModelCall):
+        if isinstance(model_call, BudgetedModelCall) and rebuild_context is None:
             for old in reversed(attempts["attempts"]):
                 if old["status"] != "failed" or old.get("error") not in SAFE_REVIEW_PRELAUNCH_ERRORS:
                     continue
@@ -481,6 +507,8 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                            "continuation_context": continuation,
                            **({"skill_bundle": skill_bundle} if skill_bundle is not None else {}),
                            **({"review_strategy": strategy} if strategy != "legacy-v1" else {})}
+        if rebuild_context is not None:
+            process_options["rebuild_context"] = deepcopy(rebuild_context)
         if feedback is not None:
             process_options.update(revision_from_run=feedback["run_id"], reuse_extraction_run=None)
             current.update(revision_from_run=feedback["run_id"],
@@ -488,10 +516,10 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                            revision_candidate_binding=feedback["candidate_binding"],
                            revision_source_plan_id=feedback["source_plan_id"],
                            revision_target_plan_id=feedback["target_plan_id"])
-        if not feedback_policy:
+        if not admission_policy:
             attempts["attempts"].append(current)
             _save(git, path, attempts, "production_attempts", head)
-    if feedback_policy:
+    if admission_policy:
         # Render the complete request before claiming an attempt, audit roles or
         # processing reservation. Avoid a reentrant Git lock around preparation.
         from .pipeline import preflight_processing
@@ -527,7 +555,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
         result = process_sources(repo, processing_paths, model_call=delegate, **process_options)
     except CaptureError as error:
         observed = delegate.ledger.operation(operation) if isinstance(delegate, BudgetedModelCall) else None
-        if (feedback_policy and error.code in {"input_limit", "head_conflict"}
+        if (admission_policy and error.code in {"input_limit", "head_conflict"}
                 and (observed is None or not observed["started_calls"])):
             result = {"status": "blocked_capacity" if error.code == "input_limit" else "blocked_context",
                       "run_id": run_id, "error": error.code,
@@ -540,7 +568,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     except BaseException:
         # Leave the durable reservation for reconciliation, including interrupts.
         raise
-    if feedback_policy and result.get("run_id") != run_id:
+    if admission_policy and result.get("run_id") != run_id:
         # An explicitly started operator revision can share the feedback pointer.
         # Never mark this reservation passed when another run was returned.
         observed = delegate.ledger.operation(operation) if isinstance(delegate, BudgetedModelCall) else None
@@ -586,6 +614,8 @@ def _verify_queue_publication(git, state, publication):
         candidate, _, _ = _read_reviewed(git, proof["run_id"], historical=True)
         if candidate.get("skill_bundle") != state["request"].get("skill_bundle"):
             _fail("queue_publication_skill_mismatch")
+        if candidate.get("rebuild_context") != state["request"].get("rebuild_context"):
+            _fail("queue_publication_rebuild_mismatch")
     if (_feedback_enabled(state["request"].get("skill_bundle")) and state["final_run"] is not None
             and {proof["run_id"] for proof in manifest["proofs"]} != {state["final_run"]}):
         _fail("queue_publication_run_mismatch")
@@ -612,6 +642,18 @@ def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=
     state = _read(git, path, "production_queue")
     if state is None:
         _fail("unknown_production_queue")
+    if state["request"].get("rebuild_context") != state["plan"]["snapshot"].get("rebuild_context"):
+        _fail("queue_rebuild_plan_mismatch")
+    rebuild_context = state["request"].get("rebuild_context")
+    if rebuild_context is not None:
+        from .rebuild import validate_rebuild_context
+        if (state["related_runs"] or state["request"]["allowed_run_ids"]
+                or state["request"].get("required_context_sources")
+                or state["request"].get("continuation_context") is not None):
+            _fail("invalid_queue_rebuild_context")
+        if len(state["plan"]["batches"]) != 1:
+            _fail("queue_rebuild_requires_single_batch")
+        validate_rebuild_context(git, rebuild_context, source_paths=state["plan"]["source_paths"])
     if state["audit_pool"] is not None:
         if not isinstance(model_call, BudgetedModelCall):
             _fail("queue_audit_identity_changed")

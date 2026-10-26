@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev23`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。当前程序为 `0.2.0.dev24`；字段与状态统一在[数据规范](data-conventions.md)，执行过程统一在[实现明细](implementation-details.md)，检查方法统一在[场景与验收](scenarios-and-acceptance.md)。工程交付与恢复遵循[发布与回滚](release-and-rollback.md)。
 
 ## 当前实现与双仓边界
 
@@ -11,6 +11,8 @@
 公开仓库是通用方案、产品设计、技术文档、代码、提示词、版本化 Skill、脚本、测试、CI 和工作流定义的唯一工程来源。个人原文、候选、正式知识、审核、控制、运行数据、私人验证及全部个人历史保留在独立私库。运行时以公库 checkout 为当前目录，从公库绝对模块路径加载程序，用 `python -P -B` 避免当前目录影子导入与生成字节码，`--repo` 明确指向私库。只读 `check_dual_repo.py` 核对两库边界、同名分支、准确公库 HEAD 的 CI、公开工程完整性及私库无活动工程副本；不再比对或同步两份核心代码。`program_commit` 绑定实际加载的公库核心工程最近提交，核对报告的 `code_commit` 为受测公库 HEAD，`data_head` 独立指向私库资料提交。旧来源、调用和审核历史按原契约保留，不改写为新工程版本。定时、加工、复用和恢复代码统一在公库，目标 GPT runner 的部署与真实触发仍待验收。操作见[双仓使用说明](dual-repository.md)，新提交 CI 与真实业务结果以各自实际证据为准。
 
 `production` 已接入持久队列、分批／最终合并、分解审核、有限重试、未知对账、统一待确认续接、条件发布与远程读回门禁；限定当前读取支持选择正式 record 或 topic，自动核齐主题的精确 record 依赖，并可去除重复原文 `body`。旧正式知识和规则不因默认值升级而自动重跑。
+
+显式清理后重建使用同一加工链路：先用不可变回执绑定实际清理与来源范围，再从完整原文重新提取、分类、独立审核及发布，旧知识不作本次模型输入。当前只支持单批完整来源；同一意图的有限计数不因换队列或版本重置，普通删除保护和旧unknown仍生效。具体字段与操作见[重建规范](data-conventions.md#explicit-knowledge-rebuild)和[日常使用](daily-use.md#explicit-knowledge-rebuild)，不为健康、事业或学习增加专用阶段。
 
 M1 整体尚未验收。目标 GPT 云端任务拟按 `Asia/Shanghai` 每日 22:00 运行，当前尚未创建／启用；目标 runner 的真实能力、两轮实际触发、云端持久状态恢复及获准第二模型读取仍待验证。手动链路、人工测试与公开 CI 各自保留证明边界，不代替这些条件。
 

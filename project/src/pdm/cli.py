@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 
@@ -49,6 +50,22 @@ def _selected_skills(args, *, default=False):
         return None
     from .skill_support import resolve_skill_refs
     return resolve_skill_refs(extract, review)
+
+
+def _rebuild_context(args):
+    """Read only the receipt reference; the core verifies its Git authority."""
+    if args.rebuild_context is None:
+        return None
+    value = _input_json(args.rebuild_context)
+    if (not isinstance(value, dict) or set(value) != {"path", "commit_sha", "sha256"}
+            or not isinstance(value["path"], str)
+            or re.fullmatch(r"memory/runs/processes/rebuilds/[0-9a-f]{64}\.md", value["path"]) is None
+            or not isinstance(value["commit_sha"], str)
+            or re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", value["commit_sha"]) is None
+            or not isinstance(value["sha256"], str)
+            or re.fullmatch(r"sha256-[0-9a-f]{64}", value["sha256"]) is None):
+        raise _CliError("invalid_rebuild_context")
+    return value
 
 
 def _reading_arguments(command):
@@ -121,6 +138,12 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--input", type=Path, required=True, help="符合来源契约的 JSON 文件")
     capture.add_argument("--expected-head")
     capture.add_argument("--remote", help="显式指定后才推送；未指定只确认本地保存")
+    rebuild = commands.add_parser("rebuild-prepare", help="按明确意图原子清理指定正式知识并保存重建回执；不调用模型")
+    rebuild.add_argument("--repo", type=Path, required=True)
+    rebuild.add_argument("--intent-id", required=True, help="本次明确清理重建意图的稳定ID；重复调用不再次删除")
+    rebuild.add_argument("--source", action="append", required=True, help="获准从头加工的现有原文路径")
+    rebuild.add_argument("--target", action="append", required=True, help="明确清理的现有record/topic路径")
+    rebuild.add_argument("--expected-head")
     process = commands.add_parser("process", help="对显式选定的已采集来源联合加工并独立 Review；不自动发布")
     process.add_argument("--repo", type=Path, required=True)
     process.add_argument("--source", required=True, action="append", help="已保存的来源相对路径；重复参数可选最多8份")
@@ -128,6 +151,9 @@ def parser() -> argparse.ArgumentParser:
     process.add_argument("--incremental", action="store_true", help="启用有版本绑定和输入去重的 M1 加工")
     process.add_argument("--related-run", action="append", help="显式允许读取的旧发布运行；涉及的原始来源仍须在 --source 范围中")
     process.add_argument("--revision-from-run", help="显式按固定 needs_revision 的完整候选及审核反馈返工；保留原范围及批次")
+    process.add_argument("--rebuild-context", type=Path, help="rebuild-prepare返回的三键回执引用JSON；本轮不读取旧知识")
+    process.add_argument("--review-strategy", choices=("legacy-v1", "auto", "decomposed-v1"),
+                         help="普通process沿原legacy-v1；已有batch候选返工可显式选择auto或分解审核")
     _skill_arguments(process)
     _budget_arguments(process)
     revision_resume = commands.add_parser("resume-unstarted-revision", help="历史0.9人工恢复：核原返工预留及零启动；新Skill质量任务须完整原证明，当前拒绝此入口")
@@ -339,6 +365,7 @@ def parser() -> argparse.ArgumentParser:
             action.add_argument("--source", action="append", required=True)
             action.add_argument("--allowed-source", action="append")
             action.add_argument("--allowed-run", action="append", default=[])
+            action.add_argument("--rebuild-context", type=Path, help="显式清理回执引用JSON；仅支持无旧运行的单批完整重建")
             action.add_argument("--max-input-bytes", type=int, default=128000)
             action.add_argument("--payload-overhead", type=int, default=16000)
             action.add_argument("--review-strategy", choices=("auto", "decomposed-v1", "legacy-v1"),
@@ -385,13 +412,27 @@ def main(argv: list[str] | None = None) -> int:
             payload = _input_json(args.input)
             result = capture(args.repo, payload, args.expected_head, remote=args.remote)
             exit_code = 3 if result.get("remote_status") == "unconfirmed" else 0
+        elif args.command == "rebuild-prepare":
+            from .rebuild import prepare_rebuild
+            result = prepare_rebuild(args.repo, args.intent_id, args.source, args.target,
+                                     expected_head=args.expected_head)
+            exit_code = 0
         elif args.command == "process":
+            if args.rebuild_context is not None and args.related_run is not None:
+                raise _CliError("rebuild_requires_fresh_processing")
+            if args.review_strategy in {"auto", "decomposed-v1"} and args.revision_from_run is None:
+                raise _CliError("invalid_review_strategy")
+            rebuild = _rebuild_context(args)
             model_call = _model_budget(args)
             from .pipeline import process_sources
             options = {"model_call": model_call,
                        "skill_bundle": _selected_skills(args, default=args.revision_from_run is None)}
             if args.incremental or args.related_run is not None or args.revision_from_run is not None:
                 options.update(related_runs=args.related_run or [], revision_from_run=args.revision_from_run)
+            if rebuild is not None:
+                options.update(rebuild_context=rebuild, related_runs=[])
+            if args.review_strategy is not None:
+                options["review_strategy"] = args.review_strategy
             result = process_sources(args.repo, args.source, args.expected_head, **options)
             exit_code = 0 if result["status"] in {"passed", "already_processed"} else 4
         elif args.command == "resume-unstarted-revision":
@@ -595,11 +636,15 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "production":
             from .production import prepare_production, production_status, run_production
             if args.production_command == "prepare":
+                if args.rebuild_context is not None and args.allowed_run:
+                    raise _CliError("rebuild_requires_fresh_processing")
+                rebuild = _rebuild_context(args)
                 result = prepare_production(args.repo, args.id, args.source,
                     allowed_source_paths=args.allowed_source, allowed_run_ids=args.allowed_run,
                     max_input_bytes=args.max_input_bytes, payload_overhead_bytes=args.payload_overhead,
                     skill_bundle=_selected_skills(args), use_default_skills=True,
-                    **({"review_strategy": args.review_strategy} if args.review_strategy is not None else {}))
+                    **({"review_strategy": args.review_strategy} if args.review_strategy is not None else {}),
+                    **({"rebuild_context": rebuild} if rebuild is not None else {}))
                 exit_code = 0 if result["status"] in {"ready", "published"} else 4
             elif args.production_command == "status":
                 result = production_status(args.repo, args.id)

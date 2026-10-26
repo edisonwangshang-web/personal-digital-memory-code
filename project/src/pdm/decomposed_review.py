@@ -125,6 +125,8 @@ def _scope(candidate, payload, sources=None):
         _fail("decomposed_scope_mismatch")
     if candidate.get("source_views") != views or candidate.get("batch_context") != payload.get("batch_context"):
         _fail("decomposed_scope_mismatch")
+    if candidate.get("rebuild_context") != payload.get("rebuild_context"):
+        _fail("decomposed_rebuild_context_mismatch")
     _quality_scope(candidate, payload)
     if sources is not None:
         from .batching import validate_source_views
@@ -235,6 +237,11 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
         _fail("decomposed_stage_changed")
     if request_contract not in (None, REQUEST_CONTRACT):
         _fail('unknown_decomposed_request_contract')
+    if candidate.get("rebuild_context") is not None:
+        from .rebuild import validate_rebuild_context
+        validate_rebuild_context(git, candidate["rebuild_context"],
+                                 [source["path"] for source in _candidate_bindings(candidate)],
+                                 at_commit=candidate["base_head"])
     units, graph = _layout(candidate, payload)
     quality = _quality_scope(candidate, payload)
     prompt_metadata = prompt or ({"sha256": candidate["skill_bundle"]["sha256"], "source": "frozen-skill-bundle"}
@@ -248,6 +255,8 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
                            for obj in sorted(candidate["objects"], key=lambda obj: obj["path"])],
              "operations_sha256": _hash(candidate.get("operations", {})), "units": units,
              "relation_graph": graph, "prompt": prompt_metadata}
+    if candidate.get("rebuild_context") is not None:
+        value["rebuild_context"] = deepcopy(candidate["rebuild_context"])
     if quality:
         frozen_prompt = {"sha256": candidate["skill_bundle"]["sha256"], "source": "frozen-skill-bundle"}
         if prompt is not None and prompt != frozen_prompt:
@@ -345,6 +354,8 @@ def _request(plan, unit, candidate, payload, certificates=()):
         _fail('unknown_decomposed_request_contract')
     if "continuation_context" in payload:
         result["continuation_context"] = deepcopy(payload["continuation_context"])
+    if "rebuild_context" in plan:
+        result["rebuild_context"] = deepcopy(plan["rebuild_context"])
     if unit["kind"] == "coverage":
         result["prior_candidates"] = [deepcopy(prior) for prior in payload.get("prior_candidates", []) if prior["run_id"] in unit["draft_runs"]]
         result["final_inventory"] = deepcopy(plan["inventory"])
@@ -364,9 +375,15 @@ def _request(plan, unit, candidate, payload, certificates=()):
 
 
 def _node_identity(plan, unit):
-    return {"kind": unit["kind"], "targets": [item["id"] for item in plan["inventory"] if item["path"] in unit["object_paths"]],
+    value = {"kind": unit["kind"], "targets": [item["id"] for item in plan["inventory"] if item["path"] in unit["object_paths"]],
             "source_versions": [{key: source[key] for key in ("source_id", "source_version", "path")} for source in plan["source_bindings"]],
             "fragments": unit["fragment_ids"]}
+    # _plan validates the receipt before a counter can be selected. Its exact
+    # immutable binding separates a new explicit rebuild from old unknowns;
+    # queue names and code versions remain absent from this stable identity.
+    if "rebuild_context" in plan:
+        value["rebuild_context"] = deepcopy(plan["rebuild_context"])
+    return value
 
 
 def _untouched_plan(git, plan, adapter):
@@ -660,6 +677,8 @@ def verify_decomposed_review(git, candidate, review, payload, sources, historica
         _fail("decomposed_plan_mismatch")
     nodes, certificates = [], []
     authority = [_snapshot(git, expected_path)]
+    if "rebuild_context" in plan:
+        authority.append(deepcopy(plan["rebuild_context"]))
     invocations = {candidate["extraction"]["invocation_id"]}
     if not isinstance(proof.get("nodes"), list) or not proof["nodes"] or len(proof["nodes"]) > len(plan["units"]):
         _fail("decomposed_incomplete_proof")

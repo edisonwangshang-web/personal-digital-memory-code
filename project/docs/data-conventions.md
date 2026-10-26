@@ -1,10 +1,31 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev23`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。当前程序 `0.2.0.dev24`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`；基础提示词、不可变 Skill 资产、程序版本与资料版本分别绑定。M1 尚未整体验收，实际定时 runner、两轮真实触发和第二模型读取仍须独立证据。
 
 来源及采集 `0.1`、正式对象 `0.2`、新10/8质量链 `0.12`，旧9/7为 `0.11`、更早质量链 `0.10`；已支持格式 `0.1`—`0.13` 按各自 kind 契约读取，不批量迁移；`0.13` 仅用于下述专用已完成提取恢复门禁，普通10/8候选与质量链仍为 `0.12`。分节中的 dev 标记说明契约引入时间，不表示切回旧默认。字段以本页为准，执行见[实现明细](implementation-details.md)，检查见[场景验收](scenarios-and-acceptance.md)，交付与兼容回退见[发布与回滚](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。当前10/8沿用固定引用 `knowledge-context-v1`，检查来源、时间、范围及已提供关系的自足性，旧审核只证明其原版本。
+
+<a id="explicit-knowledge-rebuild"></a>
+
+## 显式清理后重建回执
+
+只在用户明确清理后重建时创建。路径为 `memory/runs/processes/rebuilds/<intent_id的SHA256>.md`，封套严格为 `schema_version: 0.4`、`kind: knowledge_rebuild`，正文契约 `explicit-knowledge-rebuild-v1`。同一提交新增回执并删除列出的现有正式目标，不能混入其他写入；本版不迁移旧数据或变更默认 Skill。
+
+| 字段 | 绑定 |
+| --- | --- |
+| `intent_id` | 操作者给定的稳定清理重建意图；同 ID 不得换来源或目标，也不再次删除 |
+| `base_head`、`branch` | 清理前精确资料父提交和实际分支 |
+| `sources` | 完整获准来源及其版本、原始保存和采集回执绑定 |
+| `controls_digest` | 原清理与本次使用所需的控制摘要；重建不覆盖纠正／删除权限 |
+| `targets` | 被清理的正式路径、原始文件 SHA、对象 ID 和内容版本；全部引用须在选定来源内，主题依赖须齐全 |
+| `created_at` | 实际清理记录时间，不作为个人事件时间 |
+
+返回并传入加工的 `rebuild_context` 严格只有 `path`、`commit_sha`、`sha256`，分别固定该回执、原子清理提交和完整字节。读写均核首次新增、原子删除、完整父链、回执未改写及来源／控制范围；路径在清理后又被写入或删除时，不能继续以此回执豁免 create 检查。普通无回执的历史删除仍拒绝重建。历史候选按其固定 `base_head` 核原授权，不把当前已发布文件误认为旧清理失败。
+
+`rebuild_context` 进入本次候选、请求和处理身份。生产工作及分解审核身份绑定有效回执；同一回执换队列、日期或工程版本不重置最多四次尝试。清理不会删除旧失败、unknown 或旧计数，也不让旧输出冒充本次结果。当前重建限单批完整来源，输入容量不足在新预约前阻塞。
+
+模型仅从本次来源重新生成正文、统计声明和分类，首次不提供旧 related／revision／merge／复用输入；新候选退回后，`revision_from_run`仅可引用同回执、同来源范围与批次的本轮候选及实际反馈，不能借此引入其他generation。原始返回仍原样保存并接受完整独立 Review。程序没有替模型补写统计声明的新例外。清理回执及工程检查不代表真实业务或 M1 验收通过。
 
 <a id="quality-completed-recovery"></a>
 
@@ -236,7 +257,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev23支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
+Foundation 的实际写入支持来自已安装程序的 `contracts.SUPPORTED_SCHEMA_VERSIONS`（当前dev24支持 `0.1`—`0.13`，0.13仅为专用恢复门禁；旧程序以其固定提交能力为准，本批不批量迁移既有memory格式），不能仅修改工作区 `pyproject.toml` 声明就扩大数据兼容范围。`GitAdapter.check()` 在检查提交基础和干净工作区后、每次实际写入前核对受管元数据；来源与回执两次提交都执行。M0 `0.1.0` 不认识 `0.3`，`0.2.0.dev1` 不认识 `0.4`，均不能恢复对含新格式的数据仓库写入；不能移除文件或改其 schema 来绕过回退门禁。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 
@@ -453,7 +474,7 @@ trigger 仅含 `kind: manual\|test\|scheduled`、`trigger_id`、带时区 `sched
 
 旧0.6全组输入超限即blocked_capacity，后继分解能力按0.8及0.10契约核验；必要完整语义仍不能截断。production独立命令为本地正式提交，命令名不代表GPT任务启用、工程提升master或远程已完成，远程确认须有独立实际依据。
 
-全局attempt身份由source fragment IDs＋phase＋related identity组成，不含queue名、规则或日期；首次＋最多3次失败重试，达到4次总attempt停止，跨队列／跨日／规则更新不清零。passed仅在完整新context相同时复用，否则保留次数重审；unknown先对账。`reuse_extraction_run`仅在原候选完整、Review已确定启动前失败且账本没有review started时复用已验证extract元数据，不允许needs_revision原样换Review。有限retry与逐调用计数分别保存。worker持checkout级OS flock，与短时Git事务锁分开；崩溃可由OS释放worker锁，但持久attempt仍待核，不通过删除锁文件清除调用状态，也不保证跨clone分布式互斥。
+普通全局attempt身份由source fragment IDs＋phase＋related identity组成，不含queue名、规则或日期；显式清理重建另绑定已核验的rebuild_context，同回执仍跨队列保持同一身份。首次＋最多3次失败重试，达到4次总attempt停止，跨队列／跨日／规则更新不清零。passed仅在完整新context相同时复用，否则保留次数重审；unknown先对账。`reuse_extraction_run`仅在原候选完整、Review已确定启动前失败且账本没有review started时复用已验证extract元数据，不允许needs_revision原样换Review。有限retry与逐调用计数分别保存。worker持checkout级OS flock，与短时Git事务锁分开；崩溃可由OS释放worker锁，但持久attempt仍待核，不通过删除锁文件清除调用状态，也不保证跨clone分布式互斥。
 
 ### current读端消费片段与限定读取包
 

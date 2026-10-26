@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文描述 `0.2.0.dev23` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本；当前目录和模块加载路径指向公库，`--repo` 指向私库，代码更新不复制回私库。
+本文描述 `0.2.0.dev24` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本；当前目录和模块加载路径指向公库，`--repo` 指向私库，代码更新不复制回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -22,6 +22,35 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 `-P` 禁止将当前目录插入模块搜索路径，避免同名目录覆盖已核对的公库程序；`-B` 避免生成字节码。后文命令沿用以上绝对 `PYTHONPATH` 和资料根变量，`--expected-head` 始终读取私库 HEAD。
 
 模型调用还需要实际可用的服务与资料范围。工程仓库可读、GitHub 登录成功或命令存在，都不能证明具备模型服务访问权限。
+
+<a id="explicit-knowledge-rebuild"></a>
+
+## 明确清理后从原文重新加工
+
+只有用户明确要求清理并重建时才使用此入口。先核准原文和现有正式目标，填写本次稳定意图；下列变量均为人工占位，不能把示例当个人资料：
+
+```bash
+python -P -B -m pdm rebuild-prepare --repo "$PDM_DATA_REPO" \
+  --intent-id "$rebuild_intent" --source "$source_path" \
+  --target "$record_path" --target "$topic_path" --expected-head "$data_head"
+```
+
+多份来源或目标重复对应参数。程序在同一提交删除明确选定的正式知识并保存清理回执，原文、旧候选、审核、运行、控制和调用记录保留。相同意图重放只返回原引用，发布新知识后也不会再次删除；另一次明确清理须有新的用户意图。更新导航是后续私库资料操作，成功发布前标为待重新加工。
+
+将返回的 `rebuild_context` 三键对象单独保存为仓库外 JSON 文件，再准备队列；不要把整个命令响应当作引用：
+
+```bash
+python -P -B -m pdm production prepare --repo "$PDM_DATA_REPO" \
+  --id "$queue_id" --source "$source_path" --rebuild-context "$rebuild_reference_file"
+python -P -B -m pdm production run --repo "$PDM_DATA_REPO" \
+  --id "$queue_id" --budget-ledger "$audit_ledger" --operation-id "$operation_id"
+```
+
+小范围也可把同一引用交给 `process --rebuild-context`；该非批次入口沿用普通 Review，必须满足完整普通审核输入上限，发布仍是显式步骤。需要自动分解审核的完整重建使用上述 `production` 入口，不给普通 `process` 强加 `--review-strategy auto`。重建使用完整选定原文，首次不提供旧 related、revision、merge 与复用输入，重新提取和三领域分类后完整独立 Review。当前只支持来源能放入一批的重建，容量不足在新预约前停止；不要删原文或换意图重试。
+
+本轮新候选退回时，可将同一 `--rebuild-context` 与 `--revision-from-run` 一起交给 `process`；核心须核同回执、同来源和批次，仍不读取清理前旧知识。
+
+有效回执只授权重建它实际清理的目标，仍检查来源／控制、当前写入状态及完整证明。普通删除保护、旧 unknown 和计数保留；同一重建回执换队列、日期或工程版本不重置最多四次尝试。具体[字段契约](data-conventions.md#explicit-knowledge-rebuild)和[实现步骤](implementation-details.md#explicit-knowledge-rebuild)统一管理。原文清理、工程 CI、新知识审核、读取问答及私有恢复分别记录；任一步成功都不能单独证明 M1 整体验收完成。
 
 ## 配置调用记录
 
