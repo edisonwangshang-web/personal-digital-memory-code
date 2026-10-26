@@ -77,7 +77,7 @@ class CompatibilityTests(unittest.TestCase):
         result = inspect_memory_schema(self.repo)
         self.assertEqual(result["status"], status)
         self.assertEqual(result["writable"], status == "compatible")
-        self.assertEqual(result["supported_schema_versions"], ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10"])
+        self.assertEqual(result["supported_schema_versions"], ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14"])
         self.assertEqual(result["detected_known_versions"], versions)
         for key in ("scanned_metadata_files", "unknown_files", "ignored_files"):
             self.assertIsInstance(result[key], int)
@@ -174,6 +174,21 @@ class CompatibilityTests(unittest.TestCase):
             self.assertFalse(inspect_environment(self.repo)["local_ready"])
             self.assert_error("incompatible_memory_schema", lambda: capture(self.repo, self.payload))
         self.assertEqual(self.snapshot(), before)
+
+    def test_assembly_header_keeps_originals_and_requires_explicit_writer_support(self):
+        first = capture(self.repo, self.payload)
+        self.save("memory/staging/run-assembly.md", markdown(
+            {"schema_version": "0.14", "kind": "candidate"}, "artificial assembly header fixture"))
+        self.commit_fixtures()
+        before = self.snapshot()
+        self.assert_result("compatible", ["0.1", "0.14"], scanned=3, unknown=0)
+        from pdm.contracts import SUPPORTED_SCHEMA_VERSIONS
+        previous_support = tuple(version for version in SUPPORTED_SCHEMA_VERSIONS if version != "0.14")
+        with patch("pdm.compatibility.SUPPORTED_SCHEMA_VERSIONS", previous_support):
+            self.assert_error("incompatible_memory_schema", lambda: capture(
+                self.repo, {**self.payload, "source_key": "assembly-old-writer-must-stop"}))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((self.repo / first["path"]).read_bytes(), before["files"][first["path"]])
 
     def test_missing_invalid_or_private_schema_values_fail_closed(self):
         for metadata in ({}, {"schema_version": None}, {"schema_version": 1},

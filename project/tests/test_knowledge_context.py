@@ -66,9 +66,9 @@ LEGACY_CHECKS = "edc7018bceb71bdd234b750632281b97144e65a1baee9705698630d0057c605
 
 
 class KnowledgeContextTests(unittest.TestCase):
-    def test_new_defaults_pin_common_dependency_without_replacing_old_policy(self):
+    def test_context_versions_pin_common_dependency_without_replacing_old_policy(self):
         previous = resolve_skill_refs("knowledge-extract@7", "knowledge-review@5")
-        current = resolve_skill_refs()
+        current = resolve_skill_refs("knowledge-extract@8", "knowledge-review@6")
         self.assertEqual(("knowledge-extract@8", "knowledge-review@6"), tuple(
             current["skills"][role]["ref"] for role in ("extract", "review")))
         self.assertEqual(previous["shared_policy"], current["shared_policy"])
@@ -97,7 +97,7 @@ class KnowledgeContextTests(unittest.TestCase):
                 self.assertEqual(expected, actual)
 
     def test_both_actual_requests_load_generic_rules_and_keep_columnar_wire(self):
-        request = material(resolve_skill_refs())
+        request = material(resolve_skill_refs("knowledge-extract@8", "knowledge-review@6"))
         for role in ("extract", "review"):
             with self.subTest(role=role):
                 raw = model_calls.render_model_request(role, request)
@@ -119,14 +119,14 @@ class KnowledgeContextTests(unittest.TestCase):
             shutil.copytree(skill_support.SKILLS_ROOT, root)
             (root / "shared/knowledge-context-v1.md").unlink()
             with self.assertRaisesRegex(SkillError, "^skill_file_unavailable$"):
-                resolve_skill_refs(skills_root=root)
+                resolve_skill_refs("knowledge-extract@8", "knowledge-review@6", skills_root=root)
             self.assertEqual("knowledge-extract@7", resolve_skill_refs(
                 "knowledge-extract@7", "knowledge-review@5", skills_root=root)["skills"]["extract"]["ref"])
 
     def test_same_existing_obligations_cover_each_domain_and_wiki_without_new_stage(self):
         old = material(resolve_skill_refs("knowledge-extract@7", "knowledge-review@5"))
         for domain in ("health", "career", "learning"):
-            request = material(resolve_skill_refs())
+            request = material(resolve_skill_refs("knowledge-extract@8", "knowledge-review@6"))
             for obj in request["candidate"]["objects"]:
                 obj["metadata"]["domains"] = [domain]
             checks = build_review_checks(request["candidate"], request["quality_context"])
@@ -156,7 +156,7 @@ class KnowledgeContextTests(unittest.TestCase):
 
     def test_global_only_scope_keeps_certificate_boundary_and_exact_old_behavior(self):
         old = material(resolve_skill_refs("knowledge-extract@7", "knowledge-review@5"))
-        new = material(resolve_skill_refs())
+        new = material(resolve_skill_refs("knowledge-extract@8", "knowledge-review@6"))
         scope = {"kind": "global", "object_paths": ["memory/records/fixture.md", "memory/topics/fixture-topic.md"],
                  "fragment_ids": []}
         for request in (old, new):

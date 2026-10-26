@@ -12,8 +12,8 @@ import re
 
 QUALITY_CONTRACT = "skill-quality-v1"
 BUNDLE_SCHEMA = "skill-bundle-v1"
-DEFAULT_EXTRACT_SKILL_REF = "knowledge-extract@8"
-DEFAULT_REVIEW_SKILL_REF = "knowledge-review@6"
+DEFAULT_EXTRACT_SKILL_REF = "knowledge-extract@10"
+DEFAULT_REVIEW_SKILL_REF = "knowledge-review@8"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 MAX_FILE_BYTES = 64_000
@@ -36,6 +36,10 @@ _MANIFEST_HASHES = {
     "knowledge-extract@7": "sha256-b5699d9b8624a8b7839739e08aa7f3e006bc6e6ae2285f4bb722ea0f70c48080",
     "knowledge-extract@8": "sha256-86ca4b3d20c2f0b3f9b50fec69658bfde10da0ecd3f55a217f930c7f8b5d766a",
     "knowledge-review@6": "sha256-5cce6e93792bf6b99efd1eae417ef8cba92cb590a7dfcc3553b79f4e3b8cb980",
+    "knowledge-extract@9": "sha256-c4433237a8b21a99770b2724a8ae9069a6171dcb35fadaf5fa828306702906bf",
+    "knowledge-review@7": "sha256-247df9b6b74940b393fa2ef4c0c4ad36f5963b21e9752606eb27428619b7b348",
+    "knowledge-extract@10": "sha256-0e58d98a748f4c85882b1c54c74b2dc4b27a5936af154bbc76c977d4a8350816",
+    "knowledge-review@8": "sha256-b6314501bcf69f42d5d7c6336354bfc45db1ac176baa266f6efe49d7d1a8044c",
 }
 _ROLES = ("extract", "review")
 _SNAPSHOT_KEYS = {"path", "content", "sha256", "bytes"}
@@ -242,6 +246,12 @@ def validate_skill_bundle(bundle):
     if bundle["sha256"] != expected:
         raise SkillError("skill_bundle_hash_mismatch")
     manifests = [_validate_role(bundle["skills"][role], role) for role in _ROLES]
+    if ((bundle["skills"]["extract"]["ref"] == "knowledge-extract@9")
+            != (bundle["skills"]["review"]["ref"] == "knowledge-review@7")):
+        raise SkillError("invalid_skill_pair")
+    if ((bundle["skills"]["extract"]["ref"] == "knowledge-extract@10")
+            != (bundle["skills"]["review"]["ref"] == "knowledge-review@8")):
+        raise SkillError("invalid_skill_pair")
     if any(manifest["shared_policy"] != bundle["shared_policy"] for manifest in manifests):
         raise SkillError("shared_policy_mismatch")
     return bundle

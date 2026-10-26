@@ -41,8 +41,8 @@ class M1InterfaceTests(unittest.TestCase):
     def assert_skill_binding(self, bundle):
         validate_skill_bundle(bundle)
         self.assertEqual(bundle, resolve_skill_refs())
-        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@8")
-        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@6")
+        self.assertEqual(bundle["skills"]["extract"]["ref"], "knowledge-extract@10")
+        self.assertEqual(bundle["skills"]["review"]["ref"], "knowledge-review@8")
 
     def test_environment_bind_and_verify_are_explicit_clone_local_operations(self):
         before = test_runtime.git(self.repo, "rev-parse", "HEAD")
@@ -227,6 +227,59 @@ class M1InterfaceTests(unittest.TestCase):
                 patch("pdm.scheduler.drain_schedule", return_value={"status": "reconciliation_required", "next_action": "reconcile"}):
             self.assertEqual(self.command(["schedule", "drain", "--repo", str(self.repo), "--id", "daily",
                 "--trigger", trigger_path, "--operation-id", "fixed-window"])[0], 4)
+
+    def test_schedule_run_and_drain_signal_reconciliation_and_operator_attention(self):
+        trigger_path = self.json_file("trigger.json", {"kind": "manual"})
+        outcomes = (("unknown", "reconcile"), ("blocked_capacity", "attention_required"),
+                    ("blocked_context", "attention_required"), ("attempt_limit", "attention_required"),
+                    ("budget_exhausted", "repair_accounting"), ("registration_required", "repair_registration"),
+                    ("partial", "attention_required"))
+        for command, target in (("run", "pdm.scheduler.run_daily"), ("drain", "pdm.scheduler.drain_schedule")):
+            for status, action in outcomes:
+                with self.subTest(command=command, status=status), \
+                        patch("pdm.cli._model_budget", return_value=sentinel.calls), \
+                        patch(target, return_value={"status": status, "next_action": action}):
+                    code, result = self.command(["schedule", command, "--repo", str(self.repo), "--id", "daily",
+                        "--trigger", trigger_path, "--operation-id", "fixed-window"])
+                    self.assertEqual(code, 4)
+                    self.assertEqual((result["status"], result["next_action"]), (status, action))
+
+    def test_schedule_execution_detects_legacy_reconciliation_without_next_action(self):
+        trigger_path = self.json_file("trigger.json", {"kind": "manual"})
+        # The legacy continuous scheduler reports an uncertain model operation
+        # directly, without the production engine's next_action field.
+        outcome = {"status": "reconciliation_required", "attempt_id": "fixed-attempt",
+                   "tick_key": "fixed-tick", "lease_expired": False,
+                   "reason": "model_call_outcome_unknown", "scheduled_environment": "unverified"}
+        for command, target in (("run", "pdm.scheduler.run_daily"), ("drain", "pdm.scheduler.drain_schedule")):
+            with self.subTest(command=command), patch("pdm.cli._model_budget", return_value=sentinel.calls), \
+                    patch(target, return_value=outcome):
+                code, result = self.command(["schedule", command, "--repo", str(self.repo), "--id", "daily",
+                    "--trigger", trigger_path, "--operation-id", "fixed-window"])
+            self.assertEqual(code, 4)
+            self.assertEqual(result, outcome)
+
+    def test_schedule_queries_keep_their_exit_semantics_when_reconciliation_is_reported(self):
+        outcome = {"status": "reconciliation_required", "scheduled_environment": "unverified"}
+        for command, target in (("plan", "pdm.scheduler.plan_daily"), ("status", "pdm.scheduler.schedule_status")):
+            with self.subTest(command=command), patch(target, return_value=outcome):
+                code, result = self.command(["schedule", command, "--repo", str(self.repo), "--id", "daily"])
+            self.assertEqual(code, 0)
+            self.assertEqual(result, outcome)
+
+    def test_schedule_run_and_drain_keep_waiting_and_continuable_results_successful(self):
+        trigger_path = self.json_file("trigger.json", {"kind": "manual"})
+        outcomes = (("needs_confirmation", "await_confirmation"), ("awaiting_confirmation", "await_confirmation"),
+                    ("partial", "continue"), ("completed", "idle"), ("completed_empty", "idle"))
+        for command, target in (("run", "pdm.scheduler.run_daily"), ("drain", "pdm.scheduler.drain_schedule")):
+            for status, action in outcomes:
+                with self.subTest(command=command, status=status), \
+                        patch("pdm.cli._model_budget", return_value=sentinel.calls), \
+                        patch(target, return_value={"status": status, "next_action": action}):
+                    code, result = self.command(["schedule", command, "--repo", str(self.repo), "--id", "daily",
+                        "--trigger", trigger_path, "--operation-id", "fixed-window"])
+                    self.assertEqual(code, 0)
+                    self.assertEqual((result["status"], result["next_action"]), (status, action))
 
     def test_promotion_cli_refuses_private_data_in_actual_merge_tree(self):
         (self.repo / "memory").mkdir()

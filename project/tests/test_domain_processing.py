@@ -74,7 +74,8 @@ class DomainProcessingTests(unittest.TestCase):
             "rules_version": "sha256-2222222222222222222222222222222222222222222222222222222222222222",
             "program_commit": "3333333333333333333333333333333333333333",
         }
-        with patch("pdm.pipeline.execution_versions", return_value=versions):
+        with patch("pdm.pipeline.execution_versions", return_value=versions), \
+                patch("pdm.engine_provenance.reservation_file", return_value={}):
             result = self.process()
             self.assertEqual(result["status"], "passed")
             publication = publish(self.repo, result["run_id"])

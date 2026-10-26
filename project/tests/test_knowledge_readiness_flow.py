@@ -43,7 +43,7 @@ class KnowledgeReadinessFlowTests(unittest.TestCase):
         self.paths = []
         for spec in self.SPECS:
             self.add_source(spec)
-        self.bundle = resolve_skill_refs()
+        self.bundle = resolve_skill_refs("knowledge-extract@8", "knowledge-review@6")
         self.calls = []
 
     def add_source(self, spec):

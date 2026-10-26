@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import test_pipeline
+from engine_fixtures import isolated_engine, advance_engine
 from pdm.batch_groups import publish_final_group, verify_group_publication
 from pdm.batching import merge_batch_sources, plan_batches, project_batch_sources
 from pdm.capture import capture
@@ -66,6 +67,7 @@ class QualityRevisionUpgradeTests(unittest.TestCase):
                 "invocation_id": "model-" + f"{self.number:032x}"}
 
     def test_new_plan_and_skill_revise_only_statistics_keep_old_children_and_publish(self):
+        code = isolated_engine(self)
         paths = sorted(capture(self.repo, {
             "source_key": f"fixture:revision-table:{index}", "source_type": "note",
             "acquisition_status": "full_text",
@@ -95,9 +97,8 @@ class QualityRevisionUpgradeTests(unittest.TestCase):
         preserved_paths = [path for result in [*children, rejected]
                            for path in (result["stage_path"], result["review_path"])]
         preserved = {path: (self.repo / path).read_bytes() for path in preserved_paths}
-        # A real Git program-path commit changes execution_versions.program_commit
-        # without mutating the installed test runner or any old evidence.
-        self.commit_change("project/src/pdm/fixture_upgrade.py", b"# artificial program upgrade\n")
+        # Only a public engineering commit changes the loaded program identity.
+        advance_engine(code)
         new_plan = plan_batches(self.repo, paths, max_input_bytes=240000, max_sources=1, purpose="history")
         self.assertNotEqual(new_plan["snapshot"]["versions"], old_plan["snapshot"]["versions"])
         self.assertNotEqual(new_plan["plan_id"], old_plan["plan_id"])

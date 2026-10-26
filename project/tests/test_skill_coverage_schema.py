@@ -22,7 +22,8 @@ from test_skill_transport import EXTRACT
 
 
 def payload(count):
-    return {"quality_contract": "skill-quality-v1", "skill_bundle": resolve_skill_refs(),
+    return {"quality_contract": "skill-quality-v1", "skill_bundle": resolve_skill_refs(
+                "knowledge-extract@8", "knowledge-review@6"),
             "quality_context": {"targets": [{"target_id": "metric-" + str(i)} for i in range(count)]},
             "sources": []}
 

@@ -13,12 +13,13 @@ from pathlib import Path
 import re
 import unicodedata
 
-from .contracts import CaptureError, M1_SCHEMA_VERSION, PIPELINE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION, parse_markdown
+from .contracts import CaptureError, M1_SCHEMA_VERSION, PIPELINE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, parse_markdown
 from .controls import _json, _metadata_only, _temporal, object_policy, read_controls, source_locator_policy, source_policy
 from .model_calls import OUTPUT_SCHEMAS, USAGE_FIELDS, _valid, call_model
 from .pending_evidence import build_pending_context
 from .pipeline import control_guard, load_source, normalize_source_paths, verify_publication
 from .transaction import PipelineGit
+from .verification_cache import scoped_immutable_reads
 
 # Includes every source representation and metadata in the serialized evidence.
 # The transport has a separate 256,000-byte bound including question and rules.
@@ -133,6 +134,7 @@ def _formal_reference_matches(ref, source, sources, provided_lines=None):
             and quote in "".join(lines[int(match[1]) - 1:int(match[2])]))
 
 
+@scoped_immutable_reads
 def evidence(repo: Path, source_path: str, run_id: str | None = None) -> dict:
     git = PipelineGit(repo)
     with git.lock():
@@ -201,6 +203,7 @@ def _check_publication_sources(publication, sources):
         raise CaptureError("evidence_source_mismatch", "发布来源集合与选定版本不一致")
 
 
+@scoped_immutable_reads
 def build_evidence_sources(repo: Path, source_paths: list[str], run_id: str | None = None) -> dict:
     """Read 1–8 exact source versions without discovery or implicit latest reads.
 
@@ -261,6 +264,7 @@ def build_evidence_sources(repo: Path, source_paths: list[str], run_id: str | No
         return result
 
 
+@scoped_immutable_reads
 def _recheck_sources(repo, selected, paths, run_id):
     git = PipelineGit(repo)
     with git.lock():
@@ -611,7 +615,7 @@ def _peek_publication(git, run_id, head):
     metadata, body = parse_markdown(data)
     value = _json(body)
     batch_group = metadata.get("schema_version") == "0.6" and metadata.get("kind") == "batch_group_manifest"
-    ordinary = metadata.get("kind") == "manifest" and metadata.get("schema_version") in {"0.2", "0.3", M1_SCHEMA_VERSION, "0.6", "0.7", "0.8", "0.9", QUALITY_SCHEMA_VERSION}
+    ordinary = metadata.get("kind") == "manifest" and metadata.get("schema_version") in {"0.2", "0.3", M1_SCHEMA_VERSION, "0.6", "0.7", "0.8", "0.9", *QUALITY_SCHEMA_VERSIONS}
     if ((not ordinary and not batch_group) or metadata.get("run_id") != run_id
             or not isinstance(value, dict) or value.get("run_id") != run_id):
         raise CaptureError("publication_mismatch", "所选发布清单绑定无效")
@@ -623,7 +627,7 @@ def _peek_publication(git, run_id, head):
         raise CaptureError("publication_mismatch", "所选发布来源绑定无效")
     batch = ordinary and metadata["schema_version"] in {"0.6", "0.7", "0.8"}
     revision = ordinary and metadata["schema_version"] == "0.9"
-    quality = ordinary and metadata["schema_version"] == QUALITY_SCHEMA_VERSION
+    quality = ordinary and metadata["schema_version"] in QUALITY_SCHEMA_VERSIONS
     incremental = metadata.get("schema_version") in {M1_SCHEMA_VERSION, "0.6", "0.7", "0.8", "0.9"}
     if batch or revision or quality:
         # A version label alone cannot expand legacy limits. Inspect only the
@@ -655,6 +659,12 @@ def _peek_publication(git, run_id, head):
             incremental = candidate.get("mode") == "incremental"
             revision = "revision_context" in candidate
             continuation = "continuation_context" in candidate
+            from .revision_context import supports_phase_revision
+            continued_revision = (revision and isinstance(candidate["revision_context"], dict)
+                and supports_phase_revision(candidate)
+                and supports_phase_revision(candidate["revision_context"].get("candidate"))
+                and candidate.get("continuation_context")
+                    == candidate["revision_context"].get("candidate", {}).get("continuation_context"))
             strategy = candidate.get("review_strategy", "legacy-v1")
             if (not isinstance(candidate.get("quality_context"), dict)
                     or not isinstance(candidate.get("extraction_request_binding"), dict)
@@ -662,7 +672,8 @@ def _peek_publication(git, run_id, head):
                     or strategy not in {"legacy-v1", "auto", "decomposed-v1"}
                     or strategy != "legacy-v1" and not batch
                     or (batch or revision) and not incremental
-                    or revision and (not isinstance(candidate["revision_context"], dict) or continuation)
+                    or revision and (not isinstance(candidate["revision_context"], dict)
+                                     or continuation and not continued_revision)
                     or continuation and (not batch or not isinstance(candidate["continuation_context"], dict))
                     or batch and (not isinstance(candidate.get("source_views"), list)
                                   or not candidate["source_views"]
@@ -850,6 +861,7 @@ def _object_reference_fragments(source, numbers):
     return [_fragment(source, start, end, "object_reference", source_lines=lines) for start, end in ranges]
 
 
+@scoped_immutable_reads
 def build_current_evidence(repo: Path, source_paths: list[str], run_ids=None, *,
                            history=False, max_bytes=MAX_EVIDENCE_BYTES,
                            source_views=None, batch_context=None, object_paths=None,

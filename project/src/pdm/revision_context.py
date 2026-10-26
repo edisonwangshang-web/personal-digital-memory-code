@@ -7,7 +7,7 @@ its authority snapshots into a later publication.
 
 from copy import deepcopy
 
-from .contracts import CaptureError
+from .contracts import CaptureError, quality_schema_version
 
 SCHEMA = "0.9"
 QUALITY_SCHEMA = "0.10"
@@ -17,6 +17,19 @@ MAX_REVISION_DEPTH = 8
 
 def _fail(code="invalid_revision_context"):
     raise CaptureError(code, "返工上下文未通过原候选、独立审核、来源与控制核验")
+
+
+def supports_phase_revision(candidate):
+    """Only the frozen feedback-quality contract admits draft/reply repair.
+
+    Phase and answered-context equality are checked by the new invocation and
+    again by its persistent candidate reader. Legacy operator/recovery paths
+    keep their original restrictions.
+    """
+    from .pipeline import _feedback_quality_enabled
+    return (isinstance(candidate, dict) and "batch_context" in candidate
+            and candidate.get("quality_contract") == "skill-quality-v1"
+            and _feedback_quality_enabled(candidate.get("skill_bundle")))
 
 
 def _chain(candidate):
@@ -41,7 +54,7 @@ def _chain(candidate):
 def _read_rejected(git, run_id, source_paths, related_runs, at_commit):
     from .pipeline import (
         _ancestor, _candidate_bindings, _committed, _hash, _last_commit,
-        _load, _read_fixed_candidate, _read_reviewed, _related_run_ids,
+        _load, _read_reviewed, _related_run_ids,
         _run_path, _stage_path, control_guard, normalize_source_paths,
     )
 
@@ -59,20 +72,16 @@ def _read_rejected(git, run_id, source_paths, related_runs, at_commit):
     requested_related = _related_run_ids(related_runs or [], max_runs=maximum)
     if requested_related != raw_candidate.get("related_runs", []):
         _fail("revision_related_mismatch")
+    phase_revision = supports_phase_revision(raw_candidate)
     if (raw_candidate.get("execution_context") is not None
-            or raw_candidate.get("continuation_context") is not None
-            or raw_candidate.get("batch_material", {}).get("draft_only", False)):
+            or not phase_revision and (raw_candidate.get("continuation_context") is not None
+                or raw_candidate.get("batch_material", {}).get("draft_only", False))):
         _fail("revision_not_operator_candidate")
     frozen_stage = _committed(git, stage_path, at_commit)
     frozen_commit = _last_commit(git, at_commit, stage_path)
     _ancestor(git, frozen_commit, at_commit)
     if (_last_commit(git, git.head(), stage_path) != frozen_commit
             or git.read(frozen_commit, stage_path) != frozen_stage):
-        _fail("revision_candidate_changed")
-    candidate, sources, stage_bytes, stage_commit = _read_fixed_candidate(
-        git, run_id, source_paths=selected, historical=True)
-    _ancestor(git, stage_commit, at_commit)
-    if git.read(at_commit, stage_path) != stage_bytes:
         _fail("revision_candidate_changed")
     review_path = _run_path(run_id, "review")
     review_bytes = _committed(git, review_path, at_commit)
@@ -83,9 +92,14 @@ def _read_rejected(git, run_id, source_paths, related_runs, at_commit):
     # copied out of review.md.  Only its final non-passed gate is admissible.
     if review.get("output", {}).get("verdict") != "needs_revision":
         _fail("revision_requires_needs_revision")
-    verified_candidate, verified_review, verified_commit = _read_reviewed(
+    # This read already performs the complete fixed-candidate check. Running
+    # that check separately above doubles the rejected dependency traversal at
+    # every revision depth. Keep the frozen-stage and Review identity checks.
+    candidate, verified_review, verified_commit = _read_reviewed(
         git, run_id, source_paths=selected, historical=True, allow_nonpassed=True)
-    if (verified_candidate != candidate or verified_review != review or verified_commit != review_commit
+    if candidate != raw_candidate or review.get("stage_commit") != frozen_commit:
+        _fail("revision_candidate_changed")
+    if (verified_review != review or verified_commit != review_commit
             or _last_commit(git, git.head(), review_path) != review_commit
             or git.read(review_commit, review_path) != review_bytes):
         _fail("revision_review_changed")
@@ -94,7 +108,7 @@ def _read_rejected(git, run_id, source_paths, related_runs, at_commit):
         _fail("revision_controls_changed")
     if candidate.get("mode") == "incremental" and candidate.get("controls_digest") != original_controls:
         _fail("revision_controls_changed")
-    return candidate, sources, stage_bytes, stage_commit, review, review_bytes, review_commit, original_controls
+    return candidate, None, frozen_stage, frozen_commit, review, review_bytes, review_commit, original_controls
 
 
 def build_revision_context(git, revision_from_run, *, source_paths, related_runs=(), at_commit=None):
@@ -105,7 +119,8 @@ def build_revision_context(git, revision_from_run, *, source_paths, related_runs
     candidate, _, stage_bytes, stage_commit, review, review_bytes, review_commit, controls = _read_rejected(
         git, revision_from_run, source_paths, related_runs, anchor)
     context = {
-        "schema_version": (QUALITY_SCHEMA if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA),
+        "schema_version": (quality_schema_version(candidate["skill_bundle"])
+                           if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA),
         "contract": CONTRACT,
         "source_run_id": revision_from_run,
         "trust": "unpublished_candidate_and_review_feedback_not_source_facts",
@@ -134,6 +149,19 @@ def _model_projection(context):
                           "objects": deepcopy(candidate["objects"]),
                           "operations": deepcopy(candidate.get("operations", {}))},
             "review_record": deepcopy(context["review_record"])}
+    from .pipeline import _current_draft_review
+    if _current_draft_review(candidate):
+        # Keep the latest real unresolved feedback for repair. Call accounting,
+        # request digests and decomposed certificates remain in the complete
+        # persistent Review, not in this model's work instructions.
+        record = context["review_record"]
+        output = {key: deepcopy(record["output"][key]) for key in ("verdict", "reasons")}
+        if "checks" in record["output"]:
+            output["checks"] = [deepcopy(check) for check in record["output"]["checks"]
+                                if check["result"] in {"needs_revision", "needs_confirmation"}]
+        projected["review_record"] = {key: deepcopy(record[key]) for key in
+            ("run_id", "review_id", "binding", "stage_path", "stage_commit", "stage_sha256")}
+        projected["review_record"]["output"] = output
     if candidate.get("quality_contract") == "skill-quality-v1":
         # Preserve the exact previous coverage/statistical/temporal decisions
         # for repair.  Prior Skill rules are provenance, not replacement
@@ -153,16 +181,18 @@ def _valid_schema(context):
     candidate = context.get("candidate")
     if not isinstance(candidate, dict):
         return False
-    expected = QUALITY_SCHEMA if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA
+    expected = (quality_schema_version(candidate.get("skill_bundle"))
+                if candidate.get("quality_contract") == "skill-quality-v1" else SCHEMA)
     return context.get("schema_version") == expected
 
 
 def revision_model_context(context):
-    """Return the persisted, complete semantic feedback without duplicate raw.
+    """Return the frozen repair view selected by the rejected candidate.
 
-    All proposed objects and the entire actual Review remain.  The unchanged
-    original input is already in the new request, while its old exact envelope
-    is bound by immutable pointers and the full context binding.
+    The latest draft and its quality decisions remain; marked candidates carry
+    unresolved Review items while legacy candidates retain the full Review.
+    Original input is already in the new request. Complete history is bound by
+    immutable pointers and the full context binding, not sent as extra facts.
     """
     from .pipeline import _hash
     if not _valid_schema(context):
@@ -177,11 +207,14 @@ def revision_model_context(context):
     return deepcopy(context["model_context"])
 
 
-def verify_revision_context(git, context, *, source_paths, related_runs=(), at_commit=None, historical=False):
+def verify_revision_context(git, context, *, source_paths, related_runs=(), at_commit=None, historical=False,
+                            include_snapshots=True):
     """Rebuild feedback and return the rejected computation's full authority DAG.
 
     ``historical`` does not relax binding checks.  The caller's candidate base
     chooses the control and ancestry snapshot for both current and old reads.
+    Candidate validation can omit the unused authority list after the complete
+    original computation and exact context comparison have passed.
     """
     from .pipeline import _candidate_bindings, _computation_snapshots, _hash, _last_commit
 
@@ -191,6 +224,8 @@ def verify_revision_context(git, context, *, source_paths, related_runs=(), at_c
                                       related_runs=related_runs, at_commit=at_commit)
     if context != expected:
         _fail("revision_context_mismatch")
+    if not include_snapshots:
+        return []
     candidate = expected["candidate"]
     entries = _computation_snapshots(git, candidate)
     for binding in _candidate_bindings(candidate):

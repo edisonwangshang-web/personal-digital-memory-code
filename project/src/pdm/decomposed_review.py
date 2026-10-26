@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 
-from .contracts import CaptureError, canonical, markdown, parse_markdown
+from .contracts import CaptureError, QUALITY_SCHEMA_VERSIONS, REUSE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version
 
 SCHEMA = "0.8"
 QUALITY_SCHEMA = "0.10"
@@ -29,8 +29,12 @@ def _hash(value):
     return "sha256-" + hashlib.sha256(value if isinstance(value, bytes) else canonical(value)).hexdigest()
 
 
+def _explicit_quality_schema(value):
+    return value.get("schema_version") in QUALITY_SCHEMA_VERSIONS and value["schema_version"] != QUALITY_SCHEMA
+
+
 def _document(kind, value):
-    schema = QUALITY_SCHEMA if value.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
+    schema = value.get("schema_version", QUALITY_SCHEMA) if value.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
     return markdown({"schema_version": schema, "kind": kind, "run_id": value["run_id"]}, canonical(value).decode() + "\n")
 
 
@@ -40,10 +44,12 @@ def _read(git, path, kind, *, commit=None, immutable=True):
     if immutable and git._existing(path) != data:
         _fail("decomposed_bytes_changed")
     schema = parse_markdown(data)[0].get("schema_version")
-    if schema not in {SCHEMA, QUALITY_SCHEMA}:
+    if schema not in {SCHEMA, *QUALITY_SCHEMA_VERSIONS}:
         _fail()
     value = _load(data, kind, schema)
-    if (schema == QUALITY_SCHEMA) != (value.get("quality_contract") == QUALITY_CONTRACT):
+    if ((schema in QUALITY_SCHEMA_VERSIONS) != (value.get("quality_contract") == QUALITY_CONTRACT)
+            or schema in QUALITY_SCHEMA_VERSIONS and schema != QUALITY_SCHEMA and value.get("schema_version") != schema
+            or (schema not in QUALITY_SCHEMA_VERSIONS or schema == QUALITY_SCHEMA) and "schema_version" in value):
         _fail("decomposed_quality_contract_mismatch")
     return value, data
 
@@ -119,6 +125,8 @@ def _scope(candidate, payload, sources=None):
         _fail("decomposed_scope_mismatch")
     if candidate.get("source_views") != views or candidate.get("batch_context") != payload.get("batch_context"):
         _fail("decomposed_scope_mismatch")
+    if candidate.get("rebuild_context") != payload.get("rebuild_context"):
+        _fail("decomposed_rebuild_context_mismatch")
     _quality_scope(candidate, payload)
     if sources is not None:
         from .batching import validate_source_views
@@ -229,6 +237,11 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
         _fail("decomposed_stage_changed")
     if request_contract not in (None, REQUEST_CONTRACT):
         _fail('unknown_decomposed_request_contract')
+    if candidate.get("rebuild_context") is not None:
+        from .rebuild import validate_rebuild_context
+        validate_rebuild_context(git, candidate["rebuild_context"],
+                                 [source["path"] for source in _candidate_bindings(candidate)],
+                                 at_commit=candidate["base_head"])
     units, graph = _layout(candidate, payload)
     quality = _quality_scope(candidate, payload)
     prompt_metadata = prompt or ({"sha256": candidate["skill_bundle"]["sha256"], "source": "frozen-skill-bundle"}
@@ -242,6 +255,8 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
                            for obj in sorted(candidate["objects"], key=lambda obj: obj["path"])],
              "operations_sha256": _hash(candidate.get("operations", {})), "units": units,
              "relation_graph": graph, "prompt": prompt_metadata}
+    if candidate.get("rebuild_context") is not None:
+        value["rebuild_context"] = deepcopy(candidate["rebuild_context"])
     if quality:
         frozen_prompt = {"sha256": candidate["skill_bundle"]["sha256"], "source": "frozen-skill-bundle"}
         if prompt is not None and prompt != frozen_prompt:
@@ -249,6 +264,8 @@ def _plan(git, candidate, stage_commit, payload, *, prompt=None, request_contrac
         value.update(quality_contract=QUALITY_CONTRACT, prompt=frozen_prompt,
                      skill_bundle_sha256=candidate["skill_bundle"]["sha256"],
                      quality_context_sha256=_hash(candidate["quality_context"]))
+        if quality_schema_version(candidate["skill_bundle"]) != QUALITY_SCHEMA:
+            value["schema_version"] = quality_schema_version(candidate["skill_bundle"])
     if request_contract is not None:
         inventory = _input_scope_inventory(candidate, payload)
         value.update(request_contract=request_contract, input_scope_inventory=inventory,
@@ -337,6 +354,8 @@ def _request(plan, unit, candidate, payload, certificates=()):
         _fail('unknown_decomposed_request_contract')
     if "continuation_context" in payload:
         result["continuation_context"] = deepcopy(payload["continuation_context"])
+    if "rebuild_context" in plan:
+        result["rebuild_context"] = deepcopy(plan["rebuild_context"])
     if unit["kind"] == "coverage":
         result["prior_candidates"] = [deepcopy(prior) for prior in payload.get("prior_candidates", []) if prior["run_id"] in unit["draft_runs"]]
         result["final_inventory"] = deepcopy(plan["inventory"])
@@ -356,9 +375,15 @@ def _request(plan, unit, candidate, payload, certificates=()):
 
 
 def _node_identity(plan, unit):
-    return {"kind": unit["kind"], "targets": [item["id"] for item in plan["inventory"] if item["path"] in unit["object_paths"]],
+    value = {"kind": unit["kind"], "targets": [item["id"] for item in plan["inventory"] if item["path"] in unit["object_paths"]],
             "source_versions": [{key: source[key] for key in ("source_id", "source_version", "path")} for source in plan["source_bindings"]],
             "fragments": unit["fragment_ids"]}
+    # _plan validates the receipt before a counter can be selected. Its exact
+    # immutable binding separates a new explicit rebuild from old unknowns;
+    # queue names and code versions remain absent from this stable identity.
+    if "rebuild_context" in plan:
+        value["rebuild_context"] = deepcopy(plan["rebuild_context"])
+    return value
 
 
 def _untouched_plan(git, plan, adapter):
@@ -379,7 +404,7 @@ def _untouched_plan(git, plan, adapter):
 
 
 def _proof(plan, nodes, status):
-    return {"schema_version": QUALITY_SCHEMA if plan.get("quality_contract") == QUALITY_CONTRACT else SCHEMA,
+    return {"schema_version": plan.get("schema_version", QUALITY_SCHEMA) if plan.get("quality_contract") == QUALITY_CONTRACT else SCHEMA,
             "plan_id": plan["plan_id"],
             "plan_path": f"memory/runs/processes/{plan['run_id']}/decomposed-plan.md",
             "plan_sha256": _hash(_document("decomposed_review_plan", plan)),
@@ -428,6 +453,8 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
     quality = plan.get("quality_contract") == QUALITY_CONTRACT
     if quality:
         expected.update({"quality_contract", "request_binding"})
+        if _explicit_quality_schema(plan):
+            expected.add("schema_version")
     if (set(result) != expected or result["run_id"] != plan["run_id"] or result["plan_id"] != plan["plan_id"]
             or result["unit_id"] != unit["unit_id"] or result["request_sha256"] != reservation["request_sha256"]
             or _call_metadata({**result["call"], "output": result["output"]}) != result["call"]):
@@ -435,6 +462,8 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
     if quality:
         if (request is None or result.get("quality_contract") != QUALITY_CONTRACT
                 or reservation.get("quality_contract") != QUALITY_CONTRACT
+                or result.get("schema_version") != plan.get("schema_version")
+                or reservation.get("schema_version") != plan.get("schema_version")
                 or result.get("request_binding") != _rendered_binding(request)
                 or reservation.get("request_binding") != result["request_binding"]
                 or reservation["request_sha256"] != _hash(request)
@@ -484,7 +513,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                 return {"status": "blocked_capacity", "proof": _proof(plan, [], "blocked_capacity"),
                         "attempted_calls": 0, "head": git.head(), "error": "decomposed_input_limit"}
     nodes, certificates, calls = [], [], 0
-    invocations = {candidate["extraction"]["invocation_id"]}
+    from .assembly_final import extraction_invocations
+    invocations = extraction_invocations(candidate)
     for unit in plan["units"]:
         request = _request(plan, unit, candidate, payload, certificates)
         request_sha, size = _hash(request), _input_bytes(request, plan["prompt"])
@@ -500,6 +530,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
             counter, _ = _read(git, counter_path, "decomposed_review_attempts")
         if counter["identity"] != identity or counter["audit_pool"] != _pool(model_call):
             _fail("decomposed_audit_identity_changed")
+        if _explicit_quality_schema(plan):
+            counter.update(quality_contract=QUALITY_CONTRACT, schema_version=plan["schema_version"])
         result, node, retry = None, None, None
         for attempt in counter["attempts"]:
             if attempt["request_sha256"] == request_sha and attempt["plan_id"] == plan["plan_id"]:
@@ -539,6 +571,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                            "counter": _snapshot(git, counter_path)}
             if plan.get("quality_contract") == QUALITY_CONTRACT:
                 reservation.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
+                if _explicit_quality_schema(plan):
+                    reservation["schema_version"] = plan["schema_version"]
             if git._existing(retry["reservation_path"]) is not None:
                 # A provably unstarted guard rejection keeps its original
                 # reservation snapshot and does not use a retry slot.
@@ -579,6 +613,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                                "attempted_calls": actual, "error": retry["error"]}
                     if plan.get("quality_contract") == QUALITY_CONTRACT:
                         failure.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
+                        if _explicit_quality_schema(plan):
+                            failure["schema_version"] = plan["schema_version"]
                     if not received and actual == 0:
                         retry["status"] = "reserved"
                         retry.pop("error", None)
@@ -603,6 +639,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                      "sha256": _hash(git.read(commit, retry["reservation_path"]))}, "call": call, "output": response["output"]}
             if plan.get("quality_contract") == QUALITY_CONTRACT:
                 saved.update(quality_contract=QUALITY_CONTRACT, request_binding=_rendered_binding(request))
+                if _explicit_quality_schema(plan):
+                    saved["schema_version"] = plan["schema_version"]
             _write(git, retry["result_path"], saved, "decomposed_review_result")
             retry["status"] = saved["output"]["verdict"]
             _write(git, counter_path, counter, "decomposed_review_attempts", mutable=True)
@@ -624,7 +662,7 @@ def verify_decomposed_review(git, candidate, review, payload, sources, historica
     from .pipeline import _stage_path, _run_path
     _scope(candidate, payload, sources)
     proof = review.get("decomposed_proof")
-    expected_schema = QUALITY_SCHEMA if candidate.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
+    expected_schema = quality_schema_version(candidate.get("skill_bundle")) if candidate.get("quality_contract") == QUALITY_CONTRACT else SCHEMA
     if not isinstance(proof, dict) or proof.get("schema_version") != expected_schema:
         _fail()
     expected_path = _run_path(candidate["run_id"], "decomposed-plan")
@@ -640,7 +678,10 @@ def verify_decomposed_review(git, candidate, review, payload, sources, historica
         _fail("decomposed_plan_mismatch")
     nodes, certificates = [], []
     authority = [_snapshot(git, expected_path)]
-    invocations = {candidate["extraction"]["invocation_id"]}
+    if "rebuild_context" in plan:
+        authority.append(deepcopy(plan["rebuild_context"]))
+    from .assembly_final import extraction_invocations
+    invocations = extraction_invocations(candidate)
     if not isinstance(proof.get("nodes"), list) or not proof["nodes"] or len(proof["nodes"]) > len(plan["units"]):
         _fail("decomposed_incomplete_proof")
     last = None

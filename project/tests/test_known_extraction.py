@@ -84,6 +84,18 @@ class KnownExtractionTests(test_revision_resume.RevisionResumeTests):
         self.assertEqual(context["original_extraction_versions"], context["attestation"]["original_extraction_versions"])
         self.assertEqual((fixture["git"].head(), fixture["model_call"].ledger.path.read_bytes(), self.number), before)
 
+    def test_original_versions_must_match_the_immutable_public_engine_reservation(self):
+        fixture = self.completed()
+        attestation = deepcopy(fixture["attestation"])
+        attestation["original_extraction_versions"]["program_sha256"] = "sha256-" + "0" * 64
+        fixture.update(attestation=attestation,
+            expected_attestation_sha256=hashlib.sha256(canonical(attestation)).hexdigest())
+        before = fixture["git"].head(), fixture["model_call"].ledger.path.read_bytes(), self.number
+        with self.assertRaises(CaptureError) as raised:
+            self.verify_completed(fixture)
+        self.assertEqual(raised.exception.code, "completed_extraction_original_versions_changed")
+        self.assertEqual((fixture["git"].head(), fixture["model_call"].ledger.path.read_bytes(), self.number), before)
+
     def test_changed_response_payload_or_resume_audit_cannot_be_promoted(self):
         fixture = self.completed()
         for field in ("response", "original_payload", "original_resume_context"):

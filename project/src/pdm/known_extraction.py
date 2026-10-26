@@ -119,6 +119,10 @@ def _original(git, run_id, value, payload, response, resume, source_paths, relat
         _fail("completed_extraction_feedback_changed")
     authority = _scope(git, run_id, full, paths, related, reservation,
                        at_commit=reservation["head"], require_unstarted=False)
+    from .engine_provenance import read_reservation
+    engine = read_reservation(git, run_id)
+    if engine is not None and engine["versions"] != value["original_extraction_versions"]:
+        _fail("completed_extraction_original_versions_changed")
     if runtime:
         absent = [_stage_path(run_id), *[_run_path(run_id, name) for name in
                   ("review", "manifest", "receipt", "pending", "pending-registration", "reused")]]

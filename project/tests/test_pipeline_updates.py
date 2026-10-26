@@ -11,6 +11,7 @@ import test_pipeline
 from pdm.capture import capture
 from pdm.contracts import CaptureError, canonical, markdown, parse_markdown
 from pdm.controls import read_controls, record_control
+from pdm.engine_provenance import read_reservation
 from pdm.pipeline import load_source, process_sources, publish, verify_publication
 from pdm.transaction import PipelineGit
 
@@ -33,6 +34,15 @@ class PipelineUpdateTests(unittest.TestCase):
         paths = [self.saved["path"], other["path"]]
         return paths, process_sources(self.repo, paths, related_runs=[initial["run_id"]],
                                      run_id=run_id, model_call=model or self.model)
+
+    def assert_engine_reservation(self, run_id):
+        git = PipelineGit(self.repo)
+        engine = read_reservation(git, run_id)
+        self.assertIsNotNone(engine)
+        self.assertEqual(engine["run_id"], run_id)
+        prefix = f"memory/runs/processes/{run_id}/"
+        self.assertEqual(git.text("log", "-1", "--format=%H", "--", prefix + "engine.md"),
+                         git.text("log", "-1", "--format=%H", "--", prefix + "started.md"))
 
     def test_new_incremental_run_binds_mode_controls_and_atomic_processed_marker(self):
         processed, publication = self.initial()
@@ -367,7 +377,8 @@ class PipelineUpdateTests(unittest.TestCase):
                 "output_sha256": "sha256-" + hashlib.sha256(canonical(extracted[0]["output"])).hexdigest()})
         prefix = f"memory/runs/processes/{run_id}/"
         changed = test_pipeline.git(self.repo, "diff", "--name-only", baseline, "HEAD").splitlines()
-        self.assertEqual(set(changed), {prefix + "started.md", result["failure_path"]})
+        self.assertEqual(set(changed), {prefix + "started.md", prefix + "engine.md", result["failure_path"]})
+        self.assert_engine_reservation(run_id)
         started = self.read(prefix + "started.md")[1]
         self.assertEqual(set(started["source_paths"]), set(paths))
         self.assertEqual(started["related_runs"], [first["run_id"]])
@@ -393,7 +404,8 @@ class PipelineUpdateTests(unittest.TestCase):
             related_runs=[first["run_id"]], run_id=run_id, model_call=concurrent_commit))
         self.assertEqual(self.roles, ["extract", "review", "extract"])
         prefix = self.repo / f"memory/runs/processes/{run_id}"
-        self.assertEqual({path.name for path in prefix.iterdir()}, {"started.md"})
+        self.assertEqual({path.name for path in prefix.iterdir()}, {"started.md", "engine.md"})
+        self.assert_engine_reservation(run_id)
         self.assertEqual(before, {path: (self.repo / path).read_bytes() for path in before})
 
     def test_unselected_topic_dependency_is_detected_using_only_its_header(self):

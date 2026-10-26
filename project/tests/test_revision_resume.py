@@ -118,6 +118,17 @@ class RevisionResumeTests(unittest.TestCase):
             self.verify(fixture)
         self.assertEqual(fixture[4].operation_state()["calls"], {})
 
+    def test_missing_engine_proof_is_rejected_before_resuming_an_unstarted_call(self):
+        fixture = self.prepare()
+        git, run, _, _, adapter, _ = fixture
+        (self.repo / f"memory/runs/processes/{run}/engine.md").unlink()
+        before = git.head(), adapter.ledger.path.read_bytes(), self.number
+        with self.assertRaises(CaptureError) as raised:
+            self.verify(fixture)
+        self.assertEqual(raised.exception.code, "engine_provenance_changed")
+        self.assertEqual((git.head(), adapter.ledger.path.read_bytes(), self.number), before)
+        self.assertEqual(adapter.operation_state()["calls"], {})
+
     def test_completed_extraction_attaches_real_record_and_rejects_payload_or_invocation_substitution(self):
         fixture = self.prepare()
         context = self.verify(fixture)

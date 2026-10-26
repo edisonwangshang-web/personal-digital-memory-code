@@ -13,7 +13,7 @@ import hashlib
 import os
 import re
 
-from .contracts import CaptureError, canonical
+from .contracts import CaptureError, QUALITY_SCHEMA_VERSIONS, canonical
 
 CONTRACT = "unstarted-revision-resume-v1"
 _IDENTITY = ("schema_version", "pool_id", "authorization_sha256", "limit", "initial_used")
@@ -97,7 +97,7 @@ def _scope(git, run_id, context, source_paths, related_runs, reservation, *, at_
         if _hash(data) != pointer["sha256"] or git.read(head, path) != data:
             _fail("revision_resume_reservation_changed")
         artifacts[key] = _load(data, "processing_attempt" if key == "started" else "revision_attempt",
-                               "0.4" if key == "started" else "0.9")
+                               ("0.4" if key == "started" else "0.9", *QUALITY_SCHEMA_VERSIONS))
     started, pointer = artifacts["started"], artifacts["revision_attempt"]
     _time(started.get("started_at"))
     if not isinstance(reservation["processing_key"], str) or not re.fullmatch(r"sha256-[0-9a-f]{64}", reservation["processing_key"]):
@@ -108,6 +108,8 @@ def _scope(git, run_id, context, source_paths, related_runs, reservation, *, at_
             or pointer != {"run_id": run_id, "revision_context_sha256": _hash(context), "source_paths": selected,
                            "related_runs": related, "processing_key": reservation["processing_key"]}):
         _fail("revision_resume_reservation_changed")
+    from .engine_provenance import read_reservation
+    engine = read_reservation(git, run_id)
     if require_unstarted:
         absent = [_stage_path(run_id), *[_run_path(run_id, name) for name in
                   ("review", "failure", "manifest", "receipt", "pending", "pending-registration", "reused")]]
@@ -117,6 +119,10 @@ def _scope(git, run_id, context, source_paths, related_runs, reservation, *, at_
         _fail("revision_resume_controls_changed")
     authority = verify_revision_context(git, context, source_paths=selected, related_runs=related,
                                          at_commit=at_commit, historical=True)
+    if engine is not None:
+        engine_path = _run_path(run_id, "engine")
+        authority.append({"path": engine_path, "commit_sha": head,
+                          "sha256": _hash(_committed(git, engine_path, head))})
     return authority + [deepcopy(reservation[key]) for key in expected_paths]
 
 

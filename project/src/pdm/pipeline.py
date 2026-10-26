@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime
 from pathlib import Path
 
-from .contracts import CaptureError, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, source_contract, timestamp
+from .contracts import CaptureError, ASSEMBLY_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version, source_contract, timestamp
 from .domains import DOMAIN_LABELS, DOMAIN_POLICY_VERSION, domain_policy
 from .model_calls import ModelCallError, USAGE_FIELDS, call_model
 from .transaction import PipelineGit
@@ -32,6 +32,7 @@ SAFE_REVIEW_PRELAUNCH_ERRORS = frozenset({
     "publication_paused", "remote_unconfirmed", "remote_head_changed", "remote_sync_required",
 })
 REVIEW_STRATEGIES = frozenset({"legacy-v1", "auto", "decomposed-v1"})
+CURRENT_DRAFT_REVIEW_CONTRACT = "current-draft-v1"
 
 
 def _error(code="invalid_pipeline_data"):
@@ -52,7 +53,10 @@ def _parse_saved(value):
 
 
 def _load(value, kind, schema_version=None):
-    if len(value) > MAX_SAVED_BYTES:
+    if kind == "candidate":
+        from .storage_limits import validate_candidate_bytes
+        validate_candidate_bytes(value)
+    elif len(value) > MAX_SAVED_BYTES:
         _error()
     metadata, body = _parse_saved(value)
     try:
@@ -60,7 +64,8 @@ def _load(value, kind, schema_version=None):
                             parse_constant=lambda value: _error())
     except (ValueError, TypeError, RecursionError):
         _error()
-    supported = (PIPELINE_SCHEMA, MULTISOURCE_PIPELINE_SCHEMA, M1_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION) if schema_version is None else (schema_version,)
+    supported = ((PIPELINE_SCHEMA, MULTISOURCE_PIPELINE_SCHEMA, M1_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS, ASSEMBLY_SCHEMA_VERSION)
+                 if schema_version is None else schema_version if isinstance(schema_version, tuple) else (schema_version,))
     if metadata.get("schema_version") not in supported or metadata.get("kind") != kind or not isinstance(result, dict):
         _error()
     if metadata.get("run_id") != result.get("run_id"):
@@ -226,8 +231,11 @@ def _source_fields(sources):
 
 
 def _pipeline_schema(candidate):
+    if "assembly" in candidate:
+        from .assembly_final import SCHEMA
+        return SCHEMA
     if _quality_enabled(candidate):
-        return QUALITY_SCHEMA_VERSION
+        return quality_schema_version(candidate.get("skill_bundle"))
     if "revision_context" in candidate:
         return REVISION_SCHEMA_VERSION
     if candidate.get("review_strategy", "legacy-v1") != "legacy-v1":
@@ -293,6 +301,7 @@ def _candidate_sources(git, candidate, *, historical=False):
 
 def execution_versions(git):
     """Bind actual loaded program/rules bytes, separately from evolving data HEAD."""
+    from .engine_provenance import program_commit
     package = Path(__file__).resolve().parent
     project = package.parents[1]
     code = {}
@@ -309,7 +318,7 @@ def execution_versions(git):
               for path in sorted((project / "skills").rglob("*")) if path.is_file() and not path.is_symlink()}
     return {"program_sha256": _hash(code), "rules_version": _hash({**prompts, "domain_policy": policy_digest, "skills": skills}),
             "domain_policy_version": DOMAIN_POLICY_VERSION, "domain_policy_sha256": policy_digest,
-            "program_commit": git.text("log", "-1", "--format=%H", "--", "project/src/pdm", "project/prompts", "project/skills", "pyproject.toml") or None}
+            "program_commit": program_commit()}
 
 
 def _string(value, maximum=65536):
@@ -355,17 +364,98 @@ def _time(value):
             _error("invalid_model_output")
 
 
-def _objects(output, sources, run_id, response, versions, created, *, batch=False, quality_context=None):
+def _reuse_refs_enabled(skill_bundle):
+    skills = skill_bundle.get("skills", {}) if isinstance(skill_bundle, dict) else {}
+    return isinstance(skills, dict) and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+        for role, ref in pair) for pair in (
+            (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")),
+            (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8"))))
+
+
+def _feedback_quality_enabled(skill_bundle):
+    skills = skill_bundle.get("skills", {}) if isinstance(skill_bundle, dict) else {}
+    return isinstance(skills, dict) and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+        for role, ref in (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")))
+
+
+def _processing_header(skill_bundle, fallback):
+    return quality_schema_version(skill_bundle) if _reuse_refs_enabled(skill_bundle) else fallback
+
+
+
+def _reuse_obligation_objects(objects, related):
+    """Keep old statistical obligations when a record body is reused verbatim."""
+    known = {doc["path"]: doc for item in related for doc in item["documents"]}
+    return [{"path": old["path"], "metadata": old["metadata"], "body": old["body"]}
+            for obj in objects for old in [known.get(obj["path"])]
+            if old is not None and obj["path"].startswith("memory/records/")
+            and obj["body"] == old["body"]]
+
+
+def _reuse_requirements(git, related, sources, context):
+    from .reuse_quality import collect_reuse_statistical_obligations, model_reuse_requirements
+    documents = [{"path": doc["path"], "metadata": doc["metadata"], "body": doc["body"]}
+                 for item in related for doc in item["documents"] if doc["path"].startswith("memory/records/")]
+    return model_reuse_requirements(collect_reuse_statistical_obligations(git, related, sources, context, documents))
+
+
+def _reuse_objects(refs, related, sources):
+    """Materialize only explicitly selected, already-authorized frozen documents."""
+    if not isinstance(refs, list) or len(refs) > 40:
+        _error("invalid_reuse_reference")
+    known = {document["path"]: document for item in related for document in item["documents"]}
+    result, seen = [], set()
+    for ref in refs:
+        if (not isinstance(ref, dict) or set(ref) != {"path", "content_version"}
+                or not isinstance(ref["path"], str) or not isinstance(ref["content_version"], str)
+                or ref["path"] in seen):
+            _error("invalid_reuse_reference")
+        old = known.get(ref["path"])
+        if old is None or ref["content_version"] != old["content_version"]:
+            _error("invalid_reuse_reference")
+        metadata = old["metadata"]
+        folder = "topics" if metadata.get("type") == "wiki" else "records"
+        identifier = metadata.get("id")
+        if (not isinstance(identifier, str) or not ID_RE.fullmatch(identifier)
+                or ref["path"] != f"memory/{folder}/{identifier}.md"
+                or metadata.get("content_version") != ref["content_version"]):
+            _error("invalid_reuse_reference")
+        _refs(metadata.get("sources"), sources)
+        seen.add(ref["path"])
+        result.append(copy.deepcopy({"path": ref["path"], "metadata": metadata, "body": old["body"]}))
+    return result
+
+
+def _reuse_quality_output(output, reused):
+    return {**output, "objects": [*output["objects"],
+            *[{**obj["metadata"], "body": obj["body"]} for obj in reused
+              if obj["metadata"]["type"] != "wiki"]]}
+
+
+def _objects(output, sources, run_id, response, versions, created, *, batch=False, quality_context=None,
+             related=(), skill_bundle=None):
     fields = {"objects", "wikis"} if batch else {"objects", "wiki"}
+    reuse_enabled = _reuse_refs_enabled(skill_bundle)
+    if reuse_enabled:
+        fields.add("reuse_refs")
     if quality_context is not None:
         from .knowledge_quality import validate_quality_output
         if not isinstance(output, dict) or set(output) != fields | {"quality"}:
             _error("invalid_model_output")
-        validate_quality_output(output, quality_context)
+        if not reuse_enabled:
+            validate_quality_output(output, quality_context)
+        quality = output["quality"]
         output = {key: value for key, value in output.items() if key != "quality"}
-    if not isinstance(output, dict) or set(output) != fields or not isinstance(output["objects"], list) or not 1 <= len(output["objects"]) <= 20:
+    if not isinstance(output, dict) or set(output) != fields or not isinstance(output["objects"], list):
         _error("invalid_model_output")
-    result, ids = [], set()
+    reused = _reuse_objects(output["reuse_refs"], related, sources) if reuse_enabled else []
+    reused_records = [obj for obj in reused if obj["metadata"]["type"] != "wiki"]
+    reused_wikis = [obj for obj in reused if obj["metadata"]["type"] == "wiki"]
+    if not 1 <= len(output["objects"]) + len(reused_records) <= 20:
+        _error("invalid_model_output")
+    result, ids = [], {obj["metadata"]["id"] for obj in reused}
+    if len(ids) != len(reused):
+        _error("invalid_reuse_reference")
     record_fields = {"id", "type", "title", "source_kind", "sources", "domains", "valid_from", "valid_to", "verification_status", "lifecycle_status", "body"}
     for value in output["objects"]:
         if not isinstance(value, dict) or set(value) != record_fields:
@@ -382,8 +472,9 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
         _time(value["valid_to"])
         material = {key: value[key] for key in value if key != "body"}
         result.append(_object(material, value["body"], "records", sources, ids, run_id, response, versions, created))
-    wikis = output["wikis"] if batch else [output["wiki"]]
-    if not isinstance(wikis, list) or not 1 <= len(wikis) <= 20:
+    result.extend(reused_records)
+    wikis = output["wikis"] if batch else ([] if reuse_enabled and output["wiki"] is None else [output["wiki"]])
+    if (not isinstance(wikis, list) or not 1 <= len(wikis) + len(reused_wikis) <= (20 if batch else 1)):
         _error("invalid_model_output")
     records = {obj["metadata"]["id"]: obj for obj in result}
     for wiki in wikis:
@@ -395,6 +486,19 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
         material = {key: wiki[key] for key in wiki if key not in {"body", "record_ids"}}
         material.update(type="wiki", records=[{"id": key, "content_version": records[key]["metadata"]["content_version"]} for key in selected])
         result.append(_object(material, wiki["body"], "topics", sources, ids, run_id, response, versions, created))
+    for wiki in reused_wikis:
+        dependencies = wiki["metadata"].get("records")
+        if (not isinstance(dependencies, list) or not dependencies
+                or any(not isinstance(ref, dict) or set(ref) != {"id", "content_version"}
+                       or not isinstance(ref["id"], str) or ref["id"] not in records
+                       or ref["content_version"] != records[ref["id"]]["metadata"]["content_version"]
+                       for ref in dependencies)
+                or len({ref["id"] for ref in dependencies}) != len(dependencies)
+                or not batch and {ref["id"] for ref in dependencies} != set(records)):
+            _error("invalid_wiki_dependency")
+        result.append(wiki)
+    if reuse_enabled and quality_context is not None:
+        validate_quality_output(_reuse_quality_output({**output, "quality": quality}, reused), quality_context)
     return result
 
 
@@ -509,10 +613,19 @@ def _candidate_binding(candidate):
     return _hash({key: value for key, value in candidate.items() if key != "binding"})
 
 
-def _targets_clear(git, objects):
+def _targets_clear(git, objects, rebuild_context=None, *, at_commit=None):
+    allowed = set()
+    if rebuild_context is not None:
+        from .rebuild import allow_rebuild_targets
+        allowed = allow_rebuild_targets(git, objects, rebuild_context, at_commit=at_commit)
     for obj in objects:
         path = obj["path"]
-        if git.path(path).exists() or git.text("log", "-1", "--format=%H", "--", path):
+        if path in allowed:
+            continue
+        exists = (git.path(path).exists() if at_commit is None
+                  else bool(git.run("ls-tree", at_commit, "--", path)))
+        history = git.text("log", "-1", "--format=%H", *([at_commit] if at_commit else []), "--", path)
+        if exists or history:
             _error("target_exists_or_deleted")
 
 
@@ -591,7 +704,7 @@ def _related_context(git, related_runs, sources, *, at_commit=None, visited=(), 
     return result
 
 
-def _updated_objects(git, objects, related, *, check_current=False):
+def _updated_objects(git, objects, related, *, check_current=False, rebuild_context=None):
     known = {document["path"]: document for item in related for document in item["documents"]}
     if check_current:
         returned = {obj["path"] for obj in objects}
@@ -633,8 +746,8 @@ def _updated_objects(git, objects, related, *, check_current=False):
                 _error("correction_evidence_missing")
         previous = known.get(path)
         if previous is None:
-            if check_current:
-                _targets_clear(git, [obj])
+            if check_current and rebuild_context is None:
+                _targets_clear(git, [obj], rebuild_context)
             operations[path] = {"action": "create", "before_sha256": None, "before_content_version": None}
         else:
             if obj["metadata"]["id"] != previous["metadata"].get("id") or obj["metadata"]["type"] != previous["metadata"].get("type"):
@@ -643,6 +756,9 @@ def _updated_objects(git, objects, related, *, check_current=False):
             action = "reuse" if obj["metadata"]["content_version"] == previous["content_version"] else "update"
             operations[path] = {"action": action, "before_sha256": previous["sha256"],
                                 "before_content_version": previous["content_version"]}
+    if check_current and rebuild_context is not None:
+        _targets_clear(git, [obj for obj in objects if operations[obj["path"]]["action"] == "create"],
+                       rebuild_context)
     return operations
 
 
@@ -692,7 +808,8 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
     _validate_candidate_quality(git, old, sources)
     extraction = _call_metadata({**old["extraction"], "output": old["extraction_output"]})
     expected = _objects(old["extraction_output"], sources, run_id, extraction, versions, old["created_at"],
-                        batch=True, quality_context=old.get("quality_context"))
+                        batch=True, quality_context=old.get("quality_context"),
+                        related=old["related"], skill_bundle=old.get("skill_bundle"))
     _updated_objects(git, expected, old["related"])
     if old["objects"] != expected:
         _error("candidate_mismatch")
@@ -701,7 +818,7 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
 
 def _processing_key(source_fields, versions, controls_digest, batch_context=None, batch_material=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_context=None, revision_resume=None,
-                    revision_revalidation=None, skill_bundle=None):
+                    revision_revalidation=None, skill_bundle=None, rebuild_context=None):
     bindings = [source_fields["source"], *source_fields.get("additional_sources", [])]
     material = {"sources": [{"source_id": item["source_id"], "source_version": item["source_version"]} for item in bindings],
                 "rules_version": versions["rules_version"], "controls_digest": controls_digest}
@@ -720,6 +837,8 @@ def _processing_key(source_fields, versions, controls_digest, batch_context=None
         material["revision_revalidation"] = {key: revision_revalidation[key] for key in ("contract", "expected_attestation_sha256")}
     if skill_bundle is not None:
         material["skill_bundle_sha256"] = skill_bundle["sha256"]
+    if rebuild_context is not None:
+        material["rebuild_context"] = rebuild_context
     return _hash(material)
 
 
@@ -752,14 +871,14 @@ def _existing_revision_attempt(git, context, source_paths, related_runs):
         if _last_commit(git, git.head(), path):
             _error("revision_attempt_deleted")
         return None
-    value = _load(_committed(git, path), "revision_attempt", REVISION_SCHEMA_VERSION)
+    value = _load(_committed(git, path), "revision_attempt", (REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS))
     run = value.get("run_id")
     if value != {"run_id": run, "revision_context_sha256": _hash(context),
             "source_paths": source_paths, "related_runs": related_runs,
             "processing_key": value.get("processing_key")}:
         _error("revision_attempt_mismatch")
     _run_path(run, "review")
-    started = _load(_committed(git, _run_path(run, "started")), "processing_attempt", M1_SCHEMA_VERSION)
+    started = _load(_committed(git, _run_path(run, "started")), "processing_attempt", (M1_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS))
     if (started.get("processing_key") != value["processing_key"]
             or started.get("source_paths") != source_paths or started.get("related_runs") != related_runs
             or _last_commit(git, git.head(), _run_path(run, "started")) != _last_commit(git, git.head(), path)):
@@ -778,7 +897,7 @@ def _existing_revision_attempt(git, context, source_paths, related_runs):
     if git.path(failure_path).is_file():
         failure = _load(_committed(git, failure_path), "failure")
         metadata, _ = _parse_saved(_committed(git, failure_path))
-        if metadata.get("schema_version") not in {REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION}:
+        if metadata.get("schema_version") not in {REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS}:
             _error("revision_attempt_mismatch")
         return {**result, "status": "failed", "error": failure["error"], "next_action": "operator_reconcile"}
     return {**result, "status": "unknown", "next_action": "reconcile"}
@@ -870,6 +989,19 @@ def _assert_revalidation_operation(candidate, model_call):
     operation = _state(_adapter(model_call), budget)
     if operation["calls"].get("extract") != completed:
         _error("completed_extraction_not_known_completed")
+
+
+def _completed_extraction_module(context):
+    """Keep legacy and quality recovery authority in separate contracts."""
+    from . import known_extraction, quality_completed_extraction
+    contract = context.get("contract") if isinstance(context, dict) else None
+    if contract is None and isinstance(context, dict):
+        contract = context.get("attestation", {}).get("contract")
+    if contract in quality_completed_extraction.CONTRACTS:
+        return quality_completed_extraction
+    if contract == known_extraction.CONTRACT:
+        return known_extraction
+    _error("invalid_extraction_revalidation")
 
 
 def _actual_calls(model_call):
@@ -1047,6 +1179,8 @@ def _candidate_payload(git, candidate, sources):
     payload = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                "related": [], "controls": {}, "rules_version": candidate["versions"]["rules_version"],
                "domain_policy": domain_policy()}
+    if "rebuild_context" in candidate:
+        payload["rebuild_context"] = copy.deepcopy(candidate["rebuild_context"])
     if "continuation_context" in candidate:
         payload["continuation_context"] = copy.deepcopy(candidate["continuation_context"])
     if "revision_context" in candidate:
@@ -1061,10 +1195,23 @@ def _candidate_payload(git, candidate, sources):
     if _quality_enabled(candidate):
         payload.update({key: copy.deepcopy(candidate[key]) for key in
                         ("quality_contract", "skill_bundle", "quality_context")})
+        if _feedback_quality_enabled(candidate["skill_bundle"]):
+            payload["reuse_quality_requirements"] = copy.deepcopy(candidate["reuse_quality_requirements"])
     return payload
 
 
+def _current_draft_review(candidate):
+    """New candidates pin the smaller Review input; old bytes stay reproducible."""
+    if "review_request_contract" not in candidate:
+        return False
+    if (candidate["review_request_contract"] != CURRENT_DRAFT_REVIEW_CONTRACT
+            or not _quality_enabled(candidate) or "assembly" in candidate):
+        _error("invalid_review_request_contract")
+    return True
+
+
 def _review_payload(candidate, payload):
+    current_draft = _current_draft_review(candidate)
     request = {**payload, "candidate": candidate}
     if _quality_enabled(candidate):
         from .knowledge_quality import build_review_checks
@@ -1076,6 +1223,19 @@ def _review_payload(candidate, payload):
                                                "batch_context", "related", "merge_inputs", "extraction_output"}}
         request["candidate"]["extraction_output"] = {
             "quality": copy.deepcopy(candidate["extraction_output"]["quality"])}
+        from .quality_completed_extraction import CONTRACTS
+        if current_draft or candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS:
+            # The original recovery contract already omits repeated program
+            # provenance. The new current-draft contract uses that same narrow
+            # omission without changing any unmarked historical request.
+            for key in ("revision_context", "revision_revalidation", "revision_resume",
+                        "quality_revalidation_guard_ref"):
+                request["candidate"].pop(key, None)
+        if current_draft:
+            # Review independently checks the current draft against its actual
+            # evidence. Previous drafts and feedback remain in the bound stage
+            # and publication proof, not in this model request.
+            request.pop("revision_context", None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
     return request
 
@@ -1088,7 +1248,18 @@ def _validate_candidate_quality(git, candidate, sources):
     context = prepare_quality(sources, source_views=candidate.get("source_views"))
     if candidate["quality_context"] != context:
         _error("quality_context_mismatch")
-    validate_quality_output(candidate["extraction_output"], context)
+    output = candidate["extraction_output"]
+    if _reuse_refs_enabled(candidate["skill_bundle"]):
+        reused = _reuse_objects(output.get("reuse_refs"), candidate["related"], sources)
+        output = _reuse_quality_output(output, reused)
+    validate_quality_output(output, context)
+    if _feedback_quality_enabled(candidate["skill_bundle"]):
+        from .reuse_quality import validate_reuse_quality
+        expected_requirements = _reuse_requirements(git, candidate["related"], sources, context)
+        if candidate.get("reuse_quality_requirements") != expected_requirements:
+            _error("reuse_quality_requirements_mismatch")
+        validate_reuse_quality(git, candidate["related"], sources, context,
+                               _reuse_obligation_objects(candidate["objects"], candidate["related"]), output)
     payload = _candidate_payload(git, candidate, sources)
     # Revalidation may adopt a new program version but must retain the actual
     # completed request, whose prior quality snapshot cannot be exchanged.
@@ -1105,8 +1276,20 @@ def _use_decomposed_review(candidate, payload):
         return True
     if strategy != "auto":
         return False
-    from .model_calls import MAX_INPUT_BYTES
-    return _model_request_binding("review", _review_payload(candidate, payload))["bytes"] > MAX_INPUT_BYTES
+    from .model_calls import MAX_INPUT_BYTES, request_binding
+    from .skill_wire import SharedJSONError
+    try:
+        binding = request_binding("review", _review_payload(candidate, payload))
+    except SharedJSONError as error:
+        # The complete root may exceed the shared encoder's resource limit
+        # before its rendered size is known. Each existing Review unit still
+        # needs its own complete request and ordinary capacity checks.
+        if error.code == "shared_json_limit":
+            return True
+        _error("invalid_skill_request")
+    except (ValueError, TypeError, KeyError):
+        _error("invalid_skill_request")
+    return binding["bytes"] > MAX_INPUT_BYTES
 
 
 def _assert_fixed_current(git, candidate, sources, stage_bytes):
@@ -1122,6 +1305,9 @@ def _assert_fixed_current(git, candidate, sources, stage_bytes):
     if incremental and (control_guard(git)["digest"] != candidate["controls_digest"]
             or _related_context(git, candidate["related_runs"], sources, max_runs=256 if batch else 8) != candidate["related"]):
         _error("processing_context_changed")
+    if "rebuild_context" in candidate:
+        from .rebuild import validate_rebuild_context
+        validate_rebuild_context(git, candidate["rebuild_context"], source_paths=source_paths)
 
 
 def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, output,
@@ -1134,8 +1320,9 @@ def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, outp
         sources = _candidate_sources(git, candidate, historical=True)
         request = _review_payload(candidate, _candidate_payload(git, candidate, sources))
     _review_output(output, quality=quality, required_checks=request["required_checks"] if request else None)
+    from .assembly_final import extraction_invocations
     if (_call_metadata({**review_call, "output": output}) != review_call
-            or review_call["invocation_id"] == candidate["extraction"]["invocation_id"]):
+            or review_call["invocation_id"] in extraction_invocations(candidate)):
         _error("review_not_independent")
     review_path = _run_path(run_id, "review")
     review = {"run_id": run_id, "review_id": "rev-" + uuid.uuid4().hex, "binding": candidate["binding"],
@@ -1235,32 +1422,70 @@ def process(repo, source_path, expected_head=None, *, model_call=call_model, ski
     return process_sources(repo, [source_path], expected_head, model_call=model_call, skill_bundle=skill_bundle)
 
 
+
+def preflight_processing(repo, source_paths, **options):
+    """Build the real full extraction request before reservations or run writes."""
+    if any(key in options for key in ("model_call", "_preflight_only", "_resume_unstarted", "_revalidate_completed")):
+        _error("invalid_preflight")
+    def no_call(*args, **kwargs):
+        _error("preflight_model_call_forbidden")
+    return process_sources(repo, source_paths, model_call=no_call, _preflight_only=True, **options)
+
+
 def process_sources(repo, source_paths, expected_head=None, *, model_call=call_model,
                     related_runs=None, run_id=None, execution_context=None,
                     batch_context=None, source_views=None, draft_only=False, merge_runs=(), reuse_extraction_run=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_from_run=None, _resume_unstarted=None,
-                    _revalidate_completed=None, skill_bundle=None):
+                    _revalidate_completed=None, skill_bundle=None, rebuild_context=None, _preflight_only=False):
     """Process selected sources; explicit revision retains a rejected fixed Review.
 
     Revision is interpretation work, never another fact source or permission to
     restart an uncertain production operation. Its complete original selection
     and batch context are restored before any model invocation.
     """
+    if type(_preflight_only) is not bool or _preflight_only and (_resume_unstarted is not None or _revalidate_completed is not None):
+        _error("invalid_preflight")
+    from .quality_completed_extraction import CONTRACT_V2
+    rebuild_revalidation = (_revalidate_completed is not None
+        and isinstance(_revalidate_completed, dict)
+        and _revalidate_completed.get("attestation", {}).get("contract") == CONTRACT_V2)
+    if rebuild_revalidation and (rebuild_context is None
+            or _revalidate_completed["attestation"].get("rebuild_context") != rebuild_context
+            or _revalidate_completed.get("original_payload", {}).get("rebuild_context") != rebuild_context):
+        _error("invalid_rebuild_context")
+    if rebuild_context is not None and (related_runs not in (None, [], ())
+            or continuation_context is not None or draft_only or merge_runs or reuse_extraction_run is not None
+            or _resume_unstarted is not None or _revalidate_completed is not None and not rebuild_revalidation):
+        _error("invalid_rebuild_context")
     if _revalidate_completed is not None and (_resume_unstarted is not None or revision_from_run is None or run_id is None):
         _error("invalid_extraction_revalidation")
     if _resume_unstarted is not None and (revision_from_run is None or run_id is None):
         _error("invalid_revision_resume")
     if revision_from_run is not None:
         _run_path(revision_from_run, "review")
-        if (execution_context is not None or continuation_context is not None or draft_only
-                or reuse_extraction_run is not None):
+        if execution_context is not None or reuse_extraction_run is not None:
             _error("invalid_revision_context")
         scope = normalize_source_paths(source_paths, allow_versions=True, max_sources=256)
         peek = _load(_committed(PipelineGit(repo), _stage_path(revision_from_run)), "candidate")
+        from .revision_context import supports_phase_revision
+        phase_revision = supports_phase_revision(peek)
+        if (not phase_revision and (continuation_context is not None or draft_only)
+                or draft_only != peek.get("batch_material", {}).get("draft_only", False)
+                or continuation_context != peek.get("continuation_context")):
+            _error("invalid_revision_context")
+        if phase_revision and (_resume_unstarted is not None or _revalidate_completed is not None):
+            # Dedicated operator attestations still cover final candidates
+            # without a pending continuation; phase repair uses normal calls.
+            if draft_only or continuation_context is not None:
+                _error("invalid_revision_context")
+        if rebuild_context != peek.get("rebuild_context"):
+            _error("invalid_rebuild_context")
         if peek.get("binding") != _candidate_binding(peek) or sorted(item["path"] for item in _candidate_bindings(peek)) != scope:
             _error("revision_source_scope")
         if skill_bundle is None and _quality_enabled(peek):
             skill_bundle = copy.deepcopy(peek["skill_bundle"])
+        if (draft_only or continuation_context is not None) and not _feedback_quality_enabled(skill_bundle):
+            _error("invalid_revision_context")
         if "batch_context" in peek:
             if batch_context is None and source_views is None:
                 batch_context, source_views = copy.deepcopy(peek["batch_context"]), copy.deepcopy(peek["source_views"])
@@ -1283,8 +1508,13 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             skill_bundle = copy.deepcopy(original["skill_bundle"])
     if skill_bundle is not None:
         skill_bundle = _validated_skill_bundle(skill_bundle)
-        if _resume_unstarted is not None or _revalidate_completed is not None:
+        if _resume_unstarted is not None:
             _error("skill_quality_recovery_attestation_required")
+        if _revalidate_completed is not None:
+            from .quality_completed_extraction import CONTRACTS
+            if (not _feedback_quality_enabled(skill_bundle)
+                    or _revalidate_completed.get("attestation", {}).get("contract") not in CONTRACTS):
+                _error("skill_quality_recovery_attestation_required")
     revalidation_call_baseline = _actual_calls(model_call) if _revalidate_completed is not None else None
     def current_call_count():
         observed = _actual_calls(model_call)
@@ -1297,7 +1527,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         _error("invalid_batch_context")
     if continuation_context is not None and not batch:
         _error("invalid_continuation_context")
-    incremental = related_runs is not None or batch or revision_from_run is not None
+    incremental = related_runs is not None or batch or revision_from_run is not None or rebuild_context is not None
     if execution_context is not None and not incremental:
         _error("invalid_execution_context")
     related_limit = 256 if batch else 8
@@ -1309,7 +1539,12 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
     _run_path(run_id, "review")
     git = PipelineGit(repo)
     with git.lock():
-        git.recover()
+        if _preflight_only:
+            journal = git._journal_path()
+            if journal.exists() or journal.is_symlink():
+                _error("preflight_recovery_required")
+        else:
+            git.recover()
         head = git.check(expected_head)
         _execution_guard(repo, execution_context, run_id=run_id, source_paths=source_paths, related_runs=related_runs)
         if continuation_context is not None:
@@ -1329,8 +1564,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     reservation=_resume_unstarted["reservation"],
                     expected_reservation_sha256=_resume_unstarted["expected_reservation_sha256"])
             else:
-                from .known_extraction import verify_completed_extraction
-                _revalidate_completed = verify_completed_extraction(git, run_id, model_call=model_call,
+                recovery = _completed_extraction_module(_revalidate_completed)
+                _revalidate_completed = recovery.verify_completed_extraction(git, run_id, model_call=model_call,
                     source_paths=source_paths, related_runs=related_runs,
                     attestation=_revalidate_completed["attestation"],
                     expected_attestation_sha256=_revalidate_completed["expected_attestation_sha256"],
@@ -1347,13 +1582,19 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if all(source["metadata"]["acquisition_status"] == "link_only" for source in sources):
             _error("source_has_no_text")
         source_fields = _source_fields(sources)
-        schema_version = (QUALITY_SCHEMA_VERSION if skill_bundle is not None else REVISION_SCHEMA_VERSION if revision_context is not None else DECOMPOSED_SCHEMA_VERSION if review_strategy != "legacy-v1" else ORCHESTRATED_SCHEMA_VERSION if continuation_context is not None else CONTINUOUS_SCHEMA_VERSION
+        if rebuild_context is not None:
+            from .rebuild import validate_rebuild_context
+            validate_rebuild_context(git, rebuild_context, source_paths=source_paths)
+        schema_version = (quality_schema_version(skill_bundle) if skill_bundle is not None else REVISION_SCHEMA_VERSION if revision_context is not None else DECOMPOSED_SCHEMA_VERSION if review_strategy != "legacy-v1" else ORCHESTRATED_SCHEMA_VERSION if continuation_context is not None else CONTINUOUS_SCHEMA_VERSION
                           if batch else M1_SCHEMA_VERSION if incremental else _pipeline_schema(source_fields))
         versions = execution_versions(git)
         payload = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                    "related": [], "controls": {}, "rules_version": versions["rules_version"],
                    "domain_policy": domain_policy()}
         related, context_fields = [], {}
+        if rebuild_context is not None:
+            payload["rebuild_context"] = copy.deepcopy(rebuild_context)
+            context_fields["rebuild_context"] = copy.deepcopy(rebuild_context)
         if _resume_unstarted is not None:
             context_fields["revision_resume"] = copy.deepcopy(_resume_unstarted)
         if _revalidate_completed is not None:
@@ -1386,10 +1627,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             context_fields.update(quality)
         if incremental:
             controls = control_guard(git)
-            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle)
+            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle, rebuild_context)
             existing = _existing_processing(git, key, source_paths, related_runs)
             if existing is not None:
-                if requested_run is not None:
+                if requested_run is not None and not _preflight_only:
                     reused = {"run_id": run_id, "status": "already_processed", "original_run_id": existing["run_id"],
                               "processing_key": key, "execution_context": copy.deepcopy(execution_context), "attempted_calls": 0}
                     path = _run_path(run_id, "reused")
@@ -1397,11 +1638,44 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                             "process: persist zero-call reuse for reserved attempt")
                     existing.update(attempt_run_id=run_id, reuse_path=path, head=final)
                 return existing
+            if rebuild_context is not None:
+                from .rebuild import allow_rebuild_targets
+                # An already-published intent was handled above. A fresh call
+                # must still have every explicitly cleared target unwritten.
+                allow_rebuild_targets(git, [], rebuild_context)
             related = _related_context(git, related_runs, sources, max_runs=related_limit)
             payload.update(processing_mode="incremental", related=related, controls=controls)
             context_fields.update({"mode": "incremental", "related_runs": related_runs,
                               "controls_digest": controls["digest"], "processing_key": key,
                               "execution_context": copy.deepcopy(execution_context)})
+        if _feedback_quality_enabled(skill_bundle):
+            requirements = _reuse_requirements(git, related, sources, context_fields["quality_context"])
+            payload["reuse_quality_requirements"] = requirements
+            context_fields["reuse_quality_requirements"] = copy.deepcopy(requirements)
+        if _preflight_only or _feedback_quality_enabled(skill_bundle):
+            from .model_calls import MAX_INPUT_BYTES
+            admission = _model_request_binding("extract", payload)
+            storage_blocked = False
+            if _feedback_quality_enabled(skill_bundle):
+                from .storage_limits import (LEGACY_FILE_BYTES, MAX_CANDIDATE_BYTES,
+                                             candidate_storage_sizes)
+                # A lower bound from known immutable material, before any
+                # reservation or model call. The actual output still receives
+                # the complete bounded storage check below.
+                known = {"run_id": run_id, "base_head": head, **source_fields,
+                         "versions": versions, "related": related, **context_fields}
+                size = candidate_storage_sizes(known)
+                storage_blocked = (size["core_bytes"] > LEGACY_FILE_BYTES
+                                   or size["total_bytes"] > MAX_CANDIDATE_BYTES)
+            if _preflight_only:
+                return {"status": "ready" if admission["bytes"] <= MAX_INPUT_BYTES and not storage_blocked else "blocked_capacity",
+                        "request_bytes": admission["bytes"], "request_sha256": admission["sha256"],
+                        "head": head, "model_calls": 0, "attempted_calls": 0,
+                        **({"error": "candidate_too_large"} if storage_blocked else {})}
+            if storage_blocked:
+                _error("candidate_too_large")
+            if admission["bytes"] > MAX_INPUT_BYTES:
+                _error("input_limit")
         if _resume_unstarted is None and _revalidate_completed is None:
             _reserve_processing_calls(model_call)
         if incremental:
@@ -1411,12 +1685,16 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             else:
                 started = {"run_id": run_id, "processing_key": key, "execution_context": copy.deepcopy(execution_context),
                            "source_paths": source_paths, "related_runs": related_runs, "reserved_calls": 2, "started_at": timestamp()}
-                started_bytes = _document("processing_attempt", started, M1_SCHEMA_VERSION)
+                started_bytes = _document("processing_attempt", started,
+                    _processing_header(skill_bundle, M1_SCHEMA_VERSION))
                 started_files = {started_path: started_bytes}
+                from .engine_provenance import reservation_file
+                started_files.update(reservation_file(run_id, key, head, started_bytes, versions))
                 if revision_context is not None:
                     pointer = {"run_id": run_id, "revision_context_sha256": _hash(revision_context),
                                "source_paths": source_paths, "related_runs": related_runs, "processing_key": key}
-                    started_files[_revision_attempt_path(revision_context)] = _document("revision_attempt", pointer, REVISION_SCHEMA_VERSION)
+                    started_files[_revision_attempt_path(revision_context)] = _document("revision_attempt", pointer,
+                        _processing_header(skill_bundle, REVISION_SCHEMA_VERSION))
                 head = git.write_files(started_files, head, "process: reserve immutable run before model calls")
             # The reservation advances HEAD; both model calls must receive the
             # control snapshot at the same base used by the fixed candidate.
@@ -1448,7 +1726,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 context_fields["revision_resume"] = attach_revision_resume_extraction(model_call, _resume_unstarted, extraction, payload)
             created = timestamp()
             objects = _objects(response["output"], sources, run_id, response, versions, created, batch=batch,
-                               quality_context=context_fields.get("quality_context"))
+                               quality_context=context_fields.get("quality_context"),
+                               related=related, skill_bundle=skill_bundle)
             _current_object_corrections(objects, sources)
             if batch:
                 from .batching import assert_fragment_refs
@@ -1457,6 +1736,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         except (ModelCallError, CaptureError) as error:
             git.check(head)
             if _revalidate_completed is not None:
+                if rebuild_revalidation:
+                    return _failure(git, run_id, "extract", error.code, head,
+                        _failure_call(error, response), schema_version, current_call_count(),
+                        failure_name="revalidation-failure")
                 return {"run_id": run_id, "status": "failed", "error": error.code,
                         "failure_path": _run_path(run_id, "failure"), "head": head,
                         "attempted_calls": 0, "model_calls": 0, "extract_calls": 0}
@@ -1470,7 +1753,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             if control_guard(git)["digest"] != context_fields["controls_digest"] or _related_context(git, related_runs, sources, max_runs=related_limit) != related:
                 _error("processing_context_changed")
             try:
-                context_fields["operations"] = _updated_objects(git, objects, related, check_current=not draft_only)
+                context_fields["operations"] = _updated_objects(git, objects, related, check_current=not draft_only,
+                                                               rebuild_context=rebuild_context)
             except CaptureError as error:
                 if error.code not in {"related_records_omitted", "related_identity_changed",
                                       "correction_evidence_missing", "required_related_context"}:
@@ -1479,7 +1763,19 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version, current_call_count(),
                     failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
         else:
-            _targets_clear(git, objects)
+            _targets_clear(git, objects, rebuild_context)
+        if _feedback_quality_enabled(skill_bundle):
+            from .reuse_quality import validate_reuse_quality
+            try:
+                validate_reuse_quality(git, related, sources, context_fields["quality_context"],
+                                       _reuse_obligation_objects(objects, related),
+                                       _reuse_quality_output(response["output"],
+                                           _reuse_objects(response["output"].get("reuse_refs"), related, sources)))
+            except CaptureError as error:
+                git.check(head)
+                return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
+                                current_call_count(),
+                                failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
         try:
             _validate_domains(objects, related, context_fields.get("operations", {}), versions)
         except CaptureError as error:
@@ -1491,14 +1787,33 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         candidate = {"run_id": run_id, "base_head": head, **source_fields, "versions": versions,
                      "related": related, "objects": objects, "extraction": extraction, "extraction_output": response["output"], "created_at": created,
                      **context_fields}
+        if skill_bundle is not None:
+            candidate["review_request_contract"] = CURRENT_DRAFT_REVIEW_CONTRACT
+        stage_files = {}
+        if _revalidate_completed is not None:
+            from .quality_completed_extraction import CONTRACTS, RESPONSE_PROVENANCE, SCHEMA
+            if _revalidate_completed.get("contract") in CONTRACTS:
+                guard_path = _run_path(run_id, "quality-revalidation-guard")
+                attestation = _revalidate_completed["attestation"]
+                guard = {"run_id": run_id, "contract": _revalidate_completed["contract"], "response_provenance": RESPONSE_PROVENANCE,
+                    "revalidation_context_sha256": _hash(_revalidate_completed),
+                    "original_failure": attestation["failure"],
+                    "original_call": {"invocation_id": extraction["invocation_id"],
+                                      "payload_sha256": attestation["original_payload_sha256"]}}
+                stage_files[guard_path] = _document("quality_revalidation_guard", guard, SCHEMA)
+                candidate["quality_revalidation_guard_ref"] = {"path": guard_path, "sha256": _hash(stage_files[guard_path])}
         candidate["binding"] = _candidate_binding(candidate)
         stage_path = _stage_path(run_id)
         stage_bytes = _document("candidate", candidate, schema_version)
-        if len(stage_bytes) > 1024 * 1024:
+        from .storage_limits import validate_file_bytes
+        try:
+            validate_file_bytes(stage_path, stage_bytes)
+        except CaptureError:
             return _failure(git, run_id, "extract", "candidate_too_large", head, _failure_call(None, response), schema_version,
                             current_call_count(),
                             failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
-        head = git.write_files({stage_path: stage_bytes}, head, "process: preserve fixed candidate")
+        stage_files[stage_path] = stage_bytes
+        head = git.write_files(stage_files, head, "process: preserve fixed candidate")
         stage_commit = head
         try:
             _assert_substantive_revision(candidate)
@@ -1566,7 +1881,8 @@ def resume_unstarted_revision(repo, run_id, *, allowed_source_paths, model_call,
 def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model_call,
                                     attestation, expected_attestation_sha256, original_payload,
                                     response, original_resume_context, related_runs=(), expected_head=None,
-                                    batch_context=None, source_views=None, review_strategy="decomposed-v1"):
+                                    batch_context=None, source_views=None, review_strategy="decomposed-v1",
+                                    rebuild_context=None):
     """Revalidate the exact known completed response; never invoke extraction.
 
     Independent Review remains mandatory. The original failure, operation,
@@ -1574,6 +1890,14 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
     """
     if not isinstance(attestation, dict):
         _error("invalid_extraction_revalidation")
+    from .quality_completed_extraction import CONTRACT_V2
+    if attestation.get("contract") == CONTRACT_V2:
+        original_rebuild = attestation.get("rebuild_context")
+        if original_rebuild is None or rebuild_context is not None and rebuild_context != original_rebuild:
+            _error("invalid_rebuild_context")
+        rebuild_context = copy.deepcopy(original_rebuild)
+    elif rebuild_context is not None:
+        _error("invalid_rebuild_context")
     git = PipelineGit(repo)
     stage_path = _stage_path(run_id)
     if git.path(stage_path).is_file():
@@ -1584,7 +1908,8 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
         if (context.get("expected_attestation_sha256") != expected_attestation_sha256
                 or context.get("attestation") != attestation or context.get("original_payload") != original_payload
                 or context.get("original_response") != response
-                or context.get("original_resume_context") != original_resume_context):
+                or context.get("original_resume_context") != original_resume_context
+                or candidate.get("rebuild_context") != rebuild_context):
             _error("extraction_revalidation_changed")
         _assert_revalidation_operation(candidate, model_call)
         git.check(head)
@@ -1598,9 +1923,11 @@ def revalidate_completed_extraction(repo, run_id, *, allowed_source_paths, model
                     "review_path": review_path, "head": git.head(), "model_calls": 0, "attempted_calls": 0}
         return {"run_id": run_id, "status": "unknown", "next_action": "reconcile", "head": head,
                 "stage_path": stage_path, "model_calls": 0, "attempted_calls": 0}
-    return process_sources(repo, allowed_source_paths, expected_head, model_call=model_call,
+    bundle = _validated_skill_bundle(original_payload["skill_bundle"]) if _quality_enabled(original_payload) else None
+    return process_sources(repo, allowed_source_paths, expected_head, model_call=model_call, skill_bundle=bundle,
         run_id=run_id, related_runs=related_runs, batch_context=batch_context, source_views=source_views,
         review_strategy=review_strategy, revision_from_run=attestation.get("revision_from_run"),
+        rebuild_context=rebuild_context,
         _revalidate_completed={"attestation": copy.deepcopy(attestation),
             "expected_attestation_sha256": expected_attestation_sha256,
             "original_payload": copy.deepcopy(original_payload), "response": copy.deepcopy(response),
@@ -1625,6 +1952,11 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     _load(stage_bytes, "candidate", schema_version)
     if candidate.get("run_id") != run_id or candidate.get("binding") != _candidate_binding(candidate):
         _error("candidate_mismatch")
+    _current_draft_review(candidate)
+    if "assembly" in candidate:
+        from .assembly_final import read_assembled_candidate
+        return read_assembled_candidate(git, run_id, candidate, stage_bytes, source_paths=source_paths,
+                                        historical=historical, visited=visited)
     if ("revision_resume" in candidate or "revision_revalidation" in candidate) and "revision_context" not in candidate:
         _error("invalid_revision_resume")
     strategy = candidate.get("review_strategy", "legacy-v1")
@@ -1639,6 +1971,28 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             _error("evidence_source_mismatch")
     incremental = candidate.get("mode") == "incremental"
     sources = _candidate_sources(git, candidate, historical=historical or incremental)
+    rebuild_context = candidate.get("rebuild_context")
+    if "rebuild_context" in candidate:
+        from .quality_completed_extraction import CONTRACT_V2
+        recovery = candidate.get("revision_revalidation", {})
+        rebuild_revalidation = recovery.get("contract") == CONTRACT_V2
+        if (rebuild_context is None or not incremental or candidate.get("related_runs") != []
+                or candidate.get("related") != [] or candidate.get("merge_inputs", [])
+                or candidate.get("batch_material", {}).get("draft_only", False)
+                or any(key in candidate for key in ("continuation_context", "extraction_reused_from"))
+                or not rebuild_revalidation and any(key in candidate for key in ("revision_resume", "revision_revalidation"))):
+            _error("invalid_rebuild_context")
+        if rebuild_revalidation and (recovery.get("attestation", {}).get("rebuild_context") != rebuild_context
+                or recovery.get("original_payload", {}).get("rebuild_context") != rebuild_context):
+            _error("invalid_rebuild_context")
+        revision = candidate.get("revision_context")
+        if revision is not None and (not isinstance(revision, dict)
+                or not isinstance(revision.get("candidate"), dict)
+                or revision.get("candidate", {}).get("rebuild_context") != rebuild_context):
+            _error("invalid_rebuild_context")
+        from .rebuild import validate_rebuild_context
+        validate_rebuild_context(git, rebuild_context, source_paths=[source["path"] for source in sources],
+                                 at_commit=candidate["base_head"])
     related = []
     if incremental:
         related_limit = 256 if "batch_context" in candidate else 8
@@ -1648,11 +2002,12 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         if (candidate.get("related") != related or candidate.get("controls_digest") != controls_digest
                 or candidate.get("processing_key") != _processing_key(_source_fields(sources), candidate["versions"], controls_digest,
                     candidate.get("batch_context"), candidate.get("batch_material"), candidate.get("continuation_context"), strategy, candidate.get("revision_context"), candidate.get("revision_resume"), candidate.get("revision_revalidation"),
-                    candidate.get("skill_bundle"))):
+                    candidate.get("skill_bundle"), rebuild_context)):
             _error("processing_context_changed")
         attempt_path = _run_path(run_id, "started")
         attempt_bytes = _committed(git, attempt_path)
-        attempt = _load(attempt_bytes, "processing_attempt", M1_SCHEMA_VERSION)
+        attempt = _load(attempt_bytes, "processing_attempt",
+            _processing_header(candidate.get("skill_bundle"), M1_SCHEMA_VERSION))
         if (candidate.get("attempt_path") != attempt_path or candidate.get("attempt_sha256") != _hash(attempt_bytes)
                 or _last_commit(git, git.head(), attempt_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])
                 or attempt != {"run_id": run_id, "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"]),
@@ -1673,28 +2028,44 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             candidate["related_runs"], at_commit=candidate["base_head"],
             draft_only=candidate.get("batch_material", {}).get("draft_only", False))
     if "revision_context" in candidate:
-        if not incremental or candidate.get("execution_context") is not None or "continuation_context" in candidate or "extraction_reused_from" in candidate:
+        if not incremental or candidate.get("execution_context") is not None or "extraction_reused_from" in candidate:
             _error("invalid_revision_context")
-        from .revision_context import verify_revision_context
+        if not isinstance(candidate["revision_context"], dict):
+            _error("invalid_revision_context")
+        from .revision_context import supports_phase_revision, verify_revision_context
+        old = candidate["revision_context"].get("candidate", {})
+        phased = (candidate.get("batch_material", {}).get("draft_only", False)
+                  or candidate.get("continuation_context") is not None)
+        if phased and (not supports_phase_revision(candidate) or not supports_phase_revision(old)
+                       or "revision_resume" in candidate or "revision_revalidation" in candidate):
+            _error("invalid_revision_context")
         verify_revision_context(git, candidate["revision_context"], source_paths=[source["path"] for source in sources],
-            related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical)
+            related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical,
+            include_snapshots=False)
         pointer_path = _revision_attempt_path(candidate["revision_context"])
-        pointer = _load(_committed(git, pointer_path), "revision_attempt", REVISION_SCHEMA_VERSION)
+        pointer = _load(_committed(git, pointer_path), "revision_attempt",
+            _processing_header(candidate.get("skill_bundle"), REVISION_SCHEMA_VERSION))
         if (pointer != {"run_id": run_id, "revision_context_sha256": _hash(candidate["revision_context"]),
                 "source_paths": [source["path"] for source in sources], "related_runs": candidate["related_runs"],
                 "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"])}
                 or _last_commit(git, git.head(), pointer_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])):
             _error("revision_attempt_mismatch")
-        if "revision_resume" in candidate:
+        from .quality_completed_extraction import CONTRACTS
+        quality_revalidation = candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS
+        if "revision_resume" in candidate and not quality_revalidation:
             from .revision_resume import verify_revision_resume
             verify_revision_resume(git, candidate, historical=historical)
         if "revision_revalidation" in candidate:
-            from .known_extraction import verify_revalidated_extraction
-            verify_revalidated_extraction(git, candidate, historical=historical)
+            recovery = _completed_extraction_module(candidate["revision_revalidation"])
+            recovery.verify_revalidated_extraction(git, candidate, historical=historical)
+        elif "quality_revalidation_guard_ref" in candidate:
+            _error("invalid_extraction_revalidation")
         old = candidate["revision_context"]["candidate"]
         if (candidate.get("batch_context", {}).get("source_ranges") != old.get("batch_context", {}).get("source_ranges") or candidate.get("source_views") != old.get("source_views")
                 or candidate.get("merge_inputs", []) != old.get("merge_inputs", [])
-                or candidate.get("batch_material", {}).get("draft_only", False)):
+                or candidate.get("batch_material", {}).get("draft_only", False)
+                    != old.get("batch_material", {}).get("draft_only", False)
+                or candidate.get("continuation_context") != old.get("continuation_context")):
             _error("revision_batch_context_changed")
     if batch:
         from .batching import validate_source_views, assert_fragment_refs
@@ -1715,12 +2086,16 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
                 _error("extraction_not_reusable")
     _validate_candidate_quality(git, candidate, sources)
     expected_objects = _objects(candidate["extraction_output"], sources, run_id, extraction, candidate["versions"], candidate["created_at"],
-                                batch=batch, quality_context=candidate.get("quality_context"))
+                                batch=batch, quality_context=candidate.get("quality_context"),
+                                related=related, skill_bundle=candidate.get("skill_bundle"))
     if batch:
         for obj in expected_objects:
             assert_fragment_refs(obj["metadata"]["sources"], candidate["source_views"])
-    if incremental and candidate.get("operations") != _updated_objects(git, expected_objects, related):
+    if incremental and candidate.get("operations") != _updated_objects(git, expected_objects, related,
+                                                                      rebuild_context=rebuild_context):
         _error("candidate_mismatch")
+    if rebuild_context is not None:
+        _targets_clear(git, expected_objects, rebuild_context, at_commit=candidate["base_head"])
     _validate_domains(expected_objects, related, candidate.get("operations", {}), candidate["versions"])
     if candidate.get("objects") != expected_objects:
         _error("candidate_mismatch")
@@ -1729,6 +2104,13 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     if (git.text("rev-parse", stage_commit + "^") != candidate["base_head"]
             or git.read(stage_commit, stage_path) != stage_bytes):
         _error("candidate_mismatch")
+    if incremental:
+        from .engine_provenance import read_reservation
+        engine = read_reservation(git, run_id)
+        original_versions = candidate.get("revision_revalidation", {}).get("original_extraction_versions")
+        if engine is not None and (original_versions is not None or "revision_resume" not in candidate):
+            if engine["versions"] != (original_versions or candidate["versions"]):
+                _error("engine_provenance_changed")
     return candidate, sources, stage_bytes, stage_commit
 
 
@@ -1748,13 +2130,14 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
         _error("review_binding_mismatch")
     call = _call_metadata({**review["call"], "output": review["output"]})
     _review_output(review["output"], quality=_quality_enabled(candidate))
-    if call != review["call"] or call["invocation_id"] == candidate["extraction"]["invocation_id"]:
+    from .assembly_final import SCHEMA as ASSEMBLY_SCHEMA, extraction_invocations
+    if call != review["call"] or call["invocation_id"] in extraction_invocations(candidate):
         _error("review_not_independent")
     if not isinstance(review.get("review_id"), str) or not re.fullmatch(r"rev-[0-9a-f]{32}", review["review_id"]):
         _error("review_binding_mismatch")
     proof = review.get("decomposed_proof")
     if proof is not None:
-        if schema_version not in {DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, QUALITY_SCHEMA_VERSION} or candidate.get("review_strategy") not in {"auto", "decomposed-v1"}:
+        if schema_version not in {DECOMPOSED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, *QUALITY_SCHEMA_VERSIONS, ASSEMBLY_SCHEMA} or candidate.get("review_strategy") not in {"auto", "decomposed-v1"}:
             _error("review_binding_mismatch")
         from .decomposed_review import verify_decomposed_review
         _ancestor(git, stage_commit, review_commit)
@@ -1797,11 +2180,14 @@ def _incremental_manifest(candidate):
         if operation["action"] == "reuse":
             metadata = previous[path]["metadata"]
             origins[path] = {"run_id": metadata["generated_by"]["run_id"], "review_path": metadata["review_ref"]}
-    return {"mode": "incremental", "related_runs": candidate["related_runs"],
+    result = {"mode": "incremental", "related_runs": candidate["related_runs"],
             "operations": candidate["operations"], "object_origins": origins,
             "controls_digest": candidate["controls_digest"], "processing_key": candidate["processing_key"],
             "execution_context": candidate["execution_context"], "attempt_path": candidate["attempt_path"],
             "attempt_sha256": candidate["attempt_sha256"]}
+    if "rebuild_context" in candidate:
+        result["rebuild_context"] = copy.deepcopy(candidate["rebuild_context"])
+    return result
 
 
 def _computation_snapshots(git, candidate, visited=()):
@@ -1810,8 +2196,18 @@ def _computation_snapshots(git, candidate, visited=()):
     if run_id in visited or len(visited) >= 16:
         _error("publication_dependency_cycle")
     entries = []
+    if "rebuild_context" in candidate:
+        from .rebuild import validate_rebuild_context
+        ref = candidate["rebuild_context"]
+        validate_rebuild_context(git, ref, source_paths=[item["path"] for item in _candidate_bindings(candidate)],
+                                 at_commit=candidate["base_head"])
+        entries.append(copy.deepcopy(ref))
+    if "revision_revalidation" in candidate:
+        recovery = _completed_extraction_module(candidate["revision_revalidation"])
+        entries.extend(recovery.verify_revalidated_extraction(git, candidate, historical=True))
     for name, path in (("stage", _stage_path(run_id)), ("review", _run_path(run_id, "review")),
                        ("failure", _run_path(run_id, "failure")), ("started", _run_path(run_id, "started")),
+                       ("engine", _run_path(run_id, "engine")),
                        ("revalidation-failure", _run_path(run_id, "revalidation-failure")),
                        ("revalidation-review-failure", _run_path(run_id, "revalidation-review-failure"))):
         if git.path(path).is_file():
@@ -1981,6 +2377,8 @@ def publish(repo, run_id, expected_head=None):
         else:
             control_guard(git)
             candidate, review, review_commit = _read_reviewed(git, run_id)
+            if "assembly" in candidate:
+                _error("assembly_requires_group_publication")
             if candidate.get("batch_material", {}).get("draft_only"):
                 _error("batch_requires_final_review")
             _execution_guard(repo, candidate.get("execution_context"), run_id=run_id)
@@ -1996,7 +2394,7 @@ def publish(repo, run_id, expected_head=None):
                                             max_runs=256 if "batch_context" in candidate else 8) != candidate["related"]):
                     _error("processing_context_changed")
             else:
-                _targets_clear(git, candidate["objects"])
+                _targets_clear(git, candidate["objects"], candidate.get("rebuild_context"))
             files = _publication_files(candidate, review)
             manifest = {"run_id": run_id, "binding": candidate["binding"], "review_path": _run_path(run_id, "review"),
                         "review_commit": review_commit, "source": candidate["source"], "versions": candidate["versions"],
@@ -2010,11 +2408,16 @@ def publish(repo, run_id, expected_head=None):
             if incremental:
                 known = {document["path"]: document for item in candidate["related"] for document in item["documents"]}
                 expected = {}
+                if "rebuild_context" in candidate:
+                    _targets_clear(git, [obj for obj in candidate["objects"]
+                                        if candidate["operations"][obj["path"]]["action"] == "create"],
+                                   candidate["rebuild_context"])
                 for path, operation in candidate["operations"].items():
                     if operation["action"] == "reuse":
                         files.pop(path)
                     elif operation["action"] == "create":
-                        _targets_clear(git, [obj for obj in candidate["objects"] if obj["path"] == path])
+                        if "rebuild_context" not in candidate:
+                            _targets_clear(git, [obj for obj in candidate["objects"] if obj["path"] == path])
                         expected[path] = None
                     else:
                         previous = known[path]

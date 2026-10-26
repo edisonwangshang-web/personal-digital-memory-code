@@ -14,13 +14,14 @@ from pathlib import Path, PurePosixPath
 
 from .contracts import CaptureError
 from .git_adapter import ALLOWED_ROOTS, GitAdapter
+from .storage_limits import LEGACY_FILE_BYTES, read_limit, validate_file_bytes
 
 WRITE_ROOTS = ("memory/staging/", "memory/records/", "memory/topics/", "memory/runs/processes/",
                "memory/runs/controls/", "memory/runs/pending/", "memory/runs/schedules/")
 WRITE_FILES = {"memory/pending.md"}
 READ_ROOTS = ALLOWED_ROOTS + WRITE_ROOTS
 MAX_FILES = 256
-MAX_FILE_BYTES = 1024 * 1024
+MAX_FILE_BYTES = LEGACY_FILE_BYTES
 MAX_TOTAL_BYTES = 8 * 1024 * 1024
 MAX_JOURNAL_BYTES = 128 * 1024
 _HEX = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
@@ -29,8 +30,32 @@ _HEX = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 class PipelineGit(GitAdapter):
     """调用者持有继承的 lock；不扩大采集适配器本身的写入范围。"""
 
+    def run(self, *args: str, index: str | None = None) -> bytes:
+        from .verification_cache import immutable_git_read
+        return immutable_git_read(self.repo, args, index,
+                                  lambda: super(PipelineGit, self).run(*args, index=index))
+
     def write_commit(self, relative: str, data: bytes, expected_head: str) -> str:
         raise CaptureError("invalid_transaction", "加工适配器只允许带恢复日志的 write_files 事务")
+
+    @staticmethod
+    def _validate_storage(relative: str, value: bytes, code="invalid_transaction") -> None:
+        try:
+            validate_file_bytes(relative, value)
+        except CaptureError as error:
+            raise CaptureError(code, "事务内容超出该路径和固定候选合同的存储边界") from error
+
+    def _storage_blob(self, revision: str, relative: str, code="transaction_recovery_conflict") -> bytes:
+        # Check immutable blob size before loading it; the path only grants a
+        # provisional bound, never the candidate exception by itself.
+        size = self.text("cat-file", "-s", revision + ":" + relative)
+        if not size.isdigit() or int(size) > read_limit(relative):
+            raise CaptureError(code, "事务 blob 超出该目标的读取上界")
+        value = self.read(revision, relative)
+        if len(value) != int(size):
+            raise CaptureError(code, "事务 blob 长度不符")
+        self._validate_storage(relative, value, code)
+        return value
 
     def path(self, relative: str) -> Path:
         if not isinstance(relative, str) or len(relative) > 4096:
@@ -96,9 +121,8 @@ class PipelineGit(GitAdapter):
                 with os.fdopen(descriptor, "rb") as stream:
                     if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                         raise CaptureError("path_rejected", "事务目标必须是普通文件")
-                    value = stream.read(MAX_FILE_BYTES + 1)
-                if len(value) > MAX_FILE_BYTES:
-                    raise CaptureError("transaction_conflict", "事务目标内容超出边界")
+                    value = stream.read(read_limit(relative) + 1)
+                self._validate_storage(relative, value, "transaction_conflict")
                 return value
         except FileNotFoundError:
             return None
@@ -234,7 +258,7 @@ class PipelineGit(GitAdapter):
         with self._parent(relative, create=True) as (parent, name):
             existing = self._existing(relative)
             temporary = self._temporary_name(relative, blob)
-            leftover = self._temporary_content(parent, temporary)
+            leftover = self._temporary_content(parent, temporary, relative)
             if leftover is not None and leftover != data:
                 raise CaptureError("transaction_recovery_conflict", "事务临时文件未完整写入；保持暂停")
             if existing is None:
@@ -274,7 +298,7 @@ class PipelineGit(GitAdapter):
         return ".pdm-transaction-" + hashlib.sha256((relative + blob).encode()).hexdigest()[:32]
 
     @staticmethod
-    def _temporary_content(parent: int, name: str) -> bytes | None:
+    def _temporary_content(parent: int, name: str, relative: str) -> bytes | None:
         try:
             descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         except FileNotFoundError:
@@ -282,7 +306,9 @@ class PipelineGit(GitAdapter):
         with os.fdopen(descriptor, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 raise CaptureError("path_rejected", "事务临时路径必须是普通文件")
-            return stream.read(MAX_FILE_BYTES + 1)
+            value = stream.read(read_limit(relative) + 1)
+        PipelineGit._validate_storage(relative, value, "transaction_recovery_conflict")
+        return value
 
     def _preflight(self, journal: dict) -> dict[str, bytes]:
         if self._reference() != journal["reference"]:
@@ -295,19 +321,20 @@ class PipelineGit(GitAdapter):
         expected = [item for relative in sorted(journal["files"]) for item in ("A", relative)] + [""]
         if actual != expected:
             raise CaptureError("transaction_recovery_conflict", "事务提交含未授权的变化")
-        values = {}
+        values, total = {}, 0
         for relative, details in journal["files"].items():
             if self._tree_blob(commit, relative) != details["blob"] or self._tree_blob(head, relative) != details["blob"]:
                 raise CaptureError("transaction_recovery_conflict", "当前版本已修改或移除事务目标")
-            value = self.read(commit, relative)
-            if len(value) > MAX_FILE_BYTES or hashlib.sha256(value).hexdigest() != details["sha256"]:
+            value = self._storage_blob(commit, relative)
+            total += len(value)
+            if total > MAX_TOTAL_BYTES or hashlib.sha256(value).hexdigest() != details["sha256"]:
                 raise CaptureError("transaction_recovery_conflict", "事务内容校验失败")
             existing = self._existing(relative)
             if existing is not None and existing != value:
                 raise CaptureError("transaction_recovery_conflict", "事务目标已被修改，未覆盖")
             try:
                 with self._parent(relative) as (parent, _):
-                    leftover = self._temporary_content(parent, self._temporary_name(relative, details["blob"]))
+                    leftover = self._temporary_content(parent, self._temporary_name(relative, details["blob"]), relative)
                     if leftover is not None and leftover != value:
                         raise CaptureError("transaction_recovery_conflict", "事务临时文件未完整写入；保持暂停")
             except FileNotFoundError:
@@ -358,10 +385,12 @@ class PipelineGit(GitAdapter):
         if self._journal_path().exists() or self._journal_path().is_symlink():
             raise CaptureError("transaction_recovery_required", "已有待核对事务，请先恢复")
         if (not isinstance(files, dict) or not 1 <= len(files) <= MAX_FILES
-                or any(not isinstance(value, bytes) or len(value) > MAX_FILE_BYTES for value in files.values())
+                or any(not isinstance(value, bytes) for value in files.values())
                 or sum(len(value) for value in files.values()) > MAX_TOTAL_BYTES
                 or not isinstance(message, str) or not 1 <= len(message) <= 1024 or "\0" in message):
             raise CaptureError("invalid_transaction", "加工事务输入无效或超出边界")
+        for relative, value in files.items():
+            self._validate_storage(relative, value)
         self.check(expected_head)
         reference = self._reference()
         for relative in files:
@@ -442,7 +471,7 @@ class PipelineGit(GitAdapter):
             self._write_path(relative)
             blob = self._tree_blob(expected_head, relative)
             if ((blob is None) != (value is None)
-                    or (blob is not None and self.read(expected_head, relative) != value)
+                    or (blob is not None and self._storage_blob(expected_head, relative, "transaction_conflict") != value)
                     or self._existing(relative) != value
                     or self._index_entry(relative) != self._expected_entry(relative, blob)):
                 raise CaptureError("transaction_conflict", "事务旧值与基础版本、工作区或 index 不一致")
@@ -455,7 +484,7 @@ class PipelineGit(GitAdapter):
         try:
             with self._parent(relative) as (parent, _):
                 old_name, new_name = self._change_names(relative, details)
-                old, new = self._temporary_content(parent, old_name), self._temporary_content(parent, new_name)
+                old, new = self._temporary_content(parent, old_name, relative), self._temporary_content(parent, new_name, relative)
                 if ((old is not None and old != before) or (new is not None and new != after)
                         or (phase == "pending" and old is not None)
                         or (phase == "linked" and before is not None and before != after and old is None)):
@@ -485,10 +514,10 @@ class PipelineGit(GitAdapter):
                 raise CaptureError("transaction_recovery_conflict", "条件事务目标已在 Git 中修改或移除")
             pair = []
             for prefix, revision, blob in (("before", base, before_blob), ("after", commit, after_blob)):
-                value = None if blob is None else self.read(revision, relative)
+                value = None if blob is None else self._storage_blob(revision, relative)
                 if value is not None:
                     total += len(value)
-                    if len(value) > MAX_FILE_BYTES or hashlib.sha256(value).hexdigest() != details[prefix + "_sha256"]:
+                    if hashlib.sha256(value).hexdigest() != details[prefix + "_sha256"]:
                         raise CaptureError("transaction_recovery_conflict", "条件事务内容摘要不符")
                 pair.append(value)
             before, after = pair
@@ -506,7 +535,7 @@ class PipelineGit(GitAdapter):
             if not committed:
                 try:
                     with self._parent(relative) as (parent, _):
-                        if any(self._temporary_content(parent, name) is not None
+                        if any(self._temporary_content(parent, name, relative) is not None
                                for name in self._change_names(relative, details)):
                             raise CaptureError("transaction_recovery_conflict", "未发布事务含物化痕迹；保持暂停")
                 except FileNotFoundError:
@@ -658,7 +687,7 @@ class PipelineGit(GitAdapter):
                         or self._index_entry(relative) != self._expected_entry(relative, details["before_blob"])):
                     raise CaptureError("transaction_recovery_conflict", "条件事务目标在物化前已改变")
                 old_name, new_name = self._change_names(relative, details)
-                leftover = self._temporary_content(parent, new_name)
+                leftover = self._temporary_content(parent, new_name, relative)
                 if after is not None and leftover is None:
                     descriptor = os.open(new_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
                     with os.fdopen(descriptor, "wb") as stream:
@@ -680,12 +709,12 @@ class PipelineGit(GitAdapter):
                     saved = os.stat(old_name, dir_fd=parent, follow_symlinks=False)
                     if ((previous.st_dev, previous.st_ino) != (saved.st_dev, saved.st_ino)
                             or not stat.S_ISREG(saved.st_mode)
-                            or self._temporary_content(parent, old_name) != before):
+                            or self._temporary_content(parent, old_name, relative) != before):
                         raise CaptureError("transaction_recovery_conflict", "捕获的旧文件已并发替换或修改；保留快照并暂停")
                     self._progress(journal, relative, "moved")
                 if after is not None:
                     self._progress(journal, relative, "linking")
-                    if before is not None and self._temporary_content(parent, old_name) != before:
+                    if before is not None and self._temporary_content(parent, old_name, relative) != before:
                         raise CaptureError("transaction_recovery_conflict", "条件事务旧快照已改变")
                     os.link(new_name, name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
                     os.fsync(parent)
@@ -706,7 +735,7 @@ class PipelineGit(GitAdapter):
             try:
                 with self._parent(relative) as (parent, _):
                     for name, expected in zip(self._change_names(relative, journal["files"][relative]), (before, after)):
-                        actual = self._temporary_content(parent, name)
+                        actual = self._temporary_content(parent, name, relative)
                         if actual is not None:
                             if actual != expected:
                                 raise CaptureError("transaction_recovery_conflict", "条件事务清理发现外部临时文件改动")
@@ -742,13 +771,17 @@ class PipelineGit(GitAdapter):
             raise CaptureError("transaction_recovery_required", "已有待核对事务，请先恢复")
         if (not isinstance(files, dict) or not isinstance(expected_files, dict)
                 or set(files) != set(expected_files) or not 1 <= len(files) <= MAX_FILES
-                or any(value is not None and (not isinstance(value, bytes) or len(value) > MAX_FILE_BYTES)
+                or any(value is not None and not isinstance(value, bytes)
                        for value in (*files.values(), *expected_files.values()))
                 or sum(len(value) for value in (*files.values(), *expected_files.values()) if isinstance(value, bytes)) > MAX_TOTAL_BYTES
                 or not any(files[path] != expected_files[path] for path in files)
                 or not isinstance(expected_head, str) or not _HEX.fullmatch(expected_head)
                 or not isinstance(message, str) or not 1 <= len(message) <= 1024 or "\0" in message):
             raise CaptureError("invalid_transaction", "条件事务输入无效或超出边界")
+        for mapping in (files, expected_files):
+            for relative, value in mapping.items():
+                if value is not None:
+                    self._validate_storage(relative, value)
         # 固定不可变 bytes 映射，避免调用方的回调修改已核对的发布内容。
         files, expected_files = dict(files), dict(expected_files)
         details = self._check_change_before(expected_files, expected_head)
