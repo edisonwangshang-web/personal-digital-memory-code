@@ -487,7 +487,11 @@ def _run_schedule(repo, schedule_id, trigger, *, model_call, remote_confirm, clo
     else:
         def guard(repo, phase, details):
             _guard(repo, schedule_id, work, remote_confirm)
-        result = run_production(repo, work["queue_id"], model_call=model_call,
+        # The immutable schedule configuration governs every extract and
+        # Review child operation, including decomposed Review resumptions.
+        scheduled_call = model_call.for_operation(model_call.operation_id,
+                                                  default_timeout=state["config"]["timeout_seconds"])
+        result = run_production(repo, work["queue_id"], model_call=scheduled_call,
                                 max_steps=state["config"]["max_items"], execution_guard=guard)
     state = _require(git, schedule_id)
     active_run = result.get("active_run_id") or result.get("final_run")

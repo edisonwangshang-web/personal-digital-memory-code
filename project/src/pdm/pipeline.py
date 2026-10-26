@@ -369,13 +369,16 @@ def _reuse_refs_enabled(skill_bundle):
     return isinstance(skills, dict) and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
         for role, ref in pair) for pair in (
             (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")),
-            (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8"))))
+            (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
+            (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9"))))
 
 
 def _feedback_quality_enabled(skill_bundle):
     skills = skill_bundle.get("skills", {}) if isinstance(skill_bundle, dict) else {}
-    return isinstance(skills, dict) and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
-        for role, ref in (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")))
+    return isinstance(skills, dict) and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+        for role, ref in pair) for pair in (
+            (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
+            (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9"))))
 
 
 def _processing_header(skill_bundle, fallback):
@@ -592,9 +595,13 @@ def _call_metadata(response):
             "output_sha256": _hash(response["output"])}
 
 
-def _review_output(output, *, required_checks=None, quality=False):
+def _review_output(output, *, required_checks=None, quality=False, skill_bundle=None):
     quality = quality or required_checks is not None
     fields = {"verdict", "reasons", "checks"} if quality else {"verdict", "reasons"}
+    from .skill_support import statistic_repair_enabled
+    repair_scope_supported = quality and statistic_repair_enabled(skill_bundle)
+    if repair_scope_supported:
+        fields.add("repair_scope")
     if (not isinstance(output, dict) or set(output) != fields
             or output["verdict"] not in ("passed", "needs_revision", "needs_confirmation")
             or not isinstance(output["reasons"], list) or not 1 <= len(output["reasons"]) <= 32):
@@ -606,7 +613,10 @@ def _review_output(output, *, required_checks=None, quality=False):
             _error("invalid_model_output")
         if required_checks is not None:
             from .knowledge_quality import validate_quality_review
-            validate_quality_review(output, required_checks)
+            validate_quality_review(output, required_checks, repair_scope_supported=repair_scope_supported)
+        elif repair_scope_supported:
+            from .knowledge_quality import validate_review_repair_scope
+            validate_review_repair_scope(output)
 
 
 def _candidate_binding(candidate):
@@ -1186,6 +1196,8 @@ def _candidate_payload(git, candidate, sources):
     if "revision_context" in candidate:
         from .revision_context import revision_model_context
         payload["revision_context"] = revision_model_context(candidate["revision_context"])
+    if "quality_repair_context" in candidate:
+        payload["quality_repair_context"] = copy.deepcopy(candidate["quality_repair_context"])
     if "batch_context" in candidate:
         payload.update(sources=copy.deepcopy(candidate["source_views"]), batch_context=copy.deepcopy(candidate["batch_context"]),
                        output_contract="batch-v1", prior_candidates=copy.deepcopy(candidate["merge_inputs"]))
@@ -1236,6 +1248,9 @@ def _review_payload(candidate, payload):
             # evidence. Previous drafts and feedback remain in the bound stage
             # and publication proof, not in this model request.
             request.pop("revision_context", None)
+            request.pop("quality_repair_context", None)
+            for key in ("quality_repair_context", "raw_extraction_output"):
+                request["candidate"].pop(key, None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
     return request
 
@@ -1319,7 +1334,8 @@ def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, outp
     if quality and proof is None:
         sources = _candidate_sources(git, candidate, historical=True)
         request = _review_payload(candidate, _candidate_payload(git, candidate, sources))
-    _review_output(output, quality=quality, required_checks=request["required_checks"] if request else None)
+    _review_output(output, quality=quality, required_checks=request["required_checks"] if request else None,
+                   skill_bundle=candidate.get("skill_bundle"))
     from .assembly_final import extraction_invocations
     if (_call_metadata({**review_call, "output": output}) != review_call
             or review_call["invocation_id"] in extraction_invocations(candidate)):
@@ -1652,6 +1668,16 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             requirements = _reuse_requirements(git, related, sources, context_fields["quality_context"])
             payload["reuse_quality_requirements"] = requirements
             context_fields["reuse_quality_requirements"] = copy.deepcopy(requirements)
+        if revision_context is not None:
+            from .statistic_repairs import build_repair_context, is_enabled
+            if is_enabled(skill_bundle):
+                repair = build_repair_context(revision_context, context_fields["quality_context"],
+                    sources=sources, source_views=source_views, controls_digest=controls["digest"])
+                if repair is not None:
+                    if _resume_unstarted is not None or _revalidate_completed is not None or reuse_extraction_run is not None:
+                        _error("quality_repair_recovery_unsupported")
+                    payload["quality_repair_context"] = copy.deepcopy(repair)
+                    context_fields["quality_repair_context"] = copy.deepcopy(repair)
         if _preflight_only or _feedback_quality_enabled(skill_bundle):
             from .model_calls import MAX_INPUT_BYTES
             admission = _model_request_binding("extract", payload)
@@ -1725,9 +1751,20 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 from .revision_resume import attach_revision_resume_extraction
                 context_fields["revision_resume"] = attach_revision_resume_extraction(model_call, _resume_unstarted, extraction, payload)
             created = timestamp()
-            objects = _objects(response["output"], sources, run_id, response, versions, created, batch=batch,
+            materialized_output = response["output"]
+            if "quality_repair_context" in context_fields:
+                from .statistic_repairs import materialize_patch
+                context_fields["raw_extraction_output"] = copy.deepcopy(response["output"])
+                materialized_output = materialize_patch(response["output"], context_fields["quality_repair_context"],
+                    context_fields["quality_context"], sources, source_views, revision_context["candidate"]["extraction_output"],
+                    frozen_objects=revision_context["candidate"]["objects"], controls_digest=controls["digest"])
+            objects = _objects(materialized_output, sources, run_id, response, versions, created, batch=batch,
                                quality_context=context_fields.get("quality_context"),
                                related=related, skill_bundle=skill_bundle)
+            if "quality_repair_context" in context_fields:
+                # The actual new model call repaired metadata only. Keep the
+                # original, independently re-reviewed generator and all text.
+                objects = copy.deepcopy(revision_context["candidate"]["objects"])
             _current_object_corrections(objects, sources)
             if batch:
                 from .batching import assert_fragment_refs
@@ -1755,6 +1792,9 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             try:
                 context_fields["operations"] = _updated_objects(git, objects, related, check_current=not draft_only,
                                                                rebuild_context=rebuild_context)
+                if ("quality_repair_context" in context_fields
+                        and context_fields["operations"] != revision_context["candidate"]["operations"]):
+                    _error("quality_repair_content_changed")
             except CaptureError as error:
                 if error.code not in {"related_records_omitted", "related_identity_changed",
                                       "correction_evidence_missing", "required_related_context"}:
@@ -1769,8 +1809,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             try:
                 validate_reuse_quality(git, related, sources, context_fields["quality_context"],
                                        _reuse_obligation_objects(objects, related),
-                                       _reuse_quality_output(response["output"],
-                                           _reuse_objects(response["output"].get("reuse_refs"), related, sources)))
+                                       _reuse_quality_output(materialized_output,
+                                           _reuse_objects(materialized_output.get("reuse_refs"), related, sources)))
             except CaptureError as error:
                 git.check(head)
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
@@ -1785,7 +1825,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             return _failure(git, run_id, "extract", error.code, head, extraction, schema_version, current_call_count(),
                     failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
         candidate = {"run_id": run_id, "base_head": head, **source_fields, "versions": versions,
-                     "related": related, "objects": objects, "extraction": extraction, "extraction_output": response["output"], "created_at": created,
+                     "related": related, "objects": objects, "extraction": extraction, "extraction_output": materialized_output, "created_at": created,
                      **context_fields}
         if skill_bundle is not None:
             candidate["review_request_contract"] = CURRENT_DRAFT_REVIEW_CONTRACT
@@ -1842,7 +1882,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 reviewed = model_call("review", copy.deepcopy(request))
                 review_call = _call_metadata(reviewed)
                 output = reviewed["output"]
-                _review_output(output, required_checks=request.get("required_checks"))
+                _review_output(output, required_checks=request.get("required_checks"), skill_bundle=skill_bundle)
                 if review_call["invocation_id"] == extraction["invocation_id"]:
                     _error("review_not_independent")
             except (ModelCallError, CaptureError) as error:
@@ -2017,7 +2057,14 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         _time(attempt["started_at"])
     elif candidate.get("related") != []:
         _error("source_mismatch")
-    extraction = _call_metadata({**candidate["extraction"], "output": candidate["extraction_output"]})
+    repair_fields = {"quality_repair_context", "raw_extraction_output"}
+    repair_mode = bool(repair_fields.intersection(candidate))
+    if repair_mode and (not repair_fields <= candidate.keys() or "revision_context" not in candidate
+                        or "extraction_reused_from" in candidate or "revision_resume" in candidate
+                        or "revision_revalidation" in candidate):
+        _error("invalid_quality_repair")
+    raw_output = candidate["raw_extraction_output"] if repair_mode else candidate["extraction_output"]
+    extraction = _call_metadata({**candidate["extraction"], "output": raw_output})
     if extraction != candidate["extraction"]:
         _error("candidate_mismatch")
     batch = "batch_context" in candidate
@@ -2088,6 +2135,21 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     expected_objects = _objects(candidate["extraction_output"], sources, run_id, extraction, candidate["versions"], candidate["created_at"],
                                 batch=batch, quality_context=candidate.get("quality_context"),
                                 related=related, skill_bundle=candidate.get("skill_bundle"))
+    if repair_mode:
+        from .statistic_repairs import build_repair_context, is_enabled, materialize_patch
+        if not is_enabled(candidate.get("skill_bundle")):
+            _error("invalid_quality_repair")
+        repair = build_repair_context(candidate["revision_context"], candidate["quality_context"],
+            sources=sources, source_views=candidate.get("source_views"), controls_digest=candidate["controls_digest"])
+        old = candidate["revision_context"]["candidate"]
+        if repair is None or repair != candidate["quality_repair_context"]:
+            _error("quality_repair_context_changed")
+        rebuilt = materialize_patch(raw_output, repair, candidate["quality_context"], sources,
+            candidate.get("source_views"), old["extraction_output"], frozen_objects=old["objects"],
+            controls_digest=candidate["controls_digest"])
+        if rebuilt != candidate["extraction_output"] or candidate.get("operations") != old.get("operations"):
+            _error("quality_repair_content_changed")
+        expected_objects = copy.deepcopy(old["objects"])
     if batch:
         for obj in expected_objects:
             assert_fragment_refs(obj["metadata"]["sources"], candidate["source_views"])
@@ -2129,7 +2191,7 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
             or git.read(stage_commit, stage_path) != stage_bytes or git.read(review_commit, review_path) != review_bytes):
         _error("review_binding_mismatch")
     call = _call_metadata({**review["call"], "output": review["output"]})
-    _review_output(review["output"], quality=_quality_enabled(candidate))
+    _review_output(review["output"], quality=_quality_enabled(candidate), skill_bundle=candidate.get("skill_bundle"))
     from .assembly_final import SCHEMA as ASSEMBLY_SCHEMA, extraction_invocations
     if call != review["call"] or call["invocation_id"] in extraction_invocations(candidate):
         _error("review_not_independent")
@@ -2147,7 +2209,7 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
         _error("review_binding_mismatch")
     elif _quality_enabled(candidate):
         request = _review_payload(candidate, _candidate_payload(git, candidate, sources))
-        _review_output(review["output"], required_checks=request["required_checks"])
+        _review_output(review["output"], required_checks=request["required_checks"], skill_bundle=candidate.get("skill_bundle"))
         if review.get("request_binding") != _model_request_binding("review", request):
             _error("review_request_mismatch")
     elif "request_binding" in review:
@@ -2180,6 +2242,11 @@ def _incremental_manifest(candidate):
         if operation["action"] == "reuse":
             metadata = previous[path]["metadata"]
             origins[path] = {"run_id": metadata["generated_by"]["run_id"], "review_path": metadata["review_ref"]}
+    if "quality_repair_context" in candidate:
+        for obj in candidate["objects"]:
+            if candidate["operations"][obj["path"]]["action"] != "reuse":
+                origins[obj["path"]] = {"run_id": obj["metadata"]["generated_by"]["run_id"],
+                                        "review_path": _run_path(candidate["run_id"], "review")}
     result = {"mode": "incremental", "related_runs": candidate["related_runs"],
             "operations": candidate["operations"], "object_origins": origins,
             "controls_digest": candidate["controls_digest"], "processing_key": candidate["processing_key"],

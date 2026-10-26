@@ -54,7 +54,7 @@ class RebuildProductionTests(unittest.TestCase):
             if not getattr(self, "invalid_extract", False):
                 result["output"]["reuse_refs"] = []
         else:
-            result["output"] = passed_review(payload["required_checks"])
+            result["output"] = passed_review(payload["required_checks"], payload.get("skill_bundle"))
             if getattr(self, "reject_reviews", 0):
                 self.reject_reviews -= 1
                 result["output"]["verdict"] = "needs_revision"

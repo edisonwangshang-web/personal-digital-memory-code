@@ -1,6 +1,6 @@
 # 工程迭代、发布与回滚
 
-当前程序 `0.2.0.dev26`，新任务默认 `knowledge-extract@10`／`knowledge-review@8`。本文规定公开工程交付及私有资料运行的共同门禁，私有真实验收不在公库发布。程序版本、规则版本、数据格式及实际资料版本分别固定；代码发布不等于服务部署或M1验收。M1仍缺目标定时runner、两轮真实触发和第二模型等实际证据。
+本批为dev27开发版，默认Skill11/9、普通quality0.15，**仅dev开发验证，不合入或推送master**。实现与验证状态见Roadmap；下文稳定交付流程为历史及后续规范，本批不执行。程序、规则、schema及资料版本分别固定，旧合同原证明保持；代码交付不等于部署或完整M1验收。
 
 [执行方案](m0-m1-execution-plan.md) · [数据规范](data-conventions.md) · [场景验收](scenarios-and-acceptance.md) · [Roadmap](roadmap.md) · [双仓操作](dual-repository-operation.md)
 
@@ -74,7 +74,7 @@ PR说明具体行为、当前实际可用能力、测试与阻塞，关联实际
 4. 已完成模型节点只读重验后零调用续接。Review已完成但登记失败只补登记；已published而远程未确认只补同步／读回；unknown先对账，不换operation、run、queue、规则或池重发。
 5. 在隔离样例复验，再对限定未完成工作检查读回、版本门禁和幂等发布；通过后恢复触发，记录暂停原因、恢复版本与实际结果，保留原失败和发布记录。
 
-从已核对的公库目录和模块路径执行 `python -P -B -m pdm doctor --repo <私有资料仓库>`的`memory_schema`／`memory_writable`及实际每次写入共同执行schema门禁；当前支持0.1—0.14各自合同，以实际`contracts.SUPPORTED_SCHEMA_VERSIONS`为准。该探测只核受管文件头，不证明正文语义或迁移正确。未知、不支持、损坏或无法访问均保持不可写；不能只改pyproject版本、schema字符串或删除不认识文件取得通过。
+从已核对的公库目录和模块路径执行`doctor`的schema／writable探测，并在每次实际写入前执行格式门禁；本批新增普通quality0.15，实际支持以`contracts.SUPPORTED_SCHEMA_VERSIONS`为准。探测不证明语义或迁移正确，未知、不支持、损坏或不可访问均拒写；不改header或删除证明绕门禁。
 
 格式兼容不代表恢复语义等价。例如旧程序可能认识0.4却缺共享预算门禁，或格式不变却重新暴露resolved对账及进程清理缺陷；恢复自动发布前须评估并复验。条件修改／删除要求Linux及文件系统支持`renameat2(RENAME_NOREPLACE)`；不可用时在副作用前拒绝，不用覆盖写入降级。
 

@@ -12,8 +12,8 @@ import re
 
 QUALITY_CONTRACT = "skill-quality-v1"
 BUNDLE_SCHEMA = "skill-bundle-v1"
-DEFAULT_EXTRACT_SKILL_REF = "knowledge-extract@10"
-DEFAULT_REVIEW_SKILL_REF = "knowledge-review@8"
+DEFAULT_EXTRACT_SKILL_REF = "knowledge-extract@11"
+DEFAULT_REVIEW_SKILL_REF = "knowledge-review@9"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 MAX_FILE_BYTES = 64_000
@@ -40,6 +40,8 @@ _MANIFEST_HASHES = {
     "knowledge-review@7": "sha256-247df9b6b74940b393fa2ef4c0c4ad36f5963b21e9752606eb27428619b7b348",
     "knowledge-extract@10": "sha256-0e58d98a748f4c85882b1c54c74b2dc4b27a5936af154bbc76c977d4a8350816",
     "knowledge-review@8": "sha256-b6314501bcf69f42d5d7c6336354bfc45db1ac176baa266f6efe49d7d1a8044c",
+    "knowledge-extract@11": "sha256-763660e25629a48644c6e06364c0fa3f4766f6f96d384ca90ce9906f82961133",
+    "knowledge-review@9": "sha256-e225a117fc552bff0bee58dbf4b81cd7bc177f03ca8099a5a56c4557690c847a",
 }
 _ROLES = ("extract", "review")
 _SNAPSHOT_KEYS = {"path", "content", "sha256", "bytes"}
@@ -252,9 +254,21 @@ def validate_skill_bundle(bundle):
     if ((bundle["skills"]["extract"]["ref"] == "knowledge-extract@10")
             != (bundle["skills"]["review"]["ref"] == "knowledge-review@8")):
         raise SkillError("invalid_skill_pair")
+    if ((bundle["skills"]["extract"]["ref"] == "knowledge-extract@11")
+            != (bundle["skills"]["review"]["ref"] == "knowledge-review@9")):
+        raise SkillError("invalid_skill_pair")
     if any(manifest["shared_policy"] != bundle["shared_policy"] for manifest in manifests):
         raise SkillError("shared_policy_mismatch")
     return bundle
+
+
+def statistic_repair_enabled(bundle):
+    """Only the registered 11/9 pair can request a frozen-text quality repair."""
+    skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
+    return (isinstance(skills, dict)
+            and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+                    for role, ref in (("extract", "knowledge-extract@11"),
+                                      ("review", "knowledge-review@9"))))
 
 
 def resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None, *,

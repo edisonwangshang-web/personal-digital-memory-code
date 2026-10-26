@@ -4,7 +4,7 @@
 
 本层以 Markdown、开放结构化文件和私有 Git 保存长期资料、知识及执行状态。私有远程仓库作为同步依据，本地副本用于读取和恢复；临时工作区不承担唯一存储职责，第一版不建设专门索引。公开工程仓库保存通用方案、程序、Skill、人工测试与 CI，真实原文、知识、审核、模型返回及运行绑定保留在独立私有工作区。
 
-当前程序为 `0.2.0.dev26`，新任务使用 `knowledge-extract@10`／`knowledge-review@8`。来源／采集 schema `0.1`、正式知识 `0.2` 保持，10/8合同运行使用 `0.12`，旧9/7为 `0.11`、更早质量链为 `0.10`；专用已完成提取恢复另有 `0.13` 门禁，不把普通候选升级为0.13。历史 registry、group、普通与显式返工链按其原 schema 核验，不把新格式升级当作重加工或资料迁移。具体版本在[数据规范](../data-conventions.md)维护。
+本批为dev27开发版，仅dev验证、不更新master；新11/9普通质量0.15，来源0.1及正式知识0.2保持。旧10/8的0.12、其他旧质量合同、专用恢复0.13和assembly0.14按原证明核验，不自动迁移或重加工。新定点返工分别保存raw patch与可重算物化输出，完整历史与发布门禁保留，具体见[数据规范](../data-conventions.md#metadata-only-statistic-repair)，实现和验证以Roadmap为准。
 
 dev26容量回退的原样最终候选使用独立`0.14`，固定全部草稿stage／Review、实际extract回执及完整plan，不虚构一次新的模型提取。来源、正文、引用、统计和关系保持原样，新最终Review及完整依赖组证明通过后才正式发布。普通queue／attempt／unit和历史任务保持原合同；适用范围与拒绝条件见[原样最终候选](../data-conventions.md#verbatim-draft-finalization)。
 
@@ -56,6 +56,6 @@ dev 与 production 使用明确环境绑定、数据根和远程范围。clone �
 
 ## 候选历史包的有限存储例外
 
-当前10/8、schema0.12候选仅可为完整历史使用最多4 MiB存储包；移除revision_context、revision_revalidation、revision_resume后的当前核心仍最多1 MiB，其余文件1 MiB、模型请求256000字节、多文件事务8 MiB保持。路径、run、固定角色与完整证明都要核验，不能把正文挪入历史绕过限制，见[统一限额](../data-conventions.md#candidate-storage-limits)。
+固定10/8的schema0.12与固定11/9的schema0.15候选仅可为完整历史使用最多4MiB包；剔除三类明确历史后的当前核心仍最多1MiB，其余文件、模型请求及事务限额保持。不能把正文挪入历史绕限，见[统一限额](../data-conventions.md#candidate-storage-limits)。
 
 专用已完成提取恢复的stage与schema0.13 guard须同一原子提交，使不支持门禁的旧writer拒写。旧failure、queue、counter和原始返回不覆盖；本地缓存的操作者核定证明与过去Git／服务端已存在的输出摘要明确区分。恢复后仍须独立Review和正式发布，候选不是正式知识。

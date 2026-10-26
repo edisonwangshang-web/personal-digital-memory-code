@@ -178,7 +178,7 @@ def _pending_origin_data(git, item, run):
                        "content_version": obj["metadata"]["content_version"]}
                       for obj in candidate["objects"]), key=lambda ref: ref["path"])
     quality = candidate.get("quality_contract") == "skill-quality-v1"
-    _review_output(review["output"], quality=quality)
+    _review_output(review["output"], quality=quality, skill_bundle=candidate.get("skill_bundle"))
     call = _call_metadata({**review["call"], "output": review["output"]})
     stage_commit = _last_commit(git, git.head(), stage_path)
     review_commit = _last_commit(git, git.head(), review_path)

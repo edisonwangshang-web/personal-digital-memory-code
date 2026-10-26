@@ -58,7 +58,7 @@ class QualityRevisionUpgradeTests(unittest.TestCase):
                         "stat_id": stat["stat_id"], "record_id": record["id"], "value": stat["value"],
                         "body_evidence": record["body"], "sources": [ref]})
         else:
-            output = passed_review(payload["required_checks"])
+            output = passed_review(payload["required_checks"], payload.get("skill_bundle"))
             if self.verdict != "passed":
                 output["verdict"] = self.verdict
                 output["checks"][0]["result"] = self.verdict

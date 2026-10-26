@@ -217,8 +217,9 @@ def normalize_config(value):
             validate_skill_bundle(value["skill_bundle"])
         except (ValueError, TypeError):
             _fail("invalid_schedule_skill_bundle")
+    from .model_calls import MAX_TIMEOUT_SECONDS, PROCESSING_TIMEOUT_SECONDS
     config = {"timezone": "Asia/Shanghai", "related_run_ids": [], "max_items": 8,
-              "max_calls": None if continuous else 16, "max_attempts": 4 if continuous else 3, "timeout_seconds": 120,
+              "max_calls": None if continuous else 16, "max_attempts": 4 if continuous else 3, "timeout_seconds": PROCESSING_TIMEOUT_SECONDS,
               "lease_seconds": 1800, "grace_seconds": 1800, "remote_mode": "required",
               "remote": "origin", **value}
     if "skill_bundle" in config:
@@ -237,7 +238,7 @@ def normalize_config(value):
     if continuous and (config["max_calls"] is not None or type(config["max_attempts"]) is not int or config["max_attempts"] != 4):
         _fail("invalid_schedule_budget")
     for field, lower, upper in (("max_items", 1, 256), ("max_calls", 2, 512), ("max_attempts", 1, 20),
-                                ("timeout_seconds", 1, 600), ("lease_seconds", 1, 86400), ("grace_seconds", 0, 86400)):
+                                ("timeout_seconds", 1, MAX_TIMEOUT_SECONDS), ("lease_seconds", 1, 86400), ("grace_seconds", 0, 86400)):
         if continuous and field == "max_calls":
             continue
         number = config[field]
@@ -423,6 +424,8 @@ def configure_schedule(repo, config, expected_head=None, *, now=None, use_defaul
     # local package neither loads new rules nor drops the prior quality gate.
     if state is not None and "skill_bundle" not in config and "skill_bundle" in state["config"]:
         config = {**config, "skill_bundle": state["config"]["skill_bundle"]}
+    if state is not None and "timeout_seconds" not in config:
+        config = {**config, "timeout_seconds": state["config"]["timeout_seconds"]}
     if (use_default_skills and state is None and "skill_bundle" not in config
             and config.get("processing_engine") == PRODUCTION_ENGINE):
         from .skill_support import resolve_skill_refs
@@ -1265,7 +1268,7 @@ def run_daily(repo, schedule_id, trigger, expected_head=None, *, model_call=None
         count += 1
         attempted_this_tick.add(item["item_key"])
         calls = []
-        def bounded_call(role, payload, timeout=120):
+        def bounded_call(role, payload, timeout=None):
             if binding is not None and binding["reserved_calls"] == 0:
                 raise BudgetBlocked("budget_processing_mismatch", operation_id=binding["operation_id"])
             if len(calls) >= 2:
@@ -1273,7 +1276,8 @@ def run_daily(repo, schedule_id, trigger, expected_head=None, *, model_call=None
             before = delegate.observed_started_count if isinstance(delegate, BudgetedModelCall) else None
             blocked = False
             try:
-                return delegate(role, payload, timeout=min(timeout, config["timeout_seconds"]))
+                return delegate(role, payload, timeout=config["timeout_seconds"] if timeout is None
+                                else min(timeout, config["timeout_seconds"]))
             except BudgetBlocked:
                 blocked = True
                 raise

@@ -27,21 +27,33 @@ class _SafeParser(argparse.ArgumentParser):
 
 def _model_budget(args):
     from .budget import BudgetLedger, BudgetedModelCall
+    from .model_calls import validate_timeout
+    timeout = getattr(args, "model_timeout", None)
+    if timeout is None:
+        timeout = getattr(args, "model_timeout_default", 120)
+    validate_timeout(timeout)
     if not args.budget_ledger:
         raise _CliError("budget_ledger_required")
     if not args.operation_id:
         raise _CliError("budget_operation_required")
-    return BudgetedModelCall(BudgetLedger(args.budget_ledger, repo=args.repo), args.operation_id)
+    return BudgetedModelCall(BudgetLedger(args.budget_ledger, repo=args.repo), args.operation_id,
+                             default_timeout=timeout)
 
 
-def _budget_arguments(command):
+def _budget_arguments(command, *, default_timeout=None, configure_timeout=True):
     command.add_argument("--budget-ledger", type=Path, help="仓库外已创建的持久调用账本；支持历史预算或日常审计模式")
     command.add_argument("--operation-id", help="本次操作的稳定 ID；重试复用，不得自动重置预算")
+    if configure_timeout:
+        from .model_calls import PROCESSING_TIMEOUT_SECONDS
+        command.set_defaults(model_timeout_default=PROCESSING_TIMEOUT_SECONDS if default_timeout is None else default_timeout)
+        command.add_argument("--model-timeout", type=int,
+                             help="单次模型调用超时秒数，1–1800；新调用默认900，历史恢复默认120；不是整个任务时长")
 
 
 def _skill_arguments(command):
-    command.add_argument("--extract-skill", help="显式提取 Skill 引用；新任务默认 knowledge-extract@10")
-    command.add_argument("--review-skill", help="显式审核 Skill 引用；新任务默认 knowledge-review@8")
+    from .skill_support import DEFAULT_EXTRACT_SKILL_REF, DEFAULT_REVIEW_SKILL_REF
+    command.add_argument("--extract-skill", help="显式提取 Skill 引用；新任务默认 " + DEFAULT_EXTRACT_SKILL_REF)
+    command.add_argument("--review-skill", help="显式审核 Skill 引用；新任务默认 " + DEFAULT_REVIEW_SKILL_REF)
 
 
 def _selected_skills(args, *, default=False):
@@ -166,7 +178,7 @@ def parser() -> argparse.ArgumentParser:
     revision_resume.add_argument("--expected-reservation-sha256", required=True, help="原预留绑定的固定 canonical 摘要")
     revision_resume.add_argument("--review-strategy", choices=("legacy-v1", "auto", "decomposed-v1"), default="decomposed-v1")
     _reading_arguments(revision_resume)
-    _budget_arguments(revision_resume)
+    _budget_arguments(revision_resume, default_timeout=120)
     revalidate = commands.add_parser("revalidate-completed-extraction", help="人工核对已完成提取及原始缓存后独立Review；支持历史0.9和明确10/8恢复合同，禁止重放未知调用")
     revalidate.add_argument("--repo", type=Path, required=True)
     revalidate.add_argument("--run", required=True)
@@ -180,7 +192,7 @@ def parser() -> argparse.ArgumentParser:
     revalidate.add_argument("--original-resume-context", type=Path, required=True)
     revalidate.add_argument("--review-strategy", choices=("legacy-v1", "auto", "decomposed-v1"), default="decomposed-v1")
     _reading_arguments(revalidate)
-    _budget_arguments(revalidate)
+    _budget_arguments(revalidate, default_timeout=120)
     publish = commands.add_parser("publish", help="只发布指定运行中独立 Review 已通过的固定候选")
     publish.add_argument("--repo", type=Path, required=True)
     publish.add_argument("--run", required=True)
@@ -271,7 +283,7 @@ def parser() -> argparse.ArgumentParser:
             action.add_argument("--expected-head")
         if name in {"run", "drain"}:
             action.add_argument("--trigger", type=Path, required=True)
-            _budget_arguments(action)
+            _budget_arguments(action, configure_timeout=False)
             if name == "drain":
                 action.add_argument("--max-slices", type=int, default=8)
                 action.add_argument("--window-seconds", type=int, default=300)

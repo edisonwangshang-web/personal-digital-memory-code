@@ -76,6 +76,64 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(2, adapter.started_count)
         self.assertEqual(0, ledger.snapshot()["remaining"])
 
+    def test_configured_timeout_follows_operations_without_changing_legacy_default(self):
+        ledger = self.create()
+        observed = []
+        def transport(role, payload, timeout):
+            observed.append(timeout)
+            return {}
+        adapter = BudgetedModelCall(ledger, "configured", transport, default_timeout=900)
+        adapter("answer", {})
+        adapter.for_operation("child")("answer", {})
+        adapter.for_operation("longer-child", default_timeout=1800)("answer", {})
+        adapter.for_operation("explicit-shorter")("answer", {}, timeout=7)
+        BudgetedModelCall(ledger, "legacy", transport)("answer", {})
+        self.assertEqual(observed, [900, 900, 1800, 7, 120])
+        self.assertEqual(adapter.default_timeout, 900)
+
+    def test_invalid_timeout_never_starts_or_changes_the_ledger(self):
+        from pdm.model_calls import ModelCallError
+        ledger = self.create()
+        before = self.path.read_bytes()
+        adapter = BudgetedModelCall(ledger, "invalid-timeout", lambda *args, **kwargs: self.fail("transport"))
+        for value in (0, -1, 1801, True, 0.5, None, "900"):
+            with self.subTest(timeout=value):
+                for action in (lambda: BudgetedModelCall(ledger, "invalid-default", default_timeout=value),
+                               lambda: adapter("answer", {}, timeout=value)):
+                    with self.assertRaises(ModelCallError) as caught:
+                        action()
+                    self.assertEqual(caught.exception.code, "invalid_timeout")
+                self.assertEqual(self.path.read_bytes(), before)
+
+    def test_longer_timeout_does_not_replay_an_unknown_call(self):
+        from pdm.model_calls import ModelCallError
+        ledger = self.create()
+        seen = []
+        def timed_out(role, payload, timeout):
+            seen.append(timeout)
+            raise ModelCallError("timeout", "model-" + "a" * 32, timeout)
+        adapter = BudgetedModelCall(ledger, "fixed-operation", timed_out, default_timeout=900)
+        with self.assertRaises(ModelCallError):
+            adapter("answer", {})
+        call = adapter.operation_state()["calls"]["answer"]
+        self.assertEqual((call["status"], call["error_code"]), ("unknown", "timeout"))
+        before = self.path.read_bytes()
+        reopened = BudgetedModelCall(BudgetLedger(self.path), "fixed-operation", timed_out, default_timeout=1800)
+        self.blocked("budget_call_already_started", lambda: reopened("answer", {}))
+        self.assertEqual((seen, self.path.read_bytes()), ([900], before))
+
+    def test_production_guard_preserves_configured_timeout_for_child_review(self):
+        from pdm.production import _guarded
+        ledger = self.create()
+        seen, guards = [], []
+        adapter = BudgetedModelCall(ledger, "root", lambda role, payload, timeout: seen.append(timeout) or {},
+                                   default_timeout=900)
+        guarded = _guarded(adapter, lambda *args: guards.append(args), Path("/tmp/artificial-repo"), "queue", "run")
+        guarded("extract", {})
+        guarded.for_operation("decomposed-review")("review", {})
+        self.assertEqual(seen, [900, 900])
+        self.assertEqual(len(guards), 2)
+
     def test_pair_insufficient_starts_nothing(self):
         ledger = self.create(1)
         adapter = BudgetedModelCall(ledger, "run-1", lambda *args, **kwargs: self.fail("transport"))

@@ -91,6 +91,29 @@ class ScheduleProductionTests(unittest.TestCase):
         self.assertEqual(len(queues), 1)
         self.assertEqual(result["next_action"], "idle")
 
+    def test_production_schedule_default_timeout_reaches_extract_and_review(self):
+        self.configure(count=1)
+        seen = []
+        original = self.transport
+        def observe(role, payload, timeout=120):
+            seen.append(timeout)
+            return original(role, payload, timeout)
+        self.adapter = BudgetedModelCall(self.ledger, "scheduled-timeout", observe)
+        self.assertEqual(self.run_slice()["status"], "completed")
+        self.assertEqual(seen, [900, 900])
+
+    def test_production_schedule_uses_the_frozen_explicit_timeout(self):
+        self.configure(count=1, timeout_seconds=1730, lease_seconds=3600)
+        seen = []
+        original = self.transport
+        def observe(role, payload, timeout=120):
+            seen.append(timeout)
+            return original(role, payload, timeout)
+        # An adapter's local default cannot silently replace the schedule value.
+        self.adapter = BudgetedModelCall(self.ledger, "scheduled-timeout", observe, default_timeout=7)
+        self.assertEqual(self.run_slice()["status"], "completed")
+        self.assertEqual(seen, [1730, 1730])
+
     def test_existing_continuous_configuration_without_engine_stays_legacy_and_idempotent(self):
         self.now = datetime(2026, 10, 19, 0, tzinfo=timezone.utc)
         paths = self.sources(1)

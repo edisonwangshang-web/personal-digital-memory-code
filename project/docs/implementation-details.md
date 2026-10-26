@@ -2,9 +2,9 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复的执行方法。当前程序为 `0.2.0.dev26`，现行主路径为 **source → staging → record／topic**。自动分类使用 `three-domains-v1`，三个领域为 `health`、`career`、`learning`；分类与质量检查嵌入既有提取／独立 Review，不增加模型阶段。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。开发版`0.2.0.dev27`已实现本批修复，主路径仍为 **source → staging → record／topic**。分类及质量检查嵌入原提取／独立Review，不增加阶段。隔离定向回归和标准CLI人工全链已通过，准确dev CI与新一轮获准真实验收待核，状态见Roadmap。本批仅dev开发验证，不合入或推送master。
 
-新任务默认 `knowledge-extract@10`／`knowledge-review@8`，基础提示词为 extract v14／review v10／answer v8。历史 Skill、请求、候选及审核按原绑定恢复，不因当前默认值变化自动升级或重跑。实际数据目录和状态以[数据规范](data-conventions.md)为准，本文中的 `memory/` 路径是私有资料库的逻辑映射，公开工程不包含个人原文、正式知识或运行历史。
+新默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
 
 文档分工如下：
 
@@ -14,6 +14,12 @@
 - [Roadmap](roadmap.md)管理阶段成果、执行顺序、进度与通过证据；本页不重复阶段表。
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
+
+## dev27：等待时间与纯绑定返工
+
+新标准CLI单次模型调用默认900秒，`--model-timeout`可设1—1800秒，并实际传入子调用；专用历史恢复入口默认120秒保持可显式覆盖。production沿本次worker参数推进，不改变queue身份；schedule使用原冻结`timeout_seconds`，旧值不迁移。启动后超时仍先对账，不以更长等待或新operation重发unknown，详见[超时合同](data-conventions.md#model-call-timeout)。
+
+收到Review9的真实`needs_revision`后，先核`repair_scope`及完整旧证明。纯`statistic_bindings`且检查、目标pair和固定范围全部满足时，同一个revision extract11只取`{statistic_bindings:[{stat_id,record_id,body_evidence}]}`；程序从固定统计和原文物化value／根引用，其他正文、关系及旧quality保持。raw patch与完整输出分别绑定，完整新Review后才允许发布。内容或混合问题走原全稿，错误或歧义不能猜，原稳定次数及unknown保持。字段与拒绝条件见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)，本批隔离定向回归和标准CLI人工全链通过，准确dev CI与新一轮获准真实验收仍待核。
 
 ## dev26：多批容量回退与反馈接续
 
@@ -110,7 +116,7 @@ ChatGPT 是交互入口，模型 API 不自动提供对应聊天应用的历史�
 
 加载器只接受已注册、角色匹配且摘要一致的版本，拒绝未知引用、外部路径和依赖变化。版本化文件位于 `project/skills/knowledge-extract/<version>/`、`knowledge-review/<version>/`，共同依赖位于 `project/skills/shared/`。当前两个默认角色共同引用 `knowledge-context-v1`。`skill_support.py` 核不可变 manifest 与实际内容；`model_calls.py` 展开冻结规则并计算真实字节和摘要；`knowledge_quality.py` 准备并核验质量材料；pipeline、production、scheduler 及分解 Review 消费同一绑定。
 
-当前10/8合同的候选、Review、manifest／receipt、queue／attempt、日程事件和分解 proof 使用 `0.12`，旧9/7为 `0.11`、旧8/6质量链为 `0.10`；专用已完成提取恢复另写 `0.13` 门禁，来源／采集 `0.1`、正式 record／topic `0.2`、group wrapper `0.6` 保持。分解审核及其 proof 的历史契约为 `0.8`，显式返工为 `0.9`，统一 registry 保留 `0.4`／`0.7`。历史格式按原契约读取，不回填“已加载 Skill”，稳定计数与预约身份不迁移。
+新11/9普通质量族使用0.15，旧10/8的0.12、9/7的0.11、更早的0.10及assembly0.14按原合同核验。专用旧恢复仍有0.13门禁，来源0.1、正式record／topic0.2、group0.6及registry既有合同保持；不回填Skill证明，不迁移原计数或预约。
 
 ### 加工与审核
 
@@ -136,7 +142,7 @@ extract@9的原始输出显式携带 `reuse_refs`。每项为 `{path, content_ve
 
 按真实逐行`source_views`测完整请求容量。source profile通过`evidence_id`保存完整实际片段，target和必需检查用`source_scope_id`／`source_scope_ids`引用；scope摘要仍核完整来源与候选，避免每项指标反复展开同一片段列表。object保持其完整对象与必要证据，coverage保持实际批次／draft的完整语义范围及全部最终对象，global核跨来源关系；不把逐行切割当作独立语义审核，也不通过删掉未被提取者声明的统计来省略查漏义务。
 
-实际渲染由`model_calls.py`按显式角色版本选择 v1／v2／v3；当前默认 extract@10／review@8 使用`pdm-columnar-shared-json-v3`，按列式结构、v2字段字典、v1共享值的顺序完整还原。`skill_wire.py`负责基础v1共享值编码，重复值完整保存一次并用引用重用，保留键显式转义。编码后在程序内解码并逐值核原JSON，模型收到解引用说明；原source、context和完整payload不删减，原始调用审计保留。容量与请求摘要使用真正提交的全部字节，含Skill规则、共享表和编码说明；旧请求渲染不变，模型返回仍必须给实际业务字段，不能拿共享引用代替原文或知识正文。
+实际渲染按冻结角色选择v1／v2／v3；新11/9沿用`pdm-columnar-shared-json-v3`，依次还原列式、字段字典和共享值，并在程序内逐值核对。阶段内必要材料不被编码裁减，容量与摘要计入规则、共享表及说明的全部线上字节。旧角色请求按原字节；输出仍须实际业务字段，不拿共享引用代替原文或正文。
 
 global使用`verified-quality-conclusions-v1`证书投影，保留前序逐项结论、理由、范围和完整输出／检查摘要，重复证据ID数组以摘要绑定。原始完整Review输出仍在proof节点保存并于汇合时重验；global仍看完整最终知识与关系，证书不声称其读过未提供原文。任何必要单元仍超容量就保留阻塞，实际最终字节和检查结果统一见提测记录，不能以压缩后的请求结构代替真实模型质量验收。
 

@@ -25,8 +25,8 @@ def add_quality(output, context):
     return output
 
 
-def passed_review(required_checks):
-    return {
+def passed_review(required_checks, skill_bundle=None):
+    result = {
         "verdict": "passed",
         "reasons": ["Synthetic independent Review inspected the fixed evidence and final object scope."],
         "checks": [{"check_id": check["check_id"], "scope_sha256": check["scope_sha256"],
@@ -35,3 +35,8 @@ def passed_review(required_checks):
                     "evidence_ids": list(check["evidence_ids"])}
                    for check in required_checks],
     }
+    if (skill_bundle is not None
+            and skill_bundle["skills"]["extract"]["ref"] == "knowledge-extract@11"
+            and skill_bundle["skills"]["review"]["ref"] == "knowledge-review@9"):
+        result["repair_scope"] = {"kind": "none", "missing_bindings": []}
+    return result

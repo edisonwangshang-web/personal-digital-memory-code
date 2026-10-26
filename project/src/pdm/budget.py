@@ -24,6 +24,7 @@ MAX_LEDGER_BYTES = 4_000_000
 ROLES = ("extract", "review", "answer")
 _LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _SHA = re.compile(r"[0-9a-f]{64}")
+_TIMEOUT_UNSET = object()
 
 
 class BudgetBlocked(RuntimeError):
@@ -403,16 +404,19 @@ class BudgetLedger:
 
 class BudgetedModelCall:
     """Bind one durable operation; each role may start only once."""
-    def __init__(self, ledger, operation_id, transport=None):
+    def __init__(self, ledger, operation_id, transport=None, *, default_timeout=120):
+        from .model_calls import validate_timeout
         if not isinstance(ledger, BudgetLedger):
             _blocked("budget_binding_required")
+        self.default_timeout = validate_timeout(default_timeout)
         self.ledger = ledger
         self.operation_id = _label(operation_id)
         self.transport = transport
         self.observed_started_count = 0
 
-    def for_operation(self, operation_id):
-        return type(self)(self.ledger, operation_id, self.transport)
+    def for_operation(self, operation_id, *, default_timeout=None):
+        return type(self)(self.ledger, operation_id, self.transport,
+                          default_timeout=self.default_timeout if default_timeout is None else default_timeout)
 
     def operation_state(self):
         return self.ledger.operation(self.operation_id)
@@ -432,8 +436,9 @@ class BudgetedModelCall:
             _blocked("invalid_budget_reservation")
         return self.ledger.reserve(self.operation_id, ["extract", "review"] if count == 2 else ["answer"])
 
-    def __call__(self, role, payload, timeout=120):
-        from .model_calls import ModelCallError, _call_transport
+    def __call__(self, role, payload, timeout=_TIMEOUT_UNSET):
+        from .model_calls import ModelCallError, _call_transport, validate_timeout
+        timeout = validate_timeout(self.default_timeout if timeout is _TIMEOUT_UNSET else timeout)
         try:
             raw = _json(payload)
             digest = hashlib.sha256(raw).hexdigest()

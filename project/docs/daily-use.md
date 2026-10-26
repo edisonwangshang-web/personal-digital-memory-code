@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文描述 `0.2.0.dev26` 的通用操作。公开仓库提供工程能力，真实资料操作在获准的私有工作区进行；所有路径、来源和运行参数都由操作者按实际范围填写。开始前先按[双仓库实际使用](dual-repository-operation.md)核对版本；当前目录和模块加载路径指向公库，`--repo` 指向私库，代码更新不复制回私库。
+本文补充`0.2.0.dev27`开发批次的操作接口，默认Skill11/9、普通quality0.15；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -22,6 +22,8 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 `-P` 禁止将当前目录插入模块搜索路径，避免同名目录覆盖已核对的公库程序；`-B` 避免生成字节码。后文命令沿用以上绝对 `PYTHONPATH` 和资料根变量，`--expected-head` 始终读取私库 HEAD。
 
 模型调用还需要实际可用的服务与资料范围。工程仓库可读、GitHub 登录成功或命令存在，都不能证明具备模型服务访问权限。
+
+普通`process`（含`--revision-from-run`）、`production run`、`ask`及待确认执行的新模型调用默认等待900秒，可用`--model-timeout 900`显式设置，允许范围为1—1800秒；不是整条任务的总时长。专用resume／revalidate入口未指定时保留120秒兼容值，可显式覆盖。生产队列将worker参数传到实际调用；日程仍使用冻结的`timeout_seconds`，不因升级改旧值。启动后超时先对账，不换operation或加长超时重发unknown，见[超时合同](data-conventions.md#model-call-timeout)。
 
 <a id="explicit-knowledge-rebuild"></a>
 
@@ -80,13 +82,13 @@ python -P -B -m pdm capture --repo "$PDM_DATA_REPO" --input "$source_json" \
 
 ## 人工触发持久生产队列
 
-新任务默认使用 `knowledge-extract@10` 与 `knowledge-review@8`。程序准备资料清单、可复算描述统计和版本绑定，模型完成提取组织与独立语义审核；规则加载成功不能代替内容质量检查。未变的已提供旧对象可显式返回 `reuse_refs`，程序物化后仍做完整审核，不能用空输出省略旧记录。当前10/8合同使用0.12，专用已完成提取恢复另写0.13门禁；旧任务沿用原Skill与格式，不通过重命名队列清空失败或未知调用。
+本批新默认为`knowledge-extract@11`与`knowledge-review@9`、普通quality0.15，旧10/8的0.12及assembly0.14保持原证明。程序准备清单、可复算统计和绑定，模型提取并独立审核；精确`reuse_refs`继续按原条件物化和审核，不用空输出省略旧记录。旧任务沿用原Skill及格式，不靠改队列名清失败或unknown；专用旧恢复合同不因新默认自动扩权。
 
 ```bash
 python -P -B -m pdm production prepare --repo "$PDM_DATA_REPO" --id "$queue_id" \
   --source "$source_path" --review-strategy auto
 python -P -B -m pdm production run --repo "$PDM_DATA_REPO" --id "$queue_id" \
-  --budget-ledger "$audit_ledger" --operation-id "$worker_operation_id"
+  --budget-ledger "$audit_ledger" --operation-id "$worker_operation_id" --model-timeout 900
 python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 ```
 
@@ -95,6 +97,8 @@ python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 普通多批的完整原文合并超容量时，程序可自动把已核完整草稿原样组成0.14最终候选，再真正独立分解审核；不增加extract调用或新的CLI参数。当前只接无旧关联、答复或重建上下文的普通草稿；对象、统计口径冲突或必要审核仍超容量时保留具体阻塞。若该原样最终候选审核要求实质修订且仍不能承载，后续`assembly_revision_required`表示需要处理，不能反复运行同一联合期待自动修好。完整边界见[数据规范](data-conventions.md#verbatim-draft-finalization)。
 
 所有必要独立审核通过后才正式发布。已完成节点按原身份复验，未知先对账；首次执行后最多三次失败重试，跨日、重启或改队列名不清零。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
+
+Review9若明确只缺统计绑定，正常返工会在同一extract中要求精确`statistic_bindings`，程序补固定统计与根引用，原正文和关系保持后重新独立审核；没有新的补绑CLI命令或额外模型阶段。混合／正文问题仍需完整返工，不能手改模型返回或把旧证明补成通过。具体边界见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)。新真实全链另核现有状态和明确意图，不把零调用复验当成新加工。
 
 已完成的10/8返工提取若仅因候选存储失败，不重新extract。先准备目标plan，再由操作者核原生completed账本、原始缓存及完整请求并固定validation_head，按[专用步骤](implementation-details.md#quality-completed-recovery-execution)恢复；unknown不适用。恢复仍需真正独立Review和完整发布证明，不能把候选或缓存核验当作完成。
 

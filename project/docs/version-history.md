@@ -2,7 +2,15 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前：0.2.0.dev26
+## 当前开发批次：0.2.0.dev27
+
+本批仅在dev开发验证，不合入或推送master。默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15；能力已实现，隔离定向回归及标准CLI人工全链通过；准确dev CI与新一轮获准真实验收仍待核，不预填通过。旧10/8、0.12、assembly0.14及历史规则字节保持，不自动迁移资料或重跑已完成工作。
+
+标准CLI单次模型调用默认900秒、允许1—1800秒，含普通process反馈返工；底层Python及专用历史恢复默认120秒兼容。旧冻结日程继承原timeout_seconds，执行时实际传入，不按新默认迁移；超时unknown及稳定次数照常保留。
+
+Review9以repair_scope明确纯统计绑定缺失时，同一revision extract11仅返回stat_id／record_id／body_evidence，程序由固定统计和根原文物化value／引用，原有正文、关系和quality条目保持；混合内容仍走原全稿。raw patch与物化结果分开绑定，完整新Review、发布门禁与原尝试上限不变。具体约束见[数据规范](data-conventions.md#metadata-only-statistic-repair)，不增加模型阶段或通用补写系统。
+
+## 历史：0.2.0.dev26
 
 本批修复 M1 架构审阅发现的多批推进与反馈接续、读取重复核验、调度退出码及控制容量边界；具体实现和兼容范围以[数据规范](data-conventions.md)、[实现明细](implementation-details.md)和[人工验收](scenarios-and-acceptance.md)为准。准确提交CI、稳定分支交付及真实业务结果分别核对，不把本条版本记录当作已经通过。
 

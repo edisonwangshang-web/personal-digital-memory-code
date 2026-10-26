@@ -32,6 +32,7 @@ MAX_STREAM_BYTES = 2_000_000
 # Larger structured period summaries may legitimately need more than ten
 # minutes. Callers must opt in; the 120-second default and unknown handling stay.
 MAX_TIMEOUT_SECONDS = 1800
+PROCESSING_TIMEOUT_SECONDS = 900
 MAX_JSON_DEPTH = 64
 USAGE_FIELDS = frozenset({"input_tokens", "output_tokens", "cached_input_tokens",
                           "total_tokens", "reasoning_output_tokens"})
@@ -46,6 +47,13 @@ class ModelCallError(RuntimeError):
         self.invocation_id = invocation_id
         self.elapsed_seconds = round(elapsed_seconds, 3)
         super().__init__("model call {}: {}".format(invocation_id, code))
+
+
+def validate_timeout(timeout, *, invocation_id=None):
+    """Validate before any durable call start, including custom transports."""
+    if type(timeout) is not int or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
+        raise ModelCallError("invalid_timeout", invocation_id or "model-" + uuid.uuid4().hex)
+    return timeout
 
 
 def _object(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -109,16 +117,23 @@ def output_schema(role, payload):
             if role == "extract" and payload.get("output_contract") == "batch-v1"
             else OUTPUT_SCHEMAS[role])
     if not _skill_mode(role, payload):
+        if role == "extract" and "quality_repair_context" in payload:
+            raise ValueError("invalid_quality_repair_context")
         return base
-    from .knowledge_quality import QUALITY_SCHEMA, QUALITY_REVIEW_CHECK_SCHEMA
+    from .knowledge_quality import QUALITY_SCHEMA, QUALITY_REVIEW_CHECK_SCHEMA, REPAIR_SCOPE_SCHEMA
+    if role == "extract" and "quality_repair_context" in payload:
+        return _statistic_repair_output_schema(payload)
     result = (_object(dict(base["properties"], quality=QUALITY_SCHEMA)) if role == "extract"
               else _object(dict(base["properties"], checks=_array(QUALITY_REVIEW_CHECK_SCHEMA))))
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10"}:
+    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] == "knowledge-review@9":
+        result["properties"]["repair_scope"] = deepcopy(REPAIR_SCOPE_SCHEMA)
+        result["required"].append("repair_scope")
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11"}:
         result["properties"]["reuse_refs"] = _array(_object({"path": _STRING, "content_version": _STRING}))
         result["required"].append("reuse_refs")
         if payload.get("output_contract") != "batch-v1":
             result["properties"]["wiki"] = {"anyOf": [result["properties"]["wiki"], {"type": "null"}]}
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11"}:
         context = payload.get("quality_context")
         targets = context.get("targets") if isinstance(context, dict) else None
         if not isinstance(targets, list):
@@ -134,8 +149,35 @@ def output_schema(role, payload):
         return result
     if payload["skill_bundle"]["skills"][role]["ref"] in {
             "knowledge-extract@5", "knowledge-review@4", "knowledge-extract@6", "knowledge-review@5",
-            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8"}:
+            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9"}:
         return _reference_schema(result, role, payload)
+    return result
+
+
+def _statistic_repair_output_schema(payload):
+    """Constrain only explicitly requested identities; body meaning stays semantic."""
+    from .knowledge_quality import STATISTIC_BINDINGS_SCHEMA, STATISTIC_REPAIR_CONTRACT
+    from .skill_support import statistic_repair_enabled
+    context = payload.get("quality_repair_context")
+    if (not statistic_repair_enabled(payload.get("skill_bundle")) or not isinstance(context, dict)
+            or context.get("contract") != STATISTIC_REPAIR_CONTRACT):
+        raise ValueError("invalid_quality_repair_context")
+    bindings = context.get("missing_bindings")
+    if (not isinstance(bindings, list) or not bindings
+            or any(not isinstance(item, dict) or set(item) != {"stat_id", "record_id"}
+                   or any(not isinstance(item[key], str) or not item[key].strip()
+                          for key in ("stat_id", "record_id")) for item in bindings)):
+        raise ValueError("invalid_quality_repair_context")
+    pairs = [(item["stat_id"], item["record_id"]) for item in bindings]
+    if len(set(pairs)) != len(pairs):
+        raise ValueError("invalid_quality_repair_context")
+    result = deepcopy(STATISTIC_BINDINGS_SCHEMA)
+    items = result["properties"]["statistic_bindings"]
+    items.update(minItems=len(bindings), maxItems=len(bindings))
+    for key in ("stat_id", "record_id"):
+        values = sorted({item[key] for item in bindings})
+        if len(values) <= 200 and sum(len(value.encode()) for value in values) <= 12000:
+            items["items"]["properties"][key] = {"type": "string", "enum": values}
     return result
 
 
@@ -166,6 +208,14 @@ def _reference_schema(schema, role, payload):
         fields = result["properties"]["checks"]["items"]["properties"]
         for name in ("check_id", "scope_sha256"):
             restrict(fields, name, payload.get("required_checks", []), name)
+        if "repair_scope" in result["properties"]:
+            missing = result["properties"]["repair_scope"]["properties"]["missing_bindings"]["items"]["properties"]
+            restrict(missing, "stat_id", context.get("statistics", []), "stat_id")
+            objects = payload.get("candidate", {}).get("objects", [])
+            records = [{"record_id": obj["metadata"]["id"]} for obj in objects
+                       if isinstance(obj, dict) and isinstance(obj.get("metadata"), dict)
+                       and obj["metadata"].get("type") != "wiki" and "id" in obj["metadata"]]
+            restrict(missing, "record_id", records, "record_id")
     def source_fields(node):
         if isinstance(node, dict):
             properties = node.get("properties", {})
@@ -203,8 +253,8 @@ def render_model_request(role, payload):
             wire_instructions = KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
             encoder = encode_shared_json_v2
         elif bundle["skills"][role]["ref"] in {
-                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10",
-                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8"}:
+                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11",
+                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9"}:
             from .skill_wire_v2 import WIRE_INSTRUCTIONS as KEY_INSTRUCTIONS
             from .skill_wire_v3 import WIRE_INSTRUCTIONS as TABLE_INSTRUCTIONS, encode_shared_json_v3
             wire_instructions = TABLE_INSTRUCTIONS + "\n\n" + KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
@@ -221,7 +271,8 @@ def render_model_request(role, payload):
             "extract_skill_ref": bundle["skills"]["extract"]["ref"],
             "review_skill_ref": bundle["skills"]["review"]["ref"],
         })
-        if (bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]) == ("knowledge-extract@10", "knowledge-review@8"):
+        if (bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]) in {
+                ("knowledge-extract@10", "knowledge-review@8"), ("knowledge-extract@11", "knowledge-review@9")}:
             from .quality_projection import PROJECTION_INSTRUCTIONS, project_quality_payload
             instructions += "\n\n" + PROJECTION_INSTRUCTIONS
             material = project_quality_payload(material)
@@ -538,8 +589,7 @@ def _call_transport(role: str, payload: dict, timeout: int = 120, *, on_start) -
     started = time.monotonic()
     if not isinstance(role, str) or role not in OUTPUT_SCHEMAS or not isinstance(payload, dict):
         raise ModelCallError("invalid_request", invocation_id)
-    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
-        raise ModelCallError("invalid_timeout", invocation_id)
+    validate_timeout(timeout, invocation_id=invocation_id)
     executable = shutil.which("codex")
     if executable is None:
         raise ModelCallError("codex_not_found", invocation_id)

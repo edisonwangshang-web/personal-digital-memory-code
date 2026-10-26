@@ -440,6 +440,8 @@ def _certificate(unit, result, node):
                        | {"evidence_ids_sha256": _hash(check["evidence_ids"])}
                        for check in output["checks"]],
         }
+        if "repair_scope" in output:
+            certificate["output"]["repair_scope"] = deepcopy(output["repair_scope"])
         certificate["scope_note"] = (
             "Program-verified conclusion projection. Complete check evidence remains bound by the immutable "
             "result and complete_output_sha256; this certificate supplies no additional raw source text.")
@@ -469,7 +471,8 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
                 or reservation["request_sha256"] != _hash(request)
                 or reservation["input_bytes"] != result["request_binding"]["bytes"]):
             _fail("decomposed_request_mismatch")
-        _review_output(result["output"], quality=True, required_checks=request["required_checks"])
+        _review_output(result["output"], quality=True, required_checks=request["required_checks"],
+                       skill_bundle=request.get("skill_bundle"))
     else:
         _review_output(result["output"])
     reference = result["reservation"]
@@ -589,7 +592,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                 received = True
                 call = _call_metadata(response)
                 if plan.get("quality_contract") == QUALITY_CONTRACT:
-                    _review_output(response["output"], quality=True, required_checks=request["required_checks"])
+                    _review_output(response["output"], quality=True, required_checks=request["required_checks"],
+                                   skill_bundle=request.get("skill_bundle"))
                 else:
                     _review_output(response["output"])
                 if call["invocation_id"] in invocations:

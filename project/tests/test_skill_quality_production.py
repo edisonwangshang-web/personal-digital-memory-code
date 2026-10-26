@@ -29,7 +29,7 @@ class SkillQualityProductionTests(unittest.TestCase):
             response["output"] = add_quality(response["output"], payload["quality_context"])
             response["output"]["reuse_refs"] = []
         else:
-            response["output"] = passed_review(payload["required_checks"])
+            response["output"] = passed_review(payload["required_checks"], payload.get("skill_bundle"))
         return response
 
     def test_default_new_queue_freezes_bundle_and_publishes_verified_group(self):
@@ -49,7 +49,7 @@ class SkillQualityProductionTests(unittest.TestCase):
         git = PipelineGit(self.repo)
         meta, _ = parse_markdown(git.read(git.head(),
             "memory/runs/processes/queues/quality/state.md"))
-        self.assertEqual(meta["schema_version"], "0.12")
+        self.assertEqual(meta["schema_version"], "0.15")
         before = git.head(), self.ledger.path.read_bytes()
         self.assertEqual(run_production(self.repo, "quality", model_call=self.adapter)["status"], "published")
         self.assertEqual((git.head(), self.ledger.path.read_bytes()), before)

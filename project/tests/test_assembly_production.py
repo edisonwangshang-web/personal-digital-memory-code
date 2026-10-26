@@ -60,6 +60,8 @@ class AssemblyProductionTests(unittest.TestCase):
         self.assertEqual(parse_markdown((self.repo / f"memory/staging/{result['final_run']}.md").read_bytes())[0]["schema_version"], "0.14")
         final_requests = [payload for role, payload in self.payloads if "review_scope" in payload]
         self.assertEqual([payload["review_scope"]["kind"] for payload in final_requests], ["object"] * 4 + ["coverage"] * 2 + ["global"])
+        self.assertTrue(all(certificate["output"]["repair_scope"] == {"kind": "none", "missing_bindings": []}
+                            for certificate in final_requests[-1]["review_certificates"]))
         self.assertEqual(review["output"]["verdict"], "passed")
         proof = verify_publication(self.repo, result["publication"]["run_id"], source_paths=paths)
         self.assertEqual(len(proof["files"]), 4)

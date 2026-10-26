@@ -81,6 +81,22 @@ class CandidateStorageTests(unittest.TestCase):
         self.assertEqual(git(self.repo, "status", "--porcelain"), "")
         self.assertFalse(self.adapter._journal_path().exists())
 
+    def test_new_pair_keeps_the_same_bounded_history_exception_with_exact_schema(self):
+        value = self.candidate()
+        value["skill_bundle"] = resolve_skill_refs("knowledge-extract@11", "knowledge-review@9")
+        data = self.saved(value, schema="0.15")
+        self.assertGreater(len(data), LEGACY_FILE_BYTES)
+        self.assertEqual(validate_candidate_bytes(data)["total_bytes"], len(data))
+        for wrong in (self.saved(value, schema="0.12"), self.saved(self.candidate(), schema="0.15")):
+            self.assert_rejected(lambda wrong=wrong: self.write({self.path: wrong}, self.head))
+            self.assertEqual(self.adapter.head(), self.head)
+        oversized_current = self.candidate(padding=1)
+        oversized_current["skill_bundle"] = value["skill_bundle"]
+        oversized_current["raw_extraction_output"] = {"statistic_bindings": "x" * LEGACY_FILE_BYTES}
+        self.assert_rejected(lambda: self.write({self.path: self.saved(oversized_current, schema="0.15")}, self.head))
+        commit = self.write({self.path: data})
+        self.assertEqual(self.adapter.read(commit, self.path), data)
+
     def test_legacy_fake_role_other_kind_and_other_paths_do_not_get_exception(self):
         value = self.candidate()
         fake = copy.deepcopy(value)

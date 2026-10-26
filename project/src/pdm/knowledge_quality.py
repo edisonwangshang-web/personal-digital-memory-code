@@ -54,6 +54,16 @@ QUALITY_REVIEW_CHECK_SCHEMA = _object({
     "result": {"type": "string", "enum": ["passed", "needs_revision", "needs_confirmation"]},
     "reason": _STRING, "evidence_ids": _STRINGS,
 })
+REPAIR_SCOPE_SCHEMA = _object({
+    "kind": {"type": "string", "enum": ["statistic_bindings", "content", "none"]},
+    "missing_bindings": {"type": "array", "items": _object({"stat_id": _STRING, "record_id": _STRING})},
+})
+STATISTIC_BINDINGS_SCHEMA = _object({
+    "statistic_bindings": {"type": "array", "items": _object({
+        "stat_id": _STRING, "record_id": _STRING, "body_evidence": _STRING,
+    })},
+})
+STATISTIC_REPAIR_CONTRACT = "statistic-bindings-repair-v1"
 
 _DATE_COLUMNS = {"日期", "date", "Date"}
 _ZONE_COLUMNS = {"时区", "timezone", "time_zone"}
@@ -966,10 +976,37 @@ def build_review_checks(candidate, context, scope=None):
     return checks
 
 
-def validate_quality_review(output, checks):
+def validate_review_repair_scope(output):
+    """Validate the declared repair shape, not its factual or semantic merit."""
+    if not isinstance(output, dict) or "repair_scope" not in output:
+        _error("invalid_review_repair_scope", "新审核合同缺少明确返工范围")
+    scope = output["repair_scope"]
+    _schema(scope, REPAIR_SCOPE_SCHEMA, "invalid_review_repair_scope")
+    kind, bindings = scope["kind"], scope["missing_bindings"]
+    seen = set()
+    for binding in bindings:
+        pair = (binding["stat_id"], binding["record_id"])
+        if any(not value.strip() for value in pair) or pair in seen:
+            _error("invalid_review_repair_scope", "缺失统计关联须使用不重复的准确身份")
+        seen.add(pair)
+    if kind == "statistic_bindings":
+        checks = output.get("checks", [])
+        if (output.get("verdict") != "needs_revision" or not bindings
+                or not any(isinstance(check, dict) and check.get("result") == "needs_revision" for check in checks)
+                or any(isinstance(check, dict) and check.get("result") == "needs_confirmation" for check in checks)):
+            _error("invalid_review_repair_scope", "只有明确纯统计关联遗漏的真实退回可要求局部返工")
+    elif bindings or kind == "content" and output.get("verdict") != "needs_revision":
+        _error("invalid_review_repair_scope", "返工范围与总审核结论不一致")
+    return scope
+
+
+def validate_quality_review(output, checks, *, repair_scope_supported=False):
     """Require every predeclared check, exact scope, evidence and consistent verdict."""
-    if not isinstance(output, dict) or set(output) != {"verdict", "reasons", "checks"}:
+    fields = {"verdict", "reasons", "checks"} | ({"repair_scope"} if repair_scope_supported else set())
+    if not isinstance(output, dict) or set(output) != fields:
         _error("invalid_quality_review", "独立审核缺少完整逐项质量结果")
+    if repair_scope_supported:
+        validate_review_repair_scope(output)
     expected = {check["check_id"]: check for check in checks}
     if not expected or len(expected) != len(checks):
         _error("invalid_quality_review", "必需审核项无效")
@@ -1001,6 +1038,10 @@ def validate_quality_review(output, checks):
                "needs_confirmation" if "needs_confirmation" in outcomes else "passed")
     if output["verdict"] != verdict:
         _error("quality_review_verdict_mismatch", "总审核结论与逐项结果不一致")
+    if repair_scope_supported and output["repair_scope"]["kind"] == "statistic_bindings":
+        if any(result["result"] != "passed" and expected[result["check_id"]].get("kind") != "object_statistics_time"
+               for result in output["checks"]):
+            _error("invalid_review_repair_scope", "正文、覆盖、分类或整体关系问题不能伪装成只补统计关联")
     reasons = _list(output["reasons"], "invalid_quality_review")
     if not reasons or any(not isinstance(reason, str) or not reason.strip() for reason in reasons):
         _error("quality_review_reason_missing", "总审核结论须保留理由")

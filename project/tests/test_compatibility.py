@@ -77,7 +77,7 @@ class CompatibilityTests(unittest.TestCase):
         result = inspect_memory_schema(self.repo)
         self.assertEqual(result["status"], status)
         self.assertEqual(result["writable"], status == "compatible")
-        self.assertEqual(result["supported_schema_versions"], ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14"])
+        self.assertEqual(result["supported_schema_versions"], ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.15", "0.13", "0.14"])
         self.assertEqual(result["detected_known_versions"], versions)
         for key in ("scanned_metadata_files", "unknown_files", "ignored_files"):
             self.assertIsInstance(result[key], int)
@@ -187,6 +187,21 @@ class CompatibilityTests(unittest.TestCase):
         with patch("pdm.compatibility.SUPPORTED_SCHEMA_VERSIONS", previous_support):
             self.assert_error("incompatible_memory_schema", lambda: capture(
                 self.repo, {**self.payload, "source_key": "assembly-old-writer-must-stop"}))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((self.repo / first["path"]).read_bytes(), before["files"][first["path"]])
+
+    def test_statistic_repair_header_blocks_older_writes_without_changing_sources(self):
+        first = capture(self.repo, self.payload)
+        self.save("memory/staging/run-statistic-repair.md", markdown(
+            {"schema_version": "0.15", "kind": "candidate"}, "artificial quality repair header fixture"))
+        self.commit_fixtures()
+        before = self.snapshot()
+        self.assert_result("compatible", ["0.1", "0.15"], scanned=3, unknown=0)
+        from pdm.contracts import SUPPORTED_SCHEMA_VERSIONS
+        old_support = tuple(version for version in SUPPORTED_SCHEMA_VERSIONS if version != "0.15")
+        with patch("pdm.compatibility.SUPPORTED_SCHEMA_VERSIONS", old_support):
+            self.assert_error("incompatible_memory_schema", lambda: capture(
+                self.repo, {**self.payload, "source_key": "repair-old-writer-must-stop"}))
         self.assertEqual(self.snapshot(), before)
         self.assertEqual((self.repo / first["path"]).read_bytes(), before["files"][first["path"]])
 

@@ -40,7 +40,7 @@ class ProductionRevisionFeedbackTests(unittest.TestCase):
             response["output"] = add_quality(response["output"], payload["quality_context"])
             response["output"]["reuse_refs"] = []
         else:
-            response["output"] = passed_review(payload["required_checks"])
+            response["output"] = passed_review(payload["required_checks"], payload.get("skill_bundle"))
             reject = getattr(self, "reject_reviews", 1)
             if reject:
                 self.reject_reviews = reject - 1

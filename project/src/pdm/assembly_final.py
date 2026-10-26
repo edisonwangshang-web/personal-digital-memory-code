@@ -26,9 +26,15 @@ def _fail(code="invalid_final_assembly"):
 
 def extraction_invocations(candidate):
     if "assembly" not in candidate:
-        return {candidate["extraction"]["invocation_id"]}
+        found = {candidate["extraction"]["invocation_id"]}
+        if "quality_repair_context" in candidate:
+            previous = candidate["revision_context"]
+            found.update(extraction_invocations(previous["candidate"]))
+            found.add(previous["review_record"]["call"]["invocation_id"])
+        return found
     return ({item["extraction"]["invocation_id"] for item in candidate["assembly"]["inputs"]}
-            | {call["invocation_id"] for item in candidate["assembly"]["inputs"] for call in item["review_calls"]})
+            | {call["invocation_id"] for item in candidate["assembly"]["inputs"] for call in item["review_calls"]}
+            | {invocation for item in candidate["assembly"]["inputs"] for invocation in item.get("generation_invocations", [])})
 
 
 def review_projection(repo, plan):
@@ -109,6 +115,8 @@ def _material(git, plan, draft_runs, run_id, base_head, created_at, *, historica
                        "review": {"path": _run_path(source_run, "review"), "commit_sha": review_commit,
                                   "sha256": _hash(_committed(git, _run_path(source_run, "review")))},
                        "extraction": deepcopy(candidate["extraction"]), "review_calls": review_calls})
+        if "quality_repair_context" in candidate:
+            inputs[-1]["generation_invocations"] = sorted(extraction_invocations(candidate))
         prior.append({"run_id": source_run, "binding": candidate["binding"], "objects": deepcopy(candidate["objects"]),
                       "review_id": review["review_id"], "batch_context": deepcopy(candidate["batch_context"])})
         for obj in candidate["objects"]:

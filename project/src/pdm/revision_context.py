@@ -159,6 +159,8 @@ def _model_projection(context):
         if "checks" in record["output"]:
             output["checks"] = [deepcopy(check) for check in record["output"]["checks"]
                                 if check["result"] in {"needs_revision", "needs_confirmation"}]
+        if "repair_scope" in record["output"]:
+            output["repair_scope"] = deepcopy(record["output"]["repair_scope"])
         projected["review_record"] = {key: deepcopy(record[key]) for key in
             ("run_id", "review_id", "binding", "stage_path", "stage_commit", "stage_sha256")}
         projected["review_record"]["output"] = output

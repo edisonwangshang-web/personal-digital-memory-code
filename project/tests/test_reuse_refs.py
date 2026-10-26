@@ -265,7 +265,7 @@ class ReuseReferencePublicationTests(unittest.TestCase):
                     "quality": add_quality(shadow, payload["quality_context"])["quality"]}
             self.extract_outputs.append(copy.deepcopy(output))
         else:
-            output = passed_review(payload["required_checks"])
+            output = passed_review(payload["required_checks"], payload.get("skill_bundle"))
         return {"output": output, "model": "artificial-fixture", "usage": None, "elapsed_seconds": 0.01,
                 "invocation_id": "model-" + f"{len(self.calls):032x}"}
 

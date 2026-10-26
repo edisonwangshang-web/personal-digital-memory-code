@@ -140,7 +140,7 @@ class QualityCompletedExtractionTests(unittest.TestCase):
                 output["wikis"] = [{**output.pop("wiki"), "record_ids": [record["id"]]}]
         else:
             self.review_requests.append(deepcopy(payload))
-            output = passed_review(payload["required_checks"])
+            output = passed_review(payload["required_checks"], payload.get("skill_bundle"))
             if self.phase == "reject":
                 output["verdict"] = "needs_revision"
                 output["checks"][0]["result"] = "needs_revision"

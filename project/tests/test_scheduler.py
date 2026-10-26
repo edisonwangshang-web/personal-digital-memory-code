@@ -149,6 +149,35 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(reserved["data"]["reserved_calls"], 2)
         result_event = next(event for event in events if event["kind"] == "attempt_result")
         self.assertIsNone(result_event["data"]["usage"])
+
+    def test_new_schedule_uses_longer_default_for_each_model_call(self):
+        self.configure()
+        self.assertEqual(self.state()["config"]["timeout_seconds"], 900)
+        self.assertEqual(self.run_tick()["status"], "completed")
+        self.assertEqual(self.timeouts, [900, 900])
+
+    def test_explicit_long_timeout_is_not_capped_by_wrapper_default(self):
+        self.configure(timeout_seconds=1800, lease_seconds=3600)
+        self.assertEqual(self.run_tick()["status"], "completed")
+        self.assertEqual(self.timeouts, [1800, 1800])
+
+    def test_reopening_existing_schedule_keeps_its_frozen_timeout(self):
+        self.configure(timeout_seconds=120)
+        before = git(self.repo, "rev-parse", "HEAD")
+        result = configure_schedule(self.repo, self.config(), now=self.now)
+        self.assertEqual(result["status"], "already_configured")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertEqual(self.state()["config"]["timeout_seconds"], 120)
+        self.assertEqual(self.run_tick()["status"], "completed")
+        self.assertEqual(self.timeouts, [120, 120])
+
+    def test_invalid_schedule_timeouts_do_not_write_configuration(self):
+        before = git(self.repo, "rev-parse", "HEAD")
+        for timeout in (0, 1801, True, None, 1.5):
+            with self.subTest(timeout=timeout):
+                self.error("invalid_schedule_budget", lambda: self.configure(timeout_seconds=timeout))
+                self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+                self.assertEqual(self.roles, [])
         self.assertEqual(git(self.repo, "status", "--porcelain"), "")
 
     def test_late_historical_input_and_changed_source_version_are_not_date_filtered(self):

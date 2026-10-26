@@ -42,6 +42,69 @@ class BudgetCliTests(unittest.TestCase):
     def binding(self, operation="isolated-operation"):
         return ["--budget-ledger", str(self.ledger), "--operation-id", operation]
 
+    def test_processing_cli_timeout_reaches_the_actual_transport(self):
+        self.create(limit=8)
+        seen = []
+        def transport(role, payload, timeout, *, on_start):
+            on_start("model-" + "a" * 32)
+            seen.append(timeout)
+            return {"invocation_id": "model-" + "a" * 32}
+        def process(repo, paths, head, *, model_call, **options):
+            model_call.reserve_calls(2)
+            model_call("extract", {})
+            model_call("review", {})
+            return {"status": "passed"}
+        def production(repo, queue, *, model_call, **options):
+            model_call.for_operation(model_call.operation_id + ":child")("review", {})
+            return {"status": "published"}
+        cases = ((["process", "--source", "selected"], "pdm.pipeline.process_sources", process, 900),
+                 (["process", "--source", "selected", "--model-timeout", "1800"], "pdm.pipeline.process_sources", process, 1800),
+                 (["process", "--source", "selected", "--revision-from-run", "run-" + "a" * 32],
+                  "pdm.pipeline.process_sources", process, 900),
+                 (["production", "run", "--id", "selected", "--local-only"], "pdm.production.run_production", production, 900),
+                 (["production", "run", "--id", "selected", "--local-only", "--model-timeout", "601"],
+                  "pdm.production.run_production", production, 601))
+        for index, (arguments, target, entry, expected) in enumerate(cases):
+            before = len(seen)
+            with self.subTest(arguments=arguments), patch(target, side_effect=entry), \
+                    patch("pdm.cli._selected_skills", return_value=None), \
+                    patch("pdm.model_calls._call_transport", side_effect=transport):
+                code, _, errors = self.invoke([*arguments, "--repo", str(self.repo), *self.binding(f"timeout-{index}")])
+            self.assertEqual(code, 0, errors)
+            self.assertTrue(seen[before:])
+            self.assertEqual(set(seen[before:]), {expected})
+
+    def test_invalid_cli_timeout_is_rejected_before_opening_the_ledger(self):
+        self.create()
+        before = self.ledger.read_bytes()
+        for timeout in ("0", "1801", "-1"):
+            for arguments in (["process", "--source", "selected"],
+                              ["production", "run", "--id", "selected"]):
+                with self.subTest(arguments=arguments, timeout=timeout), \
+                        patch("pdm.budget.BudgetLedger", side_effect=AssertionError("ledger must not be opened")), \
+                        patch("pdm.model_calls._call_transport", side_effect=AssertionError("transport")):
+                    code, _, errors = self.invoke([*arguments, "--repo", str(self.repo), *self.binding(),
+                                                  "--model-timeout", timeout])
+                self.assertEqual((code, json.loads(errors)["error"]), (2, "invalid_timeout"))
+                self.assertEqual(self.ledger.read_bytes(), before)
+
+    def test_dedicated_recovery_keeps_its_default_and_accepts_an_explicit_timeout(self):
+        from pdm.cli import _model_budget, parser
+        self.create()
+        before = self.ledger.read_bytes()
+        entries = (["resume-unstarted-revision", "--run", "run-" + "a" * 32, "--source", "selected",
+                    "--reservation", "reservation.json", "--expected-reservation-sha256", "sha256-" + "a" * 64],
+                   ["revalidate-completed-extraction", "--run", "run-" + "a" * 32, "--source", "selected",
+                    "--attestation", "attestation.json", "--expected-attestation-sha256", "sha256-" + "a" * 64,
+                    "--original-payload", "payload.json", "--response", "response.json",
+                    "--original-resume-context", "resume.json"])
+        for entry in entries:
+            for extra, expected in (([], 120), (["--model-timeout", "900"], 900)):
+                with self.subTest(command=entry[0], extra=extra):
+                    args = parser().parse_args([*entry, "--repo", str(self.repo), *self.binding(), *extra])
+                    self.assertEqual(_model_budget(args).default_timeout, expected)
+                    self.assertEqual(self.ledger.read_bytes(), before)
+
     def assert_skill_binding(self, bundle):
         validate_skill_bundle(bundle)
         self.assertEqual(bundle, resolve_skill_refs())

@@ -59,7 +59,7 @@ class ProcessingPreflightTests(unittest.TestCase):
             output = add_quality({'objects': [record], 'wiki': {'id': 'artificial-preflight-topic',
                 'title': '人工主题', 'sources': [ref], 'body': record['body']}, 'reuse_refs': []}, payload['quality_context'])
         else:
-            output = passed_review(payload['required_checks'])
+            output = passed_review(payload['required_checks'], payload.get('skill_bundle'))
         return {'output': output, 'model': 'artificial-fixture', 'usage': None,
                 'elapsed_seconds': 0, 'invocation_id': 'model-' + str(len(self.roles)).zfill(32)}
 

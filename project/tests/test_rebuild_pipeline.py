@@ -37,7 +37,7 @@ class RebuildPipelineTests(unittest.TestCase):
             result["output"] = add_quality(result["output"], payload["quality_context"])
             result["output"]["reuse_refs"] = []
         else:
-            result["output"] = passed_review(payload["required_checks"])
+            result["output"] = passed_review(payload["required_checks"], payload.get("skill_bundle"))
         return result
 
     def fresh(self, *, model_call=None, **options):

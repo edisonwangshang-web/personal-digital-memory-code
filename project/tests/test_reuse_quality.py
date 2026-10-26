@@ -48,7 +48,7 @@ class ReuseQualityTests(unittest.TestCase):
         self.number += 1
         self.roles.append(role)
         if role == "review":
-            output = passed_review(payload["required_checks"])
+            output = passed_review(payload["required_checks"], payload.get("skill_bundle"))
             if self.verdict != "passed":
                 output["verdict"] = self.verdict
                 for check in output["checks"]:

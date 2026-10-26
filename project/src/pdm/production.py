@@ -44,14 +44,15 @@ class _GuardedModelCall(BudgetedModelCall):
     def __getattr__(self, name):
         return getattr(self._delegate, name)
 
-    def for_operation(self, operation_id):
-        return type(self)(self._delegate.for_operation(operation_id), self._repo,
+    def for_operation(self, operation_id, *, default_timeout=None):
+        return type(self)(self._delegate.for_operation(operation_id, default_timeout=default_timeout), self._repo,
                           self._queue_id, self._run_id, self._guard)
 
-    def __call__(self, role, payload, timeout=120):
+    def __call__(self, role, payload, timeout=None):
         self._guard(self._repo, "before_call", {"queue_id": self._queue_id,
                     "run_id": self._run_id, "operation_id": self.operation_id, "role": role})
-        return self._delegate(role, payload, timeout=timeout)
+        return (self._delegate(role, payload) if timeout is None
+                else self._delegate(role, payload, timeout=timeout))
 
 
 def _guarded(model_call, guard, repo, queue_id, run_id):
@@ -59,10 +60,11 @@ def _guarded(model_call, guard, repo, queue_id, run_id):
         return model_call
     if isinstance(model_call, BudgetedModelCall):
         return _GuardedModelCall(model_call, repo, queue_id, run_id, guard)
-    def invoke(role, payload, timeout=120):
+    def invoke(role, payload, timeout=None):
         guard(repo, "before_call", {"queue_id": queue_id, "run_id": run_id,
                                     "operation_id": None, "role": role})
-        return model_call(role, payload, timeout=timeout)
+        return (model_call(role, payload) if timeout is None
+                else model_call(role, payload, timeout=timeout))
     return invoke
 
 
@@ -271,9 +273,10 @@ def _feedback_enabled(bundle):
     """Only the new frozen contract changes a queue's retry semantics."""
     skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     return (isinstance(skills, dict)
-            and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
-                    for role, ref in (("extract", "knowledge-extract@10"),
-                                      ("review", "knowledge-review@8"))))
+            and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
+                        for role, ref in pair) for pair in (
+                    (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
+                    (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")))))
 
 
 def _revision_feedback(git, previous, state, projection, processing_paths, *, draft, merge_runs):
