@@ -1257,8 +1257,20 @@ def _use_decomposed_review(candidate, payload):
         return True
     if strategy != "auto":
         return False
-    from .model_calls import MAX_INPUT_BYTES
-    return _model_request_binding("review", _review_payload(candidate, payload))["bytes"] > MAX_INPUT_BYTES
+    from .model_calls import MAX_INPUT_BYTES, request_binding
+    from .skill_wire import SharedJSONError
+    try:
+        binding = request_binding("review", _review_payload(candidate, payload))
+    except SharedJSONError as error:
+        # The complete root may exceed the shared encoder's resource limit
+        # before its rendered size is known. Each existing Review unit still
+        # needs its own complete request and ordinary capacity checks.
+        if error.code == "shared_json_limit":
+            return True
+        _error("invalid_skill_request")
+    except (ValueError, TypeError, KeyError):
+        _error("invalid_skill_request")
+    return binding["bytes"] > MAX_INPUT_BYTES
 
 
 def _assert_fixed_current(git, candidate, sources, stage_bytes):
