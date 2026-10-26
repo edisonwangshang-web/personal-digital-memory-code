@@ -55,6 +55,8 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 合格只表示通过当前程序检查，随后仍须真实独立 Review、完整发布及读取验证。日期歧义或其他质量问题再次出现时按失败处理，不能覆盖原失败、放宽普通质量检查或直接发布。
 
+若原尝试仍为 `failed`／`quality_temporal_mismatch`，但同一run已通过V2形成完整可核候选、guard及真正 `needs_revision` Review，production可在核准同一重建回执、范围、批次与精确证明后，采用这份最新审核意见进入后续正常返工。原failure和failed counter保持，后续仍受原有四次上限及预约前完整预检约束；非V2、证明缺失、没有真实退回审核或unknown不能借此接续。
+
 <a id="candidate-storage-limits"></a>
 
 ### 候选历史存储与模型输入分开限额

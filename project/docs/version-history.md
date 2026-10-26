@@ -8,6 +8,8 @@
 
 增加显式 `quality-completed-extraction-revalidation-v2`，只对同一明确重建 generation 的原生已完成提取、`quality_temporal_mismatch` 且尚无候选／Review 的情况做零 extract 重验。操作者核定固定原始缓存和调用绑定，使用原回执、原来源、完整同轮反馈及当前校验版本，合格候选仍须真实独立 Review。旧 V1 继续仅接 `candidate_too_large`，默认恢复合同不改；候选0.12、guard0.13与调用计数边界保持。原 failure 只有调用摘要时不能倒称已有输出 SHA，原始失败、unknown和模型输出均保留。
 
+V2形成候选后，若真实Review要求修订，production仅对原 `failed`／`quality_temporal_mismatch` 且完整核验V2候选与该Review的同一重建任务采用最新反馈，继续正常返工。旧失败与counter不改，后续预检和有限尝试不跳过；不会把任意failed或unknown当作可续接审核。
+
 本批沿用人工触发与原加工阶段，不新增模型环节。准确 CI、真实重验／审核／发布／读取和私有恢复分别留证；本页不宣称业务通过或 M1 完成。字段与执行见[日期规范](data-conventions.md#skill-quality-contract)、[V2重验](data-conventions.md#quality-completed-recovery-v2)和[实现明细](implementation-details.md#quality-completed-recovery-v2-execution)。
 
 ## 历史：0.2.0.dev24

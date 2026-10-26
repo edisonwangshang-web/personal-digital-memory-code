@@ -283,11 +283,33 @@ def _revision_feedback(git, previous, state, projection, processing_paths, *, dr
     candidate/Review remains immutable feedback, while the new candidate must
     bind the new plan and independently pass its own publication proof.
     """
-    from .pipeline import _candidate_bindings, _committed, _load, _stage_path
+    from .pipeline import _candidate_bindings, _committed, _load, _run_path, _stage_path
+    from .quality_completed_extraction import CONTRACT_V2
     from .revision_context import build_revision_context
 
-    rejected = next((attempt for attempt in reversed(previous)
-                     if attempt["status"] == "needs_revision"), None)
+    rejected = None
+    for attempt in reversed(previous):
+        if attempt["status"] == "needs_revision":
+            rejected = attempt
+            break
+        # V2 keeps the original program failure and counter row immutable.
+        # Its later genuine Review is feedback without relabeling that row.
+        if attempt["status"] != "failed" or attempt.get("error") != "quality_temporal_mismatch":
+            continue
+        stage_path = _stage_path(attempt["run_id"])
+        if not git.path(stage_path).is_file():
+            continue
+        restored = _load(_committed(git, stage_path), "candidate")
+        if restored.get("revision_revalidation", {}).get("contract") != CONTRACT_V2:
+            continue
+        review_path = _run_path(attempt["run_id"], "review")
+        if not git.path(review_path).is_file():
+            _fail("queue_revision_context_mismatch")
+        review = _load(_committed(git, review_path), "review")
+        if review.get("output", {}).get("verdict") != "needs_revision":
+            _fail("queue_revision_context_mismatch")
+        rejected = attempt
+        break
     if rejected is None:
         return None
     if draft or state["request"].get("continuation_context") is not None:

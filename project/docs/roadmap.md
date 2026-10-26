@@ -12,6 +12,8 @@
 
 dev25修复通用中文日期核对，并增加同一重建generation中、已完成提取因日期校验失败的显式 V2 零 extract 重验。原始模型返回和失败保留，歧义、当前状态与完整独立审核门禁继续生效；默认V1边界保持。准确CI及真实重验、审核、发布、读取和私有恢复分别取证，详见[V2合同](data-conventions.md#quality-completed-recovery-v2)。
 
+同轮V2候选实际审核退回后，完整核验对应候选及Review才能从原failed记录采用最新反馈继续正常返工；原failure与计数保留，仍执行完整预检及有限尝试。该接续能力不代表新CI或真实返工／发布已经通过。
+
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 
 公开工程已核对的快照为 [`9ec7ccd31631d45345f609b5fe6ff78174d22420`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/9ec7ccd31631d45345f609b5fe6ff78174d22420)，其 [CI 40178015107](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40178015107) 八任务成功，Python 3.11／3.12 各 1023 项及基础检查通过。该结果只属于这个提交，不能视为本页后续文档 HEAD 已通过。
