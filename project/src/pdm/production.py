@@ -34,6 +34,15 @@ def _fail(code):
     raise CaptureError(code, "批次生产暂停；保留原文、候选和调用记录，未自动重发未知请求")
 
 
+def _attempt_result(result, number):
+    # Keep the actual fourth verdict in the durable attempt row. The queue is
+    # terminal immediately, even when this worker slice ends at that verdict.
+    if type(number) is int and number == 4 and result["status"] in {"failed", "needs_revision"}:
+        return {**result, "status": "attempt_limit", "attempts": 4,
+                "last_attempt_status": result["status"], "next_action": "operator_repair"}
+    return result
+
+
 class _GuardedModelCall(BudgetedModelCall):
     """Keep the real audit adapter while checking the gate before every start."""
 
@@ -418,6 +427,8 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     # Registration takes its own short CAS lock. Recover outside the attempt
     # transaction, without starting another extraction or Review invocation.
     previous = _read(git, path, "production_attempts")
+    if previous is not None and previous.get("identity") != identity:
+        _fail("queue_attempt_identity_conflict")
     registrations, resumptions = {}, {}
     for old in previous.get("attempts", []) if previous else []:
         if old["status"] not in {"reserved", "unknown", "partial", "needs_confirmation", "registration_required"}:
@@ -440,6 +451,21 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                         repo, old["run_id"], allowed_source_paths=state["request"]["allowed_source_paths"],
                         model_call=delegate)
                     break
+            elif assembly and not git.path(stage).is_file():
+                from .assembly_final import can_resume_unstaged_assembly, finalize_drafts
+                number = old.get("attempt")
+                if (type(number) is not int or not 1 <= number <= 4
+                        or old.get("operation_id") != "batch:" + work_key + ":" + str(number)
+                        or old.get("run_id") != "run-" + _hash({"work": work_key, "attempt": number})[:32]):
+                    _fail("queue_attempt_identity_conflict")
+                delegate = (model_call.for_operation(old["operation_id"])
+                            if isinstance(model_call, BudgetedModelCall) else model_call)
+                delegate = _guarded(delegate, execution_guard, repo, state["queue_id"], old["run_id"])
+                if can_resume_unstaged_assembly(repo, plan, merge_runs, old["run_id"],
+                                               model_call=delegate, skill_bundle=skill_bundle):
+                    resumptions[old["run_id"]] = finalize_drafts(
+                        repo, plan, merge_runs, old["run_id"], model_call=delegate)
+                    break
     with git.lock():
         head = git.check()
         attempts = _read(git, path, "production_attempts") or {"identity": identity, "attempts": []}
@@ -460,7 +486,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                 restored = resumptions[old["run_id"]]
                 old.update(status=restored["status"], error=restored.get("error"))
                 head = _save(git, path, attempts, "production_attempts", head)
-                return {**deepcopy(old), **restored}
+                return _attempt_result({**deepcopy(old), **restored}, old["attempt"])
             if old["status"] == "passed":
                 candidate, _, _ = _read_reviewed(git, old["run_id"], historical=True)
                 if reusable(candidate):
@@ -492,7 +518,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     continue
                 # A timeout, missing result or uncertain launch is never a free retry.
                 return {"status": "unknown", "run_id": old["run_id"], "next_action": "reconcile"}
-            if old["status"] in {"needs_confirmation", "registration_required", "blocked_capacity", "blocked_context"}:
+            if old["status"] in {"needs_confirmation", "registration_required", "blocked_capacity", "blocked_context", "attempt_limit"}:
                 return deepcopy(old)
         if len(attempts["attempts"]) >= 4:
             return {"status": "attempt_limit", "attempts": 4, "next_action": "operator_repair"}
@@ -639,7 +665,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             _fail("queue_attempt_changed")
         stored["attempts"][-1].update(status=status, error=result.get("error"))
         _save(git, path, stored, "production_attempts", head)
-    return {**result, "status": status, "attempt": number}
+    return _attempt_result({**result, "status": status, "attempt": number}, number)
 
 
 def run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=False, execution_guard=None):

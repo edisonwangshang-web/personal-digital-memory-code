@@ -2,7 +2,7 @@
 
 [返回技术方案](../technical-plan.md) · [执行步骤与恢复](../implementation-details.md) · [数据规范](../data-conventions.md)
 
-本层负责采集、编排、程序校验、证据读取和条件发布，模型理解与审核，程序控制正式写入。本批为dev27开发版，默认Skill11/9，仅dev验证、不更新master；实现与验证见[Roadmap](../roadmap.md)。单次超时配置及纯绑定物化沿现有阶段执行，具体见[数据规范](../data-conventions.md#metadata-only-statistic-repair)；真实定时、持久恢复及第二模型仍待验收。
+本层负责采集、编排、程序校验、证据读取和条件发布，模型理解与审核，程序控制正式写入。本批为dev28开发版，默认Skill11/9，仅dev验证、不更新master；本批补纯程序组装保存候选前的零调用恢复，真正已启动模型仍须对账，见[恢复合同](../data-conventions.md#assembly-zero-call-resume)。实现与验证见[Roadmap](../roadmap.md)。单次超时配置及纯绑定物化沿现有阶段执行，具体见[数据规范](../data-conventions.md#metadata-only-statistic-repair)；真实定时、持久恢复及第二模型仍待验收。
 
 ## 本层技术架构
 

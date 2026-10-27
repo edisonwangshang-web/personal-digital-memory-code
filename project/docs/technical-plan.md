@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev27`开发版，默认Skill11/9、普通质量链0.15；能力已实现，隔离样例定向回归和标准CLI人工全链通过；准确dev CI与新一轮获准真实验收仍待核。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev28`开发版，默认Skill11/9、普通质量链0.15及assembly0.14保持；本批纯程序组装中断恢复回归与准确dev CI待核，真实全链另行取得证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
 
 ## 当前实现与双仓边界
 

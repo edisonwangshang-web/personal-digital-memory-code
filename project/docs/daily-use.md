@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文补充`0.2.0.dev27`开发批次的操作接口，默认Skill11/9、普通quality0.15；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
+本文补充`0.2.0.dev28`开发批次的操作接口，默认Skill11/9、普通quality0.15；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -96,7 +96,9 @@ python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 
 普通多批的完整原文合并超容量时，程序可自动把已核完整草稿原样组成0.14最终候选，再真正独立分解审核；不增加extract调用或新的CLI参数。当前只接无旧关联、答复或重建上下文的普通草稿；对象、统计口径冲突或必要审核仍超容量时保留具体阻塞。若该原样最终候选审核要求实质修订且仍不能承载，后续`assembly_revision_required`表示需要处理，不能反复运行同一联合期待自动修好。完整边界见[数据规范](data-conventions.md#verbatim-draft-finalization)。
 
-所有必要独立审核通过后才正式发布。已完成节点按原身份复验，未知先对账；首次执行后最多三次失败重试，跨日、重启或改队列名不清零。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
+所有必要独立审核通过后才正式发布。已完成节点按原身份复验；首次失败后最多再安全重试3次，总attempt最多4，第4次已知失败立即以`attempt_limit`表示本次处理失败并停止。必需审核子单元耗尽时父工作同样停止，重开不新增extract或审核调用；跨日、重启或改队列名不清零。第一次真实unknown就停止对账，不自动重发；第4次通过或待确认分别正常后续或等待，不误判失败，见[有限重试合同](data-conventions.md#bounded-processing-retries)。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
+
+纯程序最终组装在started／engine已提交、staging尚未写入时中断，继续同一`production run`会先核原预约、原审计身份、root无调用且原审核子单元无状态，合格后按原run／attempt原样组装，再执行完整独立Review并正常计次。不要删除旧预约或新建队列来恢复；真正已启动或结果未知的模型调用不适用，仍先对账。具体条件见[组装零调用恢复](data-conventions.md#assembly-zero-call-resume)。
 
 Review9若明确只缺统计绑定，正常返工会在同一extract中要求精确`statistic_bindings`，程序补固定统计与根引用，原正文和关系保持后重新独立审核；没有新的补绑CLI命令或额外模型阶段。混合／正文问题仍需完整返工，不能手改模型返回或把旧证明补成通过。具体边界见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)。新真实全链另核现有状态和明确意图，不把零调用复验当成新加工。
 

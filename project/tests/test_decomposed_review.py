@@ -105,7 +105,7 @@ class DecomposedReviewTests(unittest.TestCase):
         adapter = BudgetedModelCall(self.ledger, "fixture", invalid)
         for number in range(4):
             result = self.run_review(adapter)
-            self.assertEqual(result["status"], "partial", result)
+            self.assertEqual(result["status"], "partial" if number < 3 else "attempt_limit", result)
             self.assertEqual(result["attempted_calls"], 1)
             counter = self.counters()[0]
             self.assertEqual(len(counter["attempts"]), number + 1)

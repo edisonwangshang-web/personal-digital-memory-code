@@ -6,9 +6,13 @@
 
 项目保存明确提交的原文，经模型提取组织、自动分类、独立 Review 后形成可追溯知识，供限定范围问答和后续模型读取。长期分为知识库、分析、计划与复盘四个阶段，先完成可持续维护的知识库。三个稳定领域为 `health`、`career`、`learning`，同一事实不为分类复制多份。
 
-本批开发版为`0.2.0.dev27`，默认Skill11/9、普通quality0.15，基础提示规则extract v14／review v10／answer v8保持。**本批只在dev开发验证，不合入或推送master。** 隔离样例定向回归和标准CLI人工全链已通过；准确dev CI与新一轮获准真实验证待核，不用上一批成功代替新结果。
+本批开发版为`0.2.0.dev28`，默认Skill11/9、普通quality0.15、assembly0.14及基础提示规则extract v14／review v10／answer v8保持。**本批只在dev开发验证，不合入或推送master。** 本批相关定向回归已通过，准确dev CI待核，不用上一批成功代替新结果，真实全链与M1整体另行验收。
 
-本批最小目标是调用等待时间与纯统计绑定返工：普通CLI新调用默认900秒、可设1—1800秒，旧冻结日程不迁移且实际传参，unknown不重发；Review9确认纯缺失后，原revision extract11仅补statistic_bindings，程序以固定统计与根引用物化，旧正文／关系／quality条目保持，完整新Review照常。内容或混合问题走原全稿。旧10/8及assembly0.14原证明不改，字段及边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。
+本批最小目标是纯程序组装保存候选前的中断恢复：只对原started／engine精确绑定、原pool／operation及所有分解审核子调用均未启动的预约，用原run和原attempt继续组装，再执行完整独立Review；没有原账本、候选曾存在或真实模型已启动／结果未知均不适用。契约和反例见[数据规范](data-conventions.md#assembly-zero-call-resume)与[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。没有为真实超时结果新增查询、弃用或重发入口，接手续跑前必须核真实状态，不换身份或清次数。
+
+失败次数口径为首次加失败后最多3次安全重试，总attempt最多4。第4次已知失败或必需审核子单元耗尽，立即用既有`attempt_limit`表示处理失败并停止，重开父工作不再extract；第一次真实unknown就停止对账。第4次通过或待确认仍按原语义处理，不因次数误判。契约见[有限重试](data-conventions.md#bounded-processing-retries)，本批测试与准确CI另核。
+
+dev27沿用的等待时间与纯统计绑定返工仍有效：普通CLI新调用默认900秒、可设1—1800秒，旧冻结日程不迁移且实际传参，unknown不重发；Review9确认纯缺失后，原revision extract11仅补statistic_bindings，程序以固定统计与根引用物化，旧正文／关系／quality条目保持，完整新Review照常。内容或混合问题走原全稿。旧10/8及assembly0.14原证明不改，字段及边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。可配置等待不保证真实调用完成，增加等待时间不能让原unknown自动重试。
 
 本批修复多批容量回退、10/8草稿／答复反馈、读取重复Git I/O、调度退出码与控制写前容量。受限原样finalization使用0.14且没有新extract，最终仍独立分解审核；related、答复或重建大组及跨批实质修订不因此获得任意容量支持。普通10/8质量链0.12和历史Skill不迁移，现有成功业务链不全量重加工。准确工程CI与真实业务出口分别检查，见[M1交付核对](m1-delivery-readiness.md)。
 
@@ -30,7 +34,7 @@
 
 工程在公开 `dev` 开发，通过审查和准确提交的 CI 后，经 PR 交付 `master`。`master` 是稳定交付分支；初始化 `main` 不作为开发入口。远端默认展示分支设置存在管理权限限制，访问代码可直接使用 [dev](https://github.com/edisonwangshang-web/personal-digital-memory-code/tree/dev)／[master](https://github.com/edisonwangshang-web/personal-digital-memory-code/tree/master)。
 
-上一批dev26快照[`3ae9a76fb9f8e68816baf22efe4479766746544d`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/3ae9a76fb9f8e68816baf22efe4479766746544d)的[CI 40323174304](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40323174304)八任务成功，Python3.11／3.12各1234项及基础检查通过。它不证明本批dev27或后续HEAD通过，也不授权本批更新master。
+上一批dev27快照[`df9ceba78e1e9a722ec660350f0442a5e9a7d545`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/df9ceba78e1e9a722ec660350f0442a5e9a7d545)的[CI 40349119582](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40349119582)八任务成功，Python3.11／3.12各1273项及基础检查通过。它不证明本批dev28或后续HEAD通过，不替代真实业务，也不授权本批更新master。
 
 标准公开 Linux CI 是主路线，不需要 Mac 常开。离线工程检查使用 [check_local.py](../scripts/check_local.py)，见[本地检查](local-checks.md)；自托管／Mac 容器仅保留为可选未验收方案，公库没有专用注册或 Mac 启停工具。
 

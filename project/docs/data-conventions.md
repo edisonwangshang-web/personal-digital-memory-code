@@ -1,6 +1,26 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。本批为 `0.2.0.dev27` 开发版，新任务默认为 `knowledge-extract@11`／`knowledge-review@9`、普通质量链 `0.15`；能力已实现，隔离样例定向回归和标准CLI人工全链通过；准确dev CI与新一轮获准真实验收仍待核。本批仅在 `dev` 开发和验证，不合入或推送 `master`。基础规则、不可变 Skill、程序与资料版本分别绑定，M1 整体仍未验收。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。本批为 `0.2.0.dev28` 开发版，新任务默认为 `knowledge-extract@11`／`knowledge-review@9`、普通质量链 `0.15`、assembly `0.14`保持；本批相关定向回归已通过，准确dev CI待核，真实全链另行取得证据。本批仅在 `dev` 开发和验证，不合入或推送 `master`。基础规则、不可变 Skill、程序与资料版本分别绑定，M1 整体仍未验收。
+
+<a id="assembly-zero-call-resume"></a>
+
+## dev28：零调用的组装预约恢复
+
+此恢复仅适用于纯程序最终组装已提交`started.md`及同提交engine、尚未写入staging的中断。原started必须是完整schema `0.14`组装预约：同原run、`assembly_contract=verbatim-draft-finalization-v1`、`reserved_calls=0`及精确processing key、来源、时间和执行上下文。原engine必须绑定同一预约、原版本及资料父提交；完整plan、草稿stage／Review、Skill、来源和控制仍按原样组装合同逐项核验。
+
+生产队列必须使用原持久审计pool／operation，核root的calls为空，且真实审核布局对应的分解单元计数器或子operation尚未存在（包括仅有预约），该run目录仅有原started／engine，staging从未存在。只有这些证明齐全，才能以原run和原attempt继续确定性组装，不新增extract、attempt或恢复身份。`reserved_calls=0`只是必要条件，不能代替实际调用账本；无原账本或身份不匹配时不自动恢复。
+
+恢复后候选仍为`0.14`，完整新独立Review及group发布要求保持；程序重组本身没有模型调用，后续首次Review仍会正常计次。Skill、质量schema和来源／正式对象不迁移。已有staging按原候选路径恢复；候选删除、原证明变化、root已有任意调用记录或原审核子单元已有状态均不属于此路径，不能删除记录或更换queue／operation绕过。当前版本仍须满足原plan与规则约束，不承诺跨工程升级自动恢复旧计划。
+
+真正已启动的模型调用超时仍是未知结果，须有可核验终态及完整输出才能按适用合同恢复；没有结果就保留unknown及次数。此规则没有新增独立production队列的未知结果终结或重发权限，不把纯程序组装可重建当成模型结果可找回。
+
+<a id="bounded-processing-retries"></a>
+
+## dev28：失败重试到期即停止
+
+同一稳定工作首次处理失败后，最多再安全重试3次，总attempt最多4。前3次已知失败仅在满足原续接条件时推进；第4次仍为已知失败，当前切片立即返回既有`attempt_limit`，表示本次处理失败并停止，不再显示`continue`。任一必要分解审核单元耗尽其4次安全尝试时，父工作同样停止；重开相同队列不另起extract或新审核调用，也不靠换队列、日期或规则刷新次数。
+
+结果未知不是安全重试许可：第一次出现started／unknown且无可核验终态，就保留原状态及计数并停止要求对账。第4次通过仍正常进入后续审核／发布，待用户确认的`needs_confirmation`保持等待语义，不能仅因次数为4就判定失败。沿用既有状态、计数和schema，不增加处理阶段。
 
 <a id="metadata-only-statistic-repair"></a>
 

@@ -6,21 +6,26 @@
 
 ## 当前阶段
 
-本批开发版为`0.2.0.dev27`，默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链`0.15`；基础提示规则extract v14／review v10／answer v8保持。**本批仅在dev开发和验证，不合入或推送master；隔离定向回归和标准CLI人工全链通过，准确dev CI与新一轮获准真实验收仍待核。** M0已有历史验收，M1主要工程能力已有实现但整体未验收，M2—M4尚未完整交付。
+本批开发版为`0.2.0.dev28`，默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链`0.15`；基础提示规则extract v14／review v10／answer v8及assembly `0.14`保持。**本批仅在dev开发和验证，不合入或推送master；本批相关定向回归已通过，准确dev CI待核。** M0已有历史验收，M1主要工程能力已有实现但整体未验收，M2—M4尚未完整交付。
 
-本批只补两处实际问题：标准模型调用默认等待900秒、可设1—1800秒，旧冻结日程不迁移且执行传实际配置，unknown不重发；Review9确认纯统计绑定缺失时，在原返工extract11只补stat_id／record_id／body_evidence，程序取固定value与根引用，正文、关系和旧quality不改。内容或混合问题仍走原全稿，完整新独立Review及原稳定计数照常。字段和边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。
+本批补纯程序最终组装的中断恢复：`started.md`与engine已提交、staging尚未写入时，仅在严格核对原零调用预约、完整草稿与计划，以及原审计身份和所有子调用均未启动后，以原run和原attempt继续原样组装，再执行完整独立Review。实际已启动或结果未知的模型调用继续先对账，不能用此路径重发。契约与反例见[数据规范](data-conventions.md#assembly-zero-call-resume)和[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。不增加加工阶段，不改变Skill、schema、计数或两个master。
+
+同时收紧既有4次边界：首次失败后最多再安全重试3次，第4次仍失败立即以`attempt_limit`表示本次处理失败并停止；必需审核子单元耗尽时父工作也停止，重开不再extract。第一次真实unknown仍先停止对账；第4次通过和待确认保持各自语义。沿用原状态与计数，见[有限重试合同](data-conventions.md#bounded-processing-retries)。
 
 | 本批验证 | 当前要求与状态 |
 | --- | --- |
-| 人工工程全链 | 已用标准CLI、临时Git仓库及模型替身完成三领域人工链路和针对性回归，覆盖定点返工、完整审核发布读取、超时传递及unknown保留；不含真实模型外发 |
+| 中断恢复回归 | 用临时Git仓库和人工两批资料，在最终组装提交started／engine后、写staging前注入中断；核同run继续、不重复提取、不增加attempt，并检查真正已启动调用仍拦截；新8项回归已通过（人工替身），真实unknown不重发 |
+| 有限重试回归 | 新6项及已有分解审核12项通过：第4次已知失败同切片停止，耗尽父工作不重新提取；首次unknown停止，第4次通过／待确认保留 |
 | 准确dev CI | 对最终受测提交核完整双Python检查、产物和兼容性；尚无本批通过结论，旧提交CI不代替 |
 | 获准真实全链 | 另核资料范围、既有状态和独立验证意图，保留旧计数及unknown；人工通过不替代真实验收，代码升级不自动重跑成功资料 |
+
+dev27补标准模型调用默认等待900秒、可设1—1800秒，旧冻结日程不迁移且执行传实际配置；Review9确认纯统计绑定缺失时，沿原返工extract11补精确关联，程序取固定统计与根引用，正文、关系和旧quality不改，完整新独立Review仍必需。具体字段和边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。等待参数并不保证任意真实调用都能按时返回；没有可核验终态或完整输出的已启动调用仍保持unknown，不加长超时或换身份重发。
 
 dev26处理本轮架构审阅：普通多批的完整原文合并超容量时，限定范围内原样组成0.14最终候选，明确无新extract，再执行真正独立分解审核与原子发布；不凭不同来源推断独立。该回退不覆盖related、答复或重建上下文，语义冲突或实质跨批修订仍受容量边界约束，具体见[数据合同](data-conventions.md#verbatim-draft-finalization)。另补固定10/8草稿与答复续接反馈返工、单次验证内不可变Git读取复用、日程退出码和控制写前容量检查。answer v8补逐句引用自查；结构检查不替代语义验收。人工反例、准确提交CI和真实业务分别取证，不预先声明本批提交通过。
 
 模型输入按阶段取用：新普通Review用`current-draft-v1`提供当前稿、质量检查与对应证据，不重复携带返工／恢复历史；被退回稿带同marker时，返工取最新稿、未解决意见和必要证据。持久完整真实Review及proof保持，旧无marker投影和请求按原字节，不加合同、阶段、Skill或schema，见[数据规范](data-conventions.md#current-draft-review)。
 
-本批补显式清理后从原文重建：固定清理意图与范围，原子保存清理回执，仅从选定原文重新提取、分类、独立审核和发布；旧来源、证明、unknown及有限计数保留。当前入口限单批完整来源，准确工程 CI、实际新知识质量、发布读取与私有恢复仍须分别验证，不能把清理成功或新候选产生记为 M1 通过。契约与操作见[重建规范](data-conventions.md#explicit-knowledge-rebuild)及[日常使用](daily-use.md#explicit-knowledge-rebuild)。
+dev24引入显式清理后从原文重建：固定清理意图与范围，原子保存清理回执，仅从选定原文重新提取、分类、独立审核和发布；旧来源、证明、unknown及有限计数保留。当前入口限单批完整来源，准确工程 CI、实际新知识质量、发布读取与私有恢复仍须分别验证，不能把清理成功或新候选产生记为 M1 通过。契约与操作见[重建规范](data-conventions.md#explicit-knowledge-rebuild)及[日常使用](daily-use.md#explicit-knowledge-rebuild)。
 
 dev25修复通用中文日期核对，并增加同一重建generation中、已完成提取因日期校验失败的显式 V2 零 extract 重验。原始模型返回和失败保留，歧义、当前状态与完整独立审核门禁继续生效；默认V1边界保持。准确CI及真实重验、审核、发布、读取和私有恢复分别取证，详见[V2合同](data-conventions.md#quality-completed-recovery-v2)。
 
@@ -30,7 +35,7 @@ auto审核遇到共享编码器明确的容量上限时，转入已有分解审�
 
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 
-上一批已核对的dev26快照为[`3ae9a76fb9f8e68816baf22efe4479766746544d`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/3ae9a76fb9f8e68816baf22efe4479766746544d)，其[CI 40323174304](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40323174304)八任务成功，Python3.11／3.12各1234项及基础检查通过。它不证明本批dev27修改或后续HEAD已通过，也不授权本批更新master。
+上一批已核对的dev27快照为[`df9ceba78e1e9a722ec660350f0442a5e9a7d545`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/df9ceba78e1e9a722ec660350f0442a5e9a7d545)，其[CI 40349119582](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40349119582)八任务成功，Python3.11／3.12各1273项及基础检查通过；该批标准CLI人工全链也已取得工程证据。它不证明本批dev28修改或后续HEAD已通过，不替代真实业务验收，也不授权本批更新master。
 
 公库 `dev` 开发、`master` 稳定交付，公库成为代码、提示词、Skill、脚本、测试、CI、工作流定义及设计的唯一工程来源。真实加工从公库 checkout 加载，资料根指向私库，私库仅保留资料、审核、控制、私人验证、历史与导航。只读入口核对准确公开 CI 和代码／资料边界，不再复制或比对两份核心工程。定时与恢复工程归公库不代表目标 runner 已部署；本批代码、CI 与实际运行按各自证据记录。操作见[双仓库实际使用](dual-repository-operation.md)，CI 路线见[公开工程 CI](public-code-ci.md)。
 
@@ -85,7 +90,7 @@ M1 聚焦可日常维护的知识库。用户明确提交文章、对话、个�
 | M1-Q04 独立质量审核 | 对照原文、清单、统计、时间和候选逐项审核，完整证明绑定精确版本后由发布者消费 | 已实现；修订后重新审核，旧证明不放行新内容 |
 | M1-Q05 回归与业务验证 | 用人工反例检查加载、版本、分批、恢复、误算、漏项、误类和时态，再做限定真实业务验证 | 工程回归与真实业务证据分开；具体实跑记录保留私库 |
 
-本批新默认11/9继续使用共享质量和语境规范，普通质量链为`0.15`。旧10/8的`0.12`、9/7的`0.11`、更早`0.10`及assembly`0.14`按原证明核验；来源`0.1`、正式对象`0.2`、group`0.6`保持，不自动迁移旧资料。新合同已实现且隔离样例回归通过，准确dev CI与新一轮获准真实质量仍待核。
+现行默认11/9继续使用共享质量和语境规范，普通质量链为`0.15`。旧10/8的`0.12`、9/7的`0.11`、更早`0.10`及assembly`0.14`按原证明核验；来源`0.1`、正式对象`0.2`、group`0.6`保持，不自动迁移旧资料。11/9合同的dev27固定工程证据见上文；本批组装恢复与准确提交CI另核，真实质量仍须独立验收。
 
 普通质量返工和分解恢复沿原规则继续；两个历史 `0.9` 人工 operator 入口不接收新质量链，缺少适用证明时停止。完整技术职责、字段与用例分别见[技术方案](technical-plan.md)、[数据规范](data-conventions.md)与[场景验收](scenarios-and-acceptance.md)。
 

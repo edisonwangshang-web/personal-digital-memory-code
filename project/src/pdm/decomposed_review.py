@@ -635,7 +635,9 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                 _write(git, counter_path, counter, "decomposed_review_attempts", mutable=True)
                 if not isinstance(error, Exception):
                     raise
-                return {"status": "partial" if known else "unknown", "proof": _proof(plan, nodes, "partial" if known else "unknown"),
+                status = ("attempt_limit" if known and len(counter["attempts"]) >= 4
+                          else "partial" if known else "unknown")
+                return {"status": status, "proof": _proof(plan, nodes, status),
                         "attempted_calls": calls + actual, "head": git.head(), "error": retry["error"]}
             calls += child_adapter.started_count - before if child_adapter is not None else 1
             saved = {"run_id": candidate["run_id"], "plan_id": plan["plan_id"], "unit_id": unit["unit_id"],

@@ -212,9 +212,66 @@ def preflight_assembly(repo, plan, draft_runs, run_id):
     return {"status": "ready", "model_calls": 0, "attempted_calls": 0}
 
 
+def _unstarted_assembly(git, plan, draft_runs, run_id, model_call):
+    """Prove that one original pure-program reservation never reached a model.
+
+    A missing working-tree stage is insufficient: an earlier stage, Review
+    counter or audit invocation must not be hidden by deletion or a new worker.
+    The queue supplies its original operation on its already-bound audit pool.
+    """
+    from .pipeline import (_budget_adapter, _candidate_bindings, _candidate_payload, _committed,
+                           _load, _run_path, _stage_path)
+    from .engine_provenance import read_reservation
+    from .decomposed_review import _layout, _untouched_plan
+
+    started_path, stage_path = _run_path(run_id, "started"), _stage_path(run_id)
+    if not git.path(started_path).is_file():
+        return None
+    head = git.check()
+    if git.text("log", "--full-history", "--format=%H", head, "--", stage_path):
+        _fail("assembly_stage_changed")
+    started_bytes = _committed(git, started_path)
+    started = _load(started_bytes, "processing_attempt", SCHEMA)
+    candidate, sources = _material(git, plan, draft_runs, run_id, head, started.get("started_at"), historical=False)
+    expected = {"run_id": run_id, "processing_key": candidate["processing_key"], "execution_context": None,
+                "source_paths": list(plan["source_paths"]), "related_runs": [], "reserved_calls": 0,
+                "started_at": candidate["created_at"], "assembly_contract": CONTRACT}
+    if (started != expected or not isinstance(started.get("started_at"), str) or not started["started_at"]
+            or set(git.text("ls-tree", "-r", "--name-only", head, "--",
+                            f"memory/runs/processes/{run_id}/").splitlines())
+            != {started_path, _run_path(run_id, "engine")}):
+        _fail("assembly_reservation_changed")
+    engine = read_reservation(git, run_id)
+    if engine is None or engine["versions"] != candidate["versions"]:
+        _fail("assembly_engine_changed")
+    adapter = _budget_adapter(model_call)
+    if adapter is None:
+        return None
+    operation = adapter.operation_state()
+    if operation is not None and operation["calls"]:
+        return None
+    payload = _candidate_payload(git, candidate, sources)
+    units, _ = _layout(candidate, payload)
+    untouched = {"run_id": run_id, "units": units, "source_bindings": _candidate_bindings(candidate),
+                 "inventory": [{"path": obj["path"], "id": obj["metadata"]["id"]}
+                               for obj in sorted(candidate["objects"], key=lambda item: item["path"])]}
+    if not _untouched_plan(git, untouched, adapter):
+        return None
+    return candidate, sources, started_bytes
+
+
+def can_resume_unstaged_assembly(repo, plan, draft_runs, run_id, *, model_call, skill_bundle):
+    """Check the original reservation without writing a stage or audit entry."""
+    git = PipelineGit(repo)
+    with git.lock():
+        git.recover()
+        restored = _unstarted_assembly(git, plan, draft_runs, run_id, model_call)
+        return restored is not None and restored[0].get("skill_bundle") == skill_bundle
+
+
 def finalize_drafts(repo, plan, draft_runs, run_id, *, model_call):
     """Preserve an exact assembled candidate; only real Review calls follow."""
-    from .pipeline import (_candidate_binding, _candidate_payload, _committed, _document, _hash, _load,
+    from .pipeline import (_candidate_binding, _candidate_payload, _document, _hash,
                            _persist_review, _run_path, _stage_path,
                            _assert_fixed_current, resume_decomposed_processing)
     from .engine_provenance import reservation_file
@@ -225,17 +282,16 @@ def finalize_drafts(repo, plan, draft_runs, run_id, *, model_call):
     with git.lock():
         git.recover()
         head = git.check()
-        candidate, sources = _material(git, plan, draft_runs, run_id, head, _timestamp(), historical=False)
         started_path = _run_path(run_id, "started")
         if git.path(started_path).is_file():
-            # A pure-program assembly interrupted before its stage is safe to
-            # repeat, with the same immutable reservation and no model replay.
-            started_bytes = _committed(git, started_path)
-            started = _load(started_bytes, "processing_attempt", SCHEMA)
-            if started.get("processing_key") != candidate["processing_key"]:
-                _fail("assembly_reservation_changed")
-            candidate, sources = _material(git, plan, draft_runs, run_id, head, started["started_at"], historical=False)
+            restored = _unstarted_assembly(git, plan, draft_runs, run_id, model_call)
+            if restored is None:
+                return {"status": "unknown", "run_id": run_id, "head": head,
+                        "error": "assembly_outcome_unknown", "attempted_calls": 0,
+                        "model_calls": 0, "extract_calls": 0}
+            candidate, sources, started_bytes = restored
         else:
+            candidate, sources = _material(git, plan, draft_runs, run_id, head, _timestamp(), historical=False)
             started = {"run_id": run_id, "processing_key": candidate["processing_key"], "execution_context": None,
                        "source_paths": list(plan["source_paths"]), "related_runs": [], "reserved_calls": 0,
                        "started_at": candidate["created_at"], "assembly_contract": CONTRACT}

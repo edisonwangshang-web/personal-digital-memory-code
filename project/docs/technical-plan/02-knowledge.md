@@ -4,7 +4,7 @@
 
 ## 当前范围
 
-本层负责理解、归类、审核和回答，第一版聚焦知识库。本批开发版`0.2.0.dev27`已实现新默认`knowledge-extract@11`／`knowledge-review@9`，继续引用共同质量规范和`knowledge-context-v1`，通用于三个领域。隔离定向回归及标准CLI人工全链已通过，准确dev CI和新一轮获准真实验收仍待核，状态见Roadmap。本批仅dev开发验证，不合入或推送master；模型输出仍交第三层保存或发布。
+本层负责理解、归类、审核和回答，第一版聚焦知识库。本批开发版`0.2.0.dev28`沿用默认`knowledge-extract@11`／`knowledge-review@9`，继续引用共同质量规范和`knowledge-context-v1`，通用于三个领域。本批纯程序组装中断恢复回归与准确dev CI待核；既有工程检查不替代真实全链，状态见Roadmap。本批仅dev开发验证，不合入或推送master；模型输出仍交第三层保存或发布。
 
 人工触发后的受控分类加工、独立审核、完整 proof 发布及限定读取已有工程实现；current 已支持按正式 record／topic 路径选择，主题自动带上精确版本的 record 依赖，`compact_sources` 可去掉重复原文副本。程序先核对发布、来源、控制和版本，再把必要证据交给模型；选择齐全与是否读遍全部资料分别报告。读取不改变原文、正式知识或来源权限，命令见[日常使用](../daily-use.md#selected-knowledge-reading)。
 

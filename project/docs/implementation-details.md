@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。开发版`0.2.0.dev27`已实现本批修复，主路径仍为 **source → staging → record／topic**。分类及质量检查嵌入原提取／独立Review，不增加阶段。隔离定向回归和标准CLI人工全链已通过，准确dev CI与新一轮获准真实验收待核，状态见Roadmap。本批仅dev开发验证，不合入或推送master。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。本批开发版为`0.2.0.dev28`，主路径仍为 **source → staging → record／topic**。分类及质量检查嵌入原提取／独立Review，不增加阶段。本批纯程序组装中断恢复回归与准确dev CI待核，真实全链与M1整体另行验收，状态见Roadmap。本批仅dev开发验证，不合入或推送master。
 
 新默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
 
@@ -15,11 +15,21 @@
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
 
+## dev28：纯程序组装在保存候选前中断
+
+最终组装已提交`started.md`及同提交engine、但尚未写入staging时，生产队列先核原预约确属`verbatim-draft-finalization-v1`且`reserved_calls=0`，核原run、原attempt、计划、完整草稿、Skill、来源及控制不变。再以原审计pool和operation核root的calls为空、真实审核布局对应的子单元计数器及operation均未存在（包括仅预约），该run目录仅原started／engine且候选从未存在，才以原run重新进入确定性组装。没有原持久账本的调用者不能仅凭`reserved_calls=0`自动恢复。
+
+恢复保留原started／engine和attempt身份，不重新提取或刷新次数；原样候选仍需完整object／coverage／global独立Review及group发布检查，后续Review正常调用并计次。已有staging继续既有候选恢复路径。root已有任意调用记录、子单元已有状态，来源／计划／证明变化，或曾经有候选而当前缺失，都不能通过此零调用路径。当前版本仍须满足原plan绑定，不保证跨工程升级自动恢复。完整契约见[数据规范](data-conventions.md#assembly-zero-call-resume)，人工中断步骤见[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。
+
+实际模型超时且没有完整可核验返回时仍保持unknown；本修复不查询、终结或重发该调用，也没有为独立production队列新增“确认弃用未知结果后重试”的入口。
+
+有限处理仍是首次加失败后最多3次安全重试，总attempt最多4。第4次已知失败在当前切片立即以`attempt_limit`停止；必需分解审核单元耗尽时父工作也停止，重开不会另起extract。第一次真实unknown就先停止对账；第4次通过或待确认分别保持正常后续与等待语义，不按次数误判。详见[有限重试合同](data-conventions.md#bounded-processing-retries)。
+
 ## dev27：等待时间与纯绑定返工
 
 新标准CLI单次模型调用默认900秒，`--model-timeout`可设1—1800秒，并实际传入子调用；专用历史恢复入口默认120秒保持可显式覆盖。production沿本次worker参数推进，不改变queue身份；schedule使用原冻结`timeout_seconds`，旧值不迁移。启动后超时仍先对账，不以更长等待或新operation重发unknown，详见[超时合同](data-conventions.md#model-call-timeout)。
 
-收到Review9的真实`needs_revision`后，先核`repair_scope`及完整旧证明。纯`statistic_bindings`且检查、目标pair和固定范围全部满足时，同一个revision extract11只取`{statistic_bindings:[{stat_id,record_id,body_evidence}]}`；程序从固定统计和原文物化value／根引用，其他正文、关系及旧quality保持。raw patch与完整输出分别绑定，完整新Review后才允许发布。内容或混合问题走原全稿，错误或歧义不能猜，原稳定次数及unknown保持。字段与拒绝条件见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)，本批隔离定向回归和标准CLI人工全链通过，准确dev CI与新一轮获准真实验收仍待核。
+收到Review9的真实`needs_revision`后，先核`repair_scope`及完整旧证明。纯`statistic_bindings`且检查、目标pair和固定范围全部满足时，同一个revision extract11只取`{statistic_bindings:[{stat_id,record_id,body_evidence}]}`；程序从固定统计和原文物化value／根引用，其他正文、关系及旧quality保持。raw patch与完整输出分别绑定，完整新Review后才允许发布。内容或混合问题走原全稿，错误或歧义不能猜，原稳定次数及unknown保持。字段与拒绝条件见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)；该版隔离定向回归、标准CLI人工全链及准确CI的固定证据见Roadmap，不能移用于本批HEAD或真实验收。
 
 ## dev26：多批容量回退与反馈接续
 

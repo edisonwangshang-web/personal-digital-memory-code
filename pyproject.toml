@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-digital-memory"
-version = "0.2.0.dev27"
+version = "0.2.0.dev28"
 description = "个人数字化记忆：来源采集、独立审核与可核验工程版本"
 requires-python = ">=3.11"
 dependencies = []
@@ -16,5 +16,5 @@ pdm-memory = "pdm.cli:main"
 where = ["project/src"]
 
 [tool.pdm.release]
-supported_schema_versions = ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14"]
+supported_schema_versions = ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15"]
 capabilities = ["source_capture", "reviewed_publication", "scoped_evidence_qa", "multisource_reviewed_publication", "multisource_scoped_qa", "incremental_reviewed_publication", "controlled_current_qa", "correction_deletion_controls", "unified_pending", "daily_incremental_engine", "scoped_reading_packages", "shared_persistent_call_budget", "skill_bound_knowledge_quality"]

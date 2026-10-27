@@ -2,9 +2,17 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前开发批次：0.2.0.dev27
+## 当前开发批次：0.2.0.dev28
 
-本批仅在dev开发验证，不合入或推送master。默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15；能力已实现，隔离定向回归及标准CLI人工全链通过；准确dev CI与新一轮获准真实验收仍待核，不预填通过。旧10/8、0.12、assembly0.14及历史规则字节保持，不自动迁移资料或重跑已完成工作。
+本批仅在dev开发验证，不合入或推送master。修复纯程序最终组装在started／engine已提交、staging写入前中断后无法由正常队列继续的问题；仅对原零调用预约、固定草稿／计划／规则／来源／控制及原审计身份全部可核验、root和所有分解审核子调用均未启动的情况，以原run和原attempt继续原样组装，再执行完整独立Review及group发布检查。
+
+已有staging沿原恢复路径；没有原持久账本、候选曾写入再缺失、预约或输入变化、真实模型已启动或结果未知均不进入该路径。原attempt、调用及历史不改，不新增extract或加工阶段。Skill11/9、普通quality0.15和assembly0.14保持；本批恢复回归、准确提交CI与真实业务分别取得证据，不预填通过，也不据此宣布M1完成。字段和人工反例见[恢复合同](data-conventions.md#assembly-zero-call-resume)及[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。
+
+既有有限重试收紧为第4次已知失败立即返回`attempt_limit`并停止；必需审核子单元耗尽时父工作同样停止，重开不另起extract。首次失败后最多再安全重试3次，unknown仍第一次即停下对账，第4次通过或待确认不误判，见[有限重试合同](data-conventions.md#bounded-processing-retries)。
+
+## 历史：0.2.0.dev27
+
+该批仅在dev开发验证，未提升master。默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15；隔离定向回归及标准CLI人工全链已通过，最终受测快照`df9ceba78e1e9a722ec660350f0442a5e9a7d545`的[CI 40349119582](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40349119582)八任务成功，两版Python各1273项。工程证据不替代真实全链与M1验收。旧10/8、0.12、assembly0.14及历史规则字节保持，不自动迁移资料或重跑已完成工作。
 
 标准CLI单次模型调用默认900秒、允许1—1800秒，含普通process反馈返工；底层Python及专用历史恢复默认120秒兼容。旧冻结日程继承原timeout_seconds，执行时实际传入，不按新默认迁移；超时unknown及稳定次数照常保留。
 
