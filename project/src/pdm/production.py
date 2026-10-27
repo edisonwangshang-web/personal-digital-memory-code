@@ -429,6 +429,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     previous = _read(git, path, "production_attempts")
     if previous is not None and previous.get("identity") != identity:
         _fail("queue_attempt_identity_conflict")
+    for old in previous.get("attempts", []) if previous else []:
+        if old["status"] == "attempt_limit":
+            return deepcopy(old)
     registrations, resumptions = {}, {}
     for old in previous.get("attempts", []) if previous else []:
         if old["status"] not in {"reserved", "unknown", "partial", "needs_confirmation", "registration_required"}:

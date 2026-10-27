@@ -4,8 +4,11 @@ from copy import deepcopy
 import unittest
 
 import test_production as fixtures
+import pdm.production as production
+from pdm.batching import project_batch_sources
 from pdm.budget import BudgetedModelCall
 from pdm.model_calls import ModelCallError
+from pdm.pipeline import process_sources
 from pdm.production import prepare_production, production_status, run_production
 from pdm.transaction import PipelineGit
 
@@ -18,6 +21,12 @@ class RetryFinalityTests(unittest.TestCase):
 
     def transport(self, role, payload, timeout=120):
         response = fixtures.ProductionTests.transport(self, role, payload, timeout)
+        if role == "extract" and getattr(self, "later_object_ids", False):
+            for record in response["output"]["objects"]:
+                record["id"] += "-later"
+            for topic in response["output"]["wikis"]:
+                topic["id"] += "-later"
+                topic["record_ids"] = [value + "-later" for value in topic["record_ids"]]
         mode = getattr(self, "failure_mode", None)
         if mode == "unknown" and role == "extract":
             raise ModelCallError("timeout", response["invocation_id"])
@@ -139,6 +148,58 @@ class RetryFinalityTests(unittest.TestCase):
         self.assertEqual(self.roles, ["extract"] + ["review"] * 4)
         self.assertEqual(self.ledger.snapshot()["started_calls"], 5)
         self.assert_stopped(result, source_attempts=1)
+
+    def test_historical_limit_precedes_any_later_partial_or_reserved_review_resume(self):
+        self.prepare(strategy="decomposed-v1")
+        self.failure_mode = "review"
+        for _ in range(4):
+            stopped = self.run_slice()
+        self.assertEqual(stopped["status"], "attempt_limit")
+        git = PipelineGit(self.repo)
+        counter_path = git.text("ls-tree", "-r", "--name-only", "HEAD", "--",
+                                production.ATTEMPTS).splitlines()[0]
+        work_key = counter_path.rsplit("/", 1)[1].removesuffix(".md")
+        operation = "batch:" + work_key + ":2"
+        later_run = "run-" + production._hash({"work": work_key, "attempt": 2})[:32]
+        state_path = production._path(self.queue)
+        state = production._read(git, state_path, "production_queue")
+        projection = project_batch_sources(self.repo, state["plan"],
+            state["plan"]["batches"][0]["batch_id"], source_paths=self.paths)
+        # Recreate an old reachable history in this artificial checkout only:
+        # the old parent gate admitted a second extraction after child exhaustion.
+        # Both stages, child failures and calls below come from the real pipeline.
+        self.later_object_ids = True
+        later = process_sources(self.repo, self.paths, model_call=self.adapter.for_operation(operation),
+            related_runs=[], run_id=later_run, review_strategy="decomposed-v1",
+            batch_context=projection["batch_context"], source_views=projection["source_views"])
+        self.assertEqual(later["status"], "partial", later)
+        counter = production._read(git, counter_path, "production_attempts")
+        counter["attempts"].append({"attempt": 2, "operation_id": operation,
+            "run_id": later_run, "status": "partial", "error": later.get("error")})
+        with git.lock():
+            head = production._save(git, counter_path, counter, "production_attempts", git.check())
+            state.update(status="partial", active_run_id=later_run, last_result=later,
+                         revision=state["revision"] + 1)
+            production._save(git, state_path, state, "production_queue", head)
+        self.assertEqual(self.roles, ["extract"] + ["review"] * 4 + ["extract", "review"])
+        stages = {"memory/staging/" + item["run_id"] + ".md":
+                  (self.repo / ("memory/staging/" + item["run_id"] + ".md")).read_bytes()
+                  for item in counter["attempts"]}
+        for status in ("partial", "reserved"):
+            with self.subTest(later_attempt_status=status):
+                if status == "reserved":
+                    # A crash could leave the parent's reservation behind while
+                    # its immutable stage/known child failure were already saved.
+                    counter["attempts"][-1]["status"] = status
+                    with git.lock():
+                        production._save(git, counter_path, counter, "production_attempts", git.check())
+                before = self.frozen_accounting()
+                result = self.run_slice()
+                self.assertEqual(result["status"], "attempt_limit", result)
+                self.assertNotEqual(result["next_action"], "continue", result)
+                self.assertEqual(self.frozen_accounting(), before)
+                self.assertEqual({path: (self.repo / path).read_bytes() for path in stages}, stages)
+                self.assert_no_formal()
 
 
 if __name__ == "__main__":
