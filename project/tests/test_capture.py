@@ -113,6 +113,31 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(result["commit_sha"], source_commit)
         self.assertEqual(git(self.repo, "rev-list", "--count", "HEAD"), "3")
 
+    def test_reused_receipt_body_is_rejected_without_writes_or_remote_sync(self):
+        first = capture(self.repo, self.payload)
+        receipt_path = self.repo / first["receipt_path"]
+        receipt_bytes = receipt_path.read_bytes()
+        for body in (b"Artificial accidental receipt annotation.\n", b"\n", b" \t\n"):
+            with self.subTest(body=body):
+                receipt_path.write_bytes(receipt_bytes + body)
+                git(self.repo, "add", first["receipt_path"])
+                git(self.repo, "commit", "-m", "fixture invalid receipt body")
+                head = git(self.repo, "rev-parse", "HEAD")
+                status = git(self.repo, "status", "--porcelain")
+                before = {path: (self.repo / path).read_bytes()
+                          for path in git(self.repo, "ls-files").splitlines()}
+                with patch.object(GitAdapter, "write_commit") as write, \
+                        patch.object(GitAdapter, "sync") as sync, \
+                        patch("pdm.model_calls.call_model") as model:
+                    self.assert_error("receipt_mismatch", lambda: capture(
+                        self.repo, self.payload, head, remote="fixture"))
+                write.assert_not_called()
+                sync.assert_not_called()
+                model.assert_not_called()
+                self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+                self.assertEqual(git(self.repo, "status", "--porcelain"), status)
+                self.assertEqual(before, {path: (self.repo / path).read_bytes() for path in before})
+
     def test_remote_failure_then_successful_push_and_readback(self):
         first = capture(self.repo, self.payload, remote="missing")
         self.assertTrue(first["local_saved"])

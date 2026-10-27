@@ -571,7 +571,13 @@ def production_schedule_status(repo, schedule_id, *, now=None, platform_observat
         key = schedule_id + ":" + slot.isoformat()
         if key in receipts:
             return receipts[key]["data"]["status"]
-        if any(work["root_tick_key"] == key for work in _works(state)):
+        # A crash can occur after the source snapshot is committed but before
+        # the first work is registered. The durable discovery proves this
+        # local trigger was received; it does not prove completion or a real
+        # platform timer. An empty platform query cannot erase that evidence.
+        if (any(event["kind"] == "production_discovered"
+                and event["data"]["root_tick_key"] == key for event in state["events"])
+                or any(work["root_tick_key"] == key for work in _works(state))):
             return "incomplete"
         return "missing_receipt"
     status = status_at(expected)

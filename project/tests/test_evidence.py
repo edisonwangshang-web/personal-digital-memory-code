@@ -140,6 +140,24 @@ class EvidenceTests(unittest.TestCase):
             self.assert_code("invalid_citation", lambda: answer(Path("/fixture"), self.source["path"],
                 "fixture?", model_call=self.model(output)))
 
+    def test_citation_line_numbers_are_bounded_before_integer_conversion(self):
+        reference = {key: self.source[key] for key in ("source_id", "source_version")}
+        for label, locator in (("long_start", "L" + "9" * 5000 + "-L1"),
+                               ("long_end", "L1-L" + "9" * 5000),
+                               ("ten_digits", "L1-L1000000000"),
+                               ("bounded_out_of_range", "L1-L999999999")):
+            with self.subTest(label=label):
+                output = {"answer": "人工资料。[1]", "citations": [{**reference, "locator": locator}],
+                          "limitations": []}
+                self.assert_code("invalid_citation", lambda: answer(
+                    Path("/fixture"), self.source["path"], "人工？", model_call=self.model(output)))
+        for locator in ("L1-L1", "L2-L2", "L1-L2"):
+            with self.subTest(boundary=locator):
+                output = {"answer": "人工资料。[1]", "citations": [{**reference, "locator": locator}],
+                          "limitations": []}
+                result = answer(Path("/fixture"), self.source["path"], "人工？", model_call=self.model(output))
+                self.assertEqual(result["citations"], output["citations"])
+
     def test_no_evidence_requires_gap_and_source_match(self):
         self.assert_code("unsupported_answer", lambda: answer(Path("/fixture"), self.source["path"],
             "fixture?", model_call=self.model({"answer": "fixture", "citations": [], "limitations": []})))

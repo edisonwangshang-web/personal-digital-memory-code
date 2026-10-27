@@ -2,7 +2,7 @@
 
 [返回技术方案](../technical-plan.md) · [执行步骤与恢复](../implementation-details.md) · [数据规范](../data-conventions.md)
 
-本层负责采集、编排、程序校验、证据读取和条件发布，模型理解与审核，程序控制正式写入。本批为dev29开发版，沿用Skill11/9，仅dev验证、不更新master；本批补符合窄范围条件的extract timeout最多3次自动重试，原unknown和次数保留，不适用的未知调用仍停止，见[有限超时合同](../data-conventions.md#bounded-timeout-retry)。实现与验证见[Roadmap](../roadmap.md)。单次超时配置及纯绑定物化沿现有阶段执行，具体见[数据规范](../data-conventions.md#metadata-only-statistic-repair)；真实定时、持久恢复及第二模型仍待验收。
+本层负责采集、编排、程序校验、证据读取和条件发布，模型理解与审核，程序控制正式写入。本批 `0.2.0.dev32` 在既有M1链路修复采集回执、手动答复续接、已解决事项历史幂等、持久discovery中断状态及旧引用长度边界，不新增加工阶段或schema。默认Skill11/9和有限重试条件保持；只dev，不更新master、不启动M2，工程及真实验证状态见[Roadmap](../roadmap.md)。目标runner、两次实际触发、目标环境持久状态恢复及第二模型接入仍分别待验收。
 
 ## 本层技术架构
 

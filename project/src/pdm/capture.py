@@ -50,8 +50,8 @@ def capture(repo: Path, payload: dict, expected_head: str | None = None, *, remo
             head = source_commit
         if receipt_target.exists():
             receipt_data = receipt_target.read_bytes()
-            receipt, _ = parse_markdown(receipt_data)
-            if any(receipt.get(k) != v for k, v in {
+            receipt, receipt_body = parse_markdown(receipt_data)
+            if receipt_body or any(receipt.get(k) != v for k, v in {
                 "source_id": source_id, "source_version": version, "path": relative,
                 "commit_sha": source_commit, "save_result": "local_saved", "schema_version": SCHEMA_VERSION,
             }.items()):

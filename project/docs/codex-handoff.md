@@ -6,11 +6,11 @@
 
 项目保存明确提交的原文，经模型提取组织、自动分类、独立 Review 后形成可追溯知识，供限定范围问答和后续模型读取。长期分为知识库、分析、计划与复盘四个阶段，先完成可持续维护的知识库。三个稳定领域为 `health`、`career`、`learning`，同一事实不为分类复制多份。
 
-本批开发版为`0.2.0.dev31`，只补已清空知识的新明确轮次；沿用Skill11/9、普通quality0.15、assembly0.14、重试门禁0.16和原提示词／时态规则，新增回执schema0.17。**本批仅在dev开发和验证，不更新master。** 先取得准确提交工程检查与CI，再依据用户本次已有明确新请求，在原获准范围和原服务验证提取、Review、发布与读取，不预填成功。
+本批开发版为 `0.2.0.dev32`，用户要求先完成M1剩余开发，不启动M2。仅dev修复采集回执正文校验、手动答复续接原问题与持久返工、已解决事项历史幂等、持久discovery中断状态，以及旧单／多源引用长度边界；不新增加工阶段、规则或schema。两个master不动，已通过的真实资料链及原失败／unknown／计数保持，不全量重提取。沿用Skill11/9、quality0.15、assembly0.14和既有0.16／0.17证明；本批工程回归0真实调用。准确提交CI、真实增量／纠正确认、目标runner及第二模型各自取证，不宣称M1整体通过。
 
 现有正式目标仍使用V1清理；原V1目标已空且清理后未重写时，以`--previous-rebuild-context`代替互斥的`--target`，配明确新intent与相同来源／控制创建V2。新提交只新增回执、`targets=[]`，父仅接受V1，两引用共同证明恢复范围。新轮仍总4次，旧轮unknown、失败和计数保留，不把换queue或失败自动续开当作新授权，见[空知识新轮](data-conventions.md#cleared-knowledge-reprocessing)。
 
-dev30失败诊断保持：原回执可保存本次可见返回与时态位置，不自动修事实或成为恢复权限。历史原始返回缺失时仍不能定位具体句子；新一轮的已有明确授权覆盖上一诊断批次不做真实调用的限制，不能据此清除旧历史、扩大资料范围或更换模型服务。
+dev30失败诊断保持：原回执可保存本次可见返回与时态位置，不自动修事实或成为恢复权限。历史原始返回缺失时仍不能定位具体句子；既有成功与失败各留原证据，不能清除旧历史、扩大资料范围或更换模型服务。
 
 dev29的“超时后自动最多再重试3次”继续沿用，不要求逐次人工确认。新prepare冻结`bounded-timeout-v1`，首版仅对独立人工队列的单完整批、已结束普通root extract（含真实反馈返工）timeout、该run从未有候选／Review／发布、原来源／控制／Skill／rebuild及audit身份可核验的情况自动继续。旧无marker队列不静默升级；当前目标计划沿同work和原次数推进，不是新业务意图。原调用仍unknown，0.16自动回执链接唯一后继，`timeout_retry_ref`参与处理身份但不送模型；第4次仍失败停止，绝不第5次。契约与反例见[数据规范](data-conventions.md#bounded-timeout-retry)及[场景验收](scenarios-and-acceptance.md#bounded-timeout-retry-acceptance)。
 
@@ -40,7 +40,7 @@ dev27沿用的等待时间与纯统计绑定返工仍有效：普通CLI新调用
 
 工程在公开 `dev` 开发，通过审查和准确提交的 CI 后，经 PR 交付 `master`。`master` 是稳定交付分支；初始化 `main` 不作为开发入口。远端默认展示分支设置存在管理权限限制，访问代码可直接使用 [dev](https://github.com/edisonwangshang-web/personal-digital-memory-code/tree/dev)／[master](https://github.com/edisonwangshang-web/personal-digital-memory-code/tree/master)。
 
-上一批dev30准确快照[`14a5dee7297c209a4648d81996c0d9a46101db17`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/14a5dee7297c209a4648d81996c0d9a46101db17)的[CI 40468699938](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40468699938)八任务成功，Python3.11／3.12各1321项、0跳过及基础检查通过。它不证明本批dev31或后续HEAD通过，不替代真实业务，也不授权本批更新master。
+上一版dev31准确快照[`bcb87153536a6e8b342a690acac60d3d4771f45e`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/bcb87153536a6e8b342a690acac60d3d4771f45e)的[CI40482747387](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40482747387)八任务成功，Python3.11／3.12各1331项、0跳过；不证明本批或后续HEAD通过，不替代真实业务，也不授权更新master。
 
 标准公开 Linux CI 是主路线，不需要 Mac 常开。离线工程检查使用 [check_local.py](../scripts/check_local.py)，见[本地检查](local-checks.md)；自托管／Mac 容器仅保留为可选未验收方案，公库没有专用注册或 Mac 启停工具。
 

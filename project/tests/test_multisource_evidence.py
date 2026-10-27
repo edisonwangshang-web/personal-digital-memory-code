@@ -195,6 +195,26 @@ class MultiSourceEvidenceTests(unittest.TestCase):
                 self.assert_code("invalid_citation", lambda: ask_sources(self.repo, self.paths, "人工？",
                                                                         model_call=self.model(output)))
 
+    def test_citation_line_numbers_are_bounded_before_integer_conversion(self):
+        reference = {key: self.sources[0][key] for key in ("source_id", "source_version")}
+        for label, locator in (("long_start", "L" + "9" * 5000 + "-L1"),
+                               ("long_end", "L1-L" + "9" * 5000),
+                               ("ten_digits", "L1-L1000000000"),
+                               ("bounded_out_of_range", "L1-L999999999")):
+            with self.subTest(label=label):
+                output = {"answer": "人工资料。[1]", "citations": [{**reference, "locator": locator}],
+                          "limitations": []}
+                self.assert_code("invalid_citation", lambda: ask_sources(
+                    self.repo, self.paths, "人工？", model_call=self.model(output)))
+        for source in self.sources:
+            for locator in ("L1-L1", "L2-L2", "L1-L2"):
+                with self.subTest(source=source["source_id"], boundary=locator):
+                    output = {"answer": "人工资料。[1]", "citations": [{
+                        **{key: source[key] for key in ("source_id", "source_version")}, "locator": locator}],
+                        "limitations": []}
+                    result = ask_sources(self.repo, self.paths, "人工？", model_call=self.model(output))
+                    self.assertEqual(result["citations"], output["citations"])
+
     def test_link_only_keeps_url_and_status_without_invented_body_citation(self):
         link = fixture_source("b", "", status="link_only")
         self.source_map[self.paths[1]] = link

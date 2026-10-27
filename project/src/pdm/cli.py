@@ -618,7 +618,8 @@ def main(argv: list[str] | None = None) -> int:
                       else promotion_check(args.repo, args.base, args.candidate, dev_commit=args.dev_commit))
             exit_code = 0 if result["status"] in {"passed", "prepared"} else 4
         elif args.command == "context":
-            from .context import discover_context, plan_answered_pending, execute_continuation
+            from .context import (discover_context, plan_answered_pending, execute_continuation,
+                                  process_continuation_job)
             if args.context_command == "discover":
                 result = discover_context(args.repo, args.source, allowed_source_paths=args.allow_source,
                                           allowed_run_ids=args.allow_run, object_ids=args.object_id,
@@ -630,7 +631,6 @@ def main(argv: list[str] | None = None) -> int:
                                                max_runs=args.max_runs)
                 exit_code = 0 if result["coverage"]["complete"] else 4
             else:
-                from .pipeline import process_sources
                 job = _input_json(args.input)
                 if not isinstance(job, dict) or not isinstance(job.get("job_id"), str):
                     raise _CliError("invalid_continuation_job")
@@ -640,9 +640,8 @@ def main(argv: list[str] | None = None) -> int:
                 model_call = _model_budget(args)
                 bundle = _selected_skills(args, default=True)
                 def process_reply(repo, fixed_job):
-                    return process_sources(repo, fixed_job["source_paths"], fixed_job["head"],
-                                           related_runs=fixed_job["related_runs"], model_call=model_call,
-                                           skill_bundle=bundle)
+                    return process_continuation_job(repo, fixed_job, model_call=model_call,
+                                                    skill_bundle=bundle)
                 result = execute_continuation(args.repo, job, process_call=process_reply)
                 exit_code = 0 if result.get("resolved") else 4
         elif args.command == "batch":

@@ -2,9 +2,9 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev31`开发版，沿用Skill11/9、普通质量链0.15、assembly0.14及重试门禁0.16；只补空知识明确新轮的0.17回执，新提交先核工程检查与准确CI，随后按已有授权取得真实全链证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。本批为 `0.2.0.dev32`，在既有M1架构内修复采集回执、手动答复续接、已解决事项历史核验、调度中断状态和旧读取引用边界。不启动M2，不新增加工阶段；沿用Skill11/9及现有schema0.1—0.17，不迁移私人资料或重做已完成加工。本批只在 `dev` 开发验证，不合入或推送 `master`。工程检查与准确CI、真实业务、目标云端runner和第二模型分别取证，阶段状态见[Roadmap](roadmap.md)。
 
-本批只扩既有重建入口：原V1目标仍空且未重写时，用户明确新意图可记录V2新轮，提交仅新增回执，不假称删除。新旧两引用共同证明受限权限，新轮仍最多4次，旧unknown和counter不动；原Skill、时间谓词及模型阶段保持。具体边界见[空知识新轮](data-conventions.md#cleared-knowledge-reprocessing)，真实Review／发布／读取另行验收。
+手动待确认续接复用现有持久production队列和continuation上下文，使模型取得原问题及完整答复，沿原有限次数修订并重新审核；不把已启动／unknown的旧入口操作自动改成新队列重发。首次事项解决仍检查当前有效正式知识，重复核验同一已解决事项则检查原发布历史和原答复引用，避免后续合法更新阻塞收尾。持久discovery证明本地已收到该轮执行，不代表实际云端定时完成。字段统一见[数据规范](data-conventions.md)，操作见[日常使用](daily-use.md)，具体检查见[M1交付核对](m1-delivery-readiness.md)。
 
 ## 当前实现与双仓边界
 

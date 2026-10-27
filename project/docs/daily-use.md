@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文补充`0.2.0.dev31`开发批次的操作接口，本批补已清空知识的明确新轮回执0.17；沿用Skill11/9、普通quality0.15、assembly0.14及重试门禁0.16；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
+本文补充`0.2.0.dev32`的M1操作接口。本批收尾既有采集、待确认续接、解决幂等、调度状态与引用校验；沿用Skill11/9、普通quality0.15、assembly0.14、重试门禁0.16及新轮回执0.17。实现、准确CI、人工全链和真实运行状态以Roadmap为准，不预填本批通过。本批只在dev开发验证，不启动M2、不合入或推送两个master，不重跑已完成的真实资料、不新增真实模型调用。实际资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -27,7 +27,7 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 
 ## 查看提取失败诊断
 
-诊断机制沿用dev30的虚构输入验证；本批新轮实际调用须先通过准确工程检查与CI，并限定于已有明确新授权的资料和原服务。本批接入的首轮提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
+诊断机制沿用既有私有失败记录，本批仅使用虚构资料核对工程行为。提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
 
 先检查`status`：`unvalidated_not_publishable`才表示本次五字段可见返回已完整留存，`not_saved_capacity`或`not_saved_engineering_root`表示未保存原始返回，不可用摘要还原或声称完整保存。没有返回的unknown也不会补出response。诊断没有自动重验或发布命令；原次数和上限继续生效，耗尽后不因已有诊断而新增调用。没有历史原始输出时仍不能定位具体旧句子，不为了补日志再跑模型。字段和边界见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。
 
@@ -102,9 +102,11 @@ python -P -B -m pdm capture --repo "$PDM_DATA_REPO" --input "$source_json" \
 
 `local_saved` 只说明本地保存；指定 `--remote origin` 后，只有实际推送并精确读回成功，才报告 `remote_status: confirmed`。来源位于私库 `memory/sources/`，候选位于 `memory/staging/`，正式知识位于 `memory/records/` 和 `memory/topics/`。
 
+重复采集仍须校验已有采集回执。回执是元数据专用文件；正文附注、额外空行或空白均使其无效，返回`receipt_mismatch`且不写入或远程同步。应核对已保存原文及回执损坏原因，不把再次提交返回的摘要当作修复，不手工删除原文或历史来恢复幂等。
+
 ## 人工触发持久生产队列
 
-本批新默认为`knowledge-extract@11`与`knowledge-review@9`、普通quality0.15，旧10/8的0.12及assembly0.14保持原证明。程序准备清单、可复算统计和绑定，模型提取并独立审核；精确`reuse_refs`继续按原条件物化和审核，不用空输出省略旧记录。旧任务沿用原Skill及格式，不靠改队列名清失败或unknown；专用旧恢复合同不因新默认自动扩权。
+当前新任务默认为`knowledge-extract@11`与`knowledge-review@9`、普通quality0.15，旧10/8的0.12及assembly0.14保持原证明。程序准备清单、可复算统计和绑定，模型提取并独立审核；精确`reuse_refs`继续按原条件物化和审核，不用空输出省略旧记录。旧任务沿用原Skill及格式，不靠改队列名清失败或unknown；专用旧恢复合同不因新默认自动扩权。
 
 ```bash
 python -P -B -m pdm production prepare --repo "$PDM_DATA_REPO" --id "$queue_id" \
@@ -179,7 +181,7 @@ python -P -B -m pdm knowledge --repo "$PDM_DATA_REPO" --source "$source_path" --
 
 目录只覆盖显式来源与发布运行，不自动发现全库运行，不调用模型，也不改 README 或正式文件。topic 领域来自精确受审 record 的并集；未分类、分类缺口和 coverage 一起报告。`evidence_budget` 是读取／输出字节上限。
 
-当前回答规则区分已核验的系统处理状态与来源历史自述。未提供 pending 只代表本次未提供相关事项，不能把每个资料缺口变成用户任务或宣称全库没有待确认项。正文 `[1]` 对应 citations 第一项；程序拒绝畸形、越界编号和无效来源坐标，但编号有效不能证明逐句语义支持，仍需质量核对。
+当前回答规则区分已核验的系统处理状态与来源历史自述。未提供 pending 只代表本次未提供相关事项，不能把每个资料缺口变成用户任务或宣称全库没有待确认项。正文 `[1]` 对应 citations 第一项；单源、多源及当前读取均在转换前限制引用行号长度，超长或越界坐标统一返回`invalid_citation`。程序也拒绝畸形、越界编号，但编号及坐标有效不能证明逐句语义支持，仍需质量核对。
 
 ## 补充、纠正、删除与待确认
 
@@ -194,14 +196,34 @@ python -P -B -m pdm pending list --repo "$PDM_DATA_REPO" --status open
 
 缺少来源或对象依赖时拒绝写入；纠正控制不自动改正文，随后仍走增量加工、审核与发布。普通删除清理当前视图并防止旧来源重建，Git 历史保留；彻底清除历史须另定范围。
 
-Review 需要澄清时登记统一事项。回复先 `capture`，再关联原事项，后续真实新发布实际采用全部有效答复后才能解决：
+Review需要澄清时登记统一事项。回复先`capture`，再关联原事项：
 
 ```bash
 python -P -B -m pdm pending answer --repo "$PDM_DATA_REPO" --item "$item_id" --source "$reply_source_path"
-python -P -B -m pdm pending resolve --repo "$PDM_DATA_REPO" --item "$item_id" --run "$new_run_id"
 ```
 
-`answered` 表示已收到回复，`resolved` 需要后续发布核验。限定 evidence／ask 会投影相关 pending；仅在来源、回复和正文都完整选中时显示完整问题，缺范围时只报告缺口。`registration_required` 表示 Review 已保存但登记未完成；核对存储或冲突后，可用 `pending repair-registration --repo "$PDM_DATA_REPO" --run "$run_id" --source "$source_path"` 零模型补登记，重复列全原来源。不能修改候选或规则后沿用旧审核。
+`answered`只表示已收到回复。使用已有续接入口，为原问题和完整有效答复规划后续加工；`confirmation_run_id`是原`needs_confirmation`审核运行，不是任意已发布运行：
+
+```bash
+python -P -B -m pdm context continuations plan --repo "$PDM_DATA_REPO" \
+  --allow-source "$source_path" --allow-source "$reply_source_path" \
+  --allow-run "$confirmation_run_id"
+```
+
+多来源、多个回复及所需获准关联运行重复对应参数；范围不齐时先处理返回的缺口，不自动读全库。将结果`jobs`中的一条完整job单独保存为仓库外JSON，不能把整份计划响应当作job。然后执行：
+
+```bash
+python -P -B -m pdm context continuations execute --repo "$PDM_DATA_REPO" \
+  --input "$continuation_job_json" --budget-ledger "$audit_ledger" --model-timeout 900
+```
+
+该CLI沿既有持久production队列处理，携带原问题、父运行、来源与对象引用及完整有效答复；提取、程序校验、独立Review和发布仍使用原阶段。它不是缺少原问题的普通再次提取；必要来源及答复不能被分批遗漏。退回后带实际意见有限返工，同一计划身份重新取最新HEAD不换原队列或清零次数。`--operation-id`默认使用job_id，若显式填写也必须完全相同，不能改名重试。
+
+升级前若原job_id对应的旧账本operation已经有预约或调用，返回`continuation_legacy_reconciliation_required`并停止，保留原调用和unknown；不能把它们当作新队列尚未执行而重发。其它在途或未知结果仍按既有恢复条件核对，不删旧operation、队列或计数。
+
+只有后续发布实际采用全部必要答复且核验通过，事项才成为`resolved`。如果另按既有流程取得满足该条件的新发布，可显式执行`pending resolve --repo "$PDM_DATA_REPO" --item "$item_id" --run "$new_run_id"`。首次解决仍要求当前有效发布；同事项、同解决run的重复操作则核原发布历史证明及原答复引用，后续正常知识更新不使原解决失效。这种幂等复核不把旧发布当成当前知识，也不授权用历史证明首次解决。
+
+限定evidence／ask会投影相关pending；仅在来源、回复和正文都完整选中时显示完整问题，缺范围时只报告缺口。`registration_required`表示Review已保存但登记未完成；核对存储或冲突后，可用`pending repair-registration --repo "$PDM_DATA_REPO" --run "$run_id" --source "$source_path"`零模型补登记，重复列全原来源。不能修改候选或规则后沿用旧审核。
 
 ## 日程入口与停启
 
@@ -221,6 +243,8 @@ python -P -B -m pdm schedule status --repo "$PDM_DATA_REPO" --id "$schedule_id"
 `drain` 在有限窗口内推进持久队列，续跑使用返回的 `--continuation "$continuation_json"` 和原身份。答复关联为 `answered` 后，同一日程会携带完整必要回复继续加工。`remote_mode=required` 需要实际条件 push、fetch 和精确读回；`local_only` 仅供隔离演练。完整来源并集超过支持范围或必要语义超容量时停止，不截断。
 
 查看JSON中的`status`、`next_action`及剩余范围。`run`和`drain`需对账、账本修复或人工处理时均返回退出码4，应先核已有结果或修复前置；合法等待确认和可继续进度不会因此变成完成，退出码0也不表示所有资料均已发布。
+
+如果discovery已持久保存，但尚未建立work即中断，`schedule status`须报告`incomplete`；没有attempt不等于没有待处理资料，也不能显示已全部完成。核对原发现结果及进度后按原日程和身份继续，不另换队列消除中断。discovery文件、模拟trigger和本地状态修复都不能证明平台在约定时刻实际触发。
 
 ```bash
 python -P -B -m pdm schedule pause --repo "$PDM_DATA_REPO" --id "$schedule_id" --reason "$pause_reason"
@@ -245,3 +269,16 @@ python -P -B -m pdm reading-package verify "$reading_package_json" \
 ```
 
 准备和核验不调用另一模型。真正的跨模型验收还需指定模型实际读取同包同版本、独立回答并核对来源，结果保存在私有验证记录中。
+
+## 本批工程收尾与尚需实际验收
+
+本批检查使用虚构资料和模拟调用，检查要求及准确提交CI另行记录；不重跑已完成的真实加工，也不将工程修复写成M1整体通过。
+
+| 剩余项 | 需要的下一步 |
+| --- | --- |
+| 真实代表性资料、增量和分类 | 用获准新增／变更／补录资料验证关联维护及三领域、跨类和未分类；已有工程能力不代表所有业务场景已验收 |
+| 真实纠正与确认 | 核对一次真实补充或纠正前后的知识和答案，再验证问题→用户答复→审核发布→解决；不编造用户错误或答复 |
+| 目标runner及每日运行 | 接入实际执行入口，核权限、持久状态和读写恢复，取得两个北京时间22:00真实触发、停启与续跑证据；这不是本地日程命令已经完成的部署 |
+| 第二模型读取 | 由获准另一模型实际读取同包同版本并独立回答；读取包生成、同服务独立Review或私库Git恢复均不能代替 |
+
+本批保持dev-only；稳定交付和生产环境核对另按[M1交付门槛](m1-delivery-readiness.md)执行，不启动M2或变更两个master。

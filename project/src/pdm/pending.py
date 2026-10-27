@@ -298,9 +298,9 @@ def _verify_input_refs(repo, item):
         _error("pending_object_mismatch")
 
 
-def _read_document(git, path):
-    data = git.read(git.head(), path)
-    if git._existing(path) != data:
+def _read_document(git, path, *, at_commit=None):
+    data = git.read(git.head() if at_commit is None else at_commit, path)
+    if at_commit is None and git._existing(path) != data:
         _error("saved_bytes_changed")
     try:
         if not data.startswith(b"---\n") or len(data) > MAX_REGISTRY_BYTES:
@@ -529,7 +529,7 @@ def _reply_association_commit(git, item, ref):
     _error("pending_publication_mismatch")
 
 
-def _check_reply_records(git, publication, item):
+def _check_reply_records(git, publication, item, *, historical=False):
     """答复必须实际成为经核验正式记录的依据；仅进入运行上下文不算完成。"""
     required = {(ref["source_id"], ref["source_version"]) for ref in item["reply_sources"]}
     referenced = set()
@@ -538,7 +538,8 @@ def _check_reply_records(git, publication, item):
             continue
         # These exact files and their actual source locators/quotes have already
         # passed verify_publication. Read no object outside that verified scope.
-        metadata, _ = _read_document(git, path)
+        metadata, _ = _read_document(git, path,
+            at_commit=publication["commit_sha"] if historical else None)
         if metadata.get("review_status") != "passed":
             _error("pending_publication_mismatch")
         referenced.update((ref["source_id"], ref["source_version"]) for ref in metadata["sources"])
@@ -563,10 +564,15 @@ def resolve_pending(repo, item_id, publication_run, expected_head=None):
         # First restrict the manifest to the item's explicitly associated scope;
         # verify_publication also checks this exact scope before loading sources.
         paths = _publication_scope(git, publication_run, item)
-        publication = verify_publication(repo, publication_run, source_paths=paths)
+        # A resolved item records a past completion. A later legitimate update
+        # must not reopen it or require the old formal version to stay current.
+        # First-time resolution still requires a valid current publication.
+        historical = item["pending_status"] == "resolved"
+        publication = verify_publication(repo, publication_run, source_paths=paths,
+            **({"historical": True} if historical else {}))
         if publication.get("status") != "published_local":
             _error("pending_publication_mismatch")
-        _check_reply_records(git, publication, item)
+        _check_reply_records(git, publication, item, historical=historical)
         commit = publication["commit_sha"]
         for ref in item["reply_sources"]:
             source = load_source(repo, ref["path"])

@@ -407,7 +407,8 @@ def answer(repo: Path, source_path: str, question: str, run_id: str | None = Non
                 citation["source_version"] != source["source_version"]):
             raise CaptureError("invalid_citation", "回答引用超出本次来源")
         match = re.fullmatch(r"L([1-9][0-9]*)-L([1-9][0-9]*)", citation["locator"])
-        if match is None or not 1 <= int(match[1]) <= int(match[2]) <= len(selected["lines"]):
+        if (match is None or any(len(number) > 9 for number in match.groups())
+                or not 1 <= int(match[1]) <= int(match[2]) <= len(selected["lines"])):
             raise CaptureError("invalid_citation", "回答引用不在原文行范围内")
     if not output["citations"] and not output["limitations"]:
         raise CaptureError("unsupported_answer", "没有来源依据时必须说明资料缺口")
@@ -484,7 +485,8 @@ def ask_sources(repo: Path, source_paths: list[str], question: str, run_id: str 
             raise CaptureError("invalid_citation", "回答引用超出本次来源或版本")
         match = re.fullmatch(r"L([1-9][0-9]*)-L([1-9][0-9]*)", citation["locator"])
         if (entry["source"].get("metadata", {}).get("acquisition_status") == "link_only"
-                or match is None or not 1 <= int(match[1]) <= int(match[2]) <= len(entry["lines"])):
+                or match is None or any(len(number) > 9 for number in match.groups())
+                or not 1 <= int(match[1]) <= int(match[2]) <= len(entry["lines"])):
             raise CaptureError("invalid_citation", "回答引用不在已取得的原文行范围内")
     if not output["citations"] and not output["limitations"]:
         raise CaptureError("unsupported_answer", "没有来源依据时必须说明资料缺口")

@@ -264,6 +264,94 @@ def plan_answered_pending(repo, *, allowed_source_paths, allowed_run_ids, max_so
             "coverage": {"complete": not gaps, "gaps": gaps}, "model_calls": 0}
 
 
+_CONTINUATION_FIELDS = ("job_id", "parent_item_id", "question", "parent_run_ids",
+                        "source_refs", "object_refs", "reply_sources")
+
+
+def _continuation_queue_id(job):
+    # A replanned job has a fresh CAS head, but the same question, reply,
+    # authorization and capacity must resume the original persistent plan.
+    stable = {key: value for key, value in job.items() if key != "head"}
+    return "pending-" + hashlib.sha256(canonical(stable)).hexdigest()[:56]
+
+
+def process_continuation_job(repo, job, *, model_call, skill_bundle):
+    """Use the existing durable worker, including bounded feedback retries.
+
+    Called only after execute_continuation verifies the complete planned job.
+    A legacy call used the job ID itself and omitted its question; changing
+    engines must not silently replay a completed or uncertain legacy call.
+    """
+    from .budget import BudgetedModelCall
+    from .production import prepare_production, run_production
+
+    if isinstance(model_call, BudgetedModelCall):
+        legacy = model_call.ledger.operation(job["job_id"])
+        if legacy is not None:
+            _fail("continuation_legacy_reconciliation_required")
+    context = {key: copy.deepcopy(job[key]) for key in _CONTINUATION_FIELDS}
+    required = sorted({ref["path"] for ref in [*context["source_refs"], *context["reply_sources"]]})
+    queue_id = _continuation_queue_id(job)
+    prepared = prepare_production(repo, queue_id, job["source_paths"],
+        allowed_source_paths=job["source_paths"], allowed_run_ids=job["related_runs"],
+        required_context_sources=required, continuation_context=context,
+        skill_bundle=skill_bundle)
+    if prepared["status"] in {"blocked_context", "blocked_capacity"}:
+        return prepared
+    produced = run_production(repo, queue_id, model_call=model_call)
+    if produced["status"] == "published":
+        # The worker already performs the atomic group publication. The outer
+        # executor still verifies it and the actual reply before resolving.
+        return {"status": "already_processed", "run_id": produced["publication"]["run_id"],
+                "head": produced["head"], "production": produced}
+    return {"status": produced["status"], "production": produced}
+
+
+def _completed_continuation(repo, job):
+    """Read back a completed new worker job without repeating model calls."""
+    from .pending import REGISTRY_PATH, _parse, resolve_pending
+    from .pipeline import verify_publication
+    from .production import _path, _read, _verify_queue_publication
+
+    git = PipelineGit(repo)
+    head = git.check()
+    state = _read(git, _path(_continuation_queue_id(job)), "production_queue")
+    if state is None or state["status"] != "published":
+        return None
+    context = {key: copy.deepcopy(job[key]) for key in _CONTINUATION_FIELDS}
+    registry = read_registry(repo, head=head)
+    item = next((item for item in registry["items"] if item["item_id"] == job["parent_item_id"]), None)
+    if item is None or item["pending_status"] != "resolved":
+        return None
+    identity = {"parent_item_id": item["item_id"], "question": item["question"],
+                "parent_run_ids": item["run_ids"], "source_refs": item["source_refs"],
+                "object_refs": item["object_refs"], "reply_sources": item["reply_sources"]}
+    expected = {**identity, "job_id": "continuation-" + hashlib.sha256(canonical(identity)).hexdigest()}
+    if (context != expected or state["request"].get("continuation_context") != context
+            or state["request"]["source_paths"] != job["source_paths"]
+            or state["request"]["allowed_run_ids"] != job["related_runs"]
+            or not isinstance(job.get("head"), str) or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", job["head"])):
+        _fail("continuation_job_changed")
+    git.run("merge-base", "--is-ancestor", job["head"], head)
+    previous = _parse(git.read(job["head"], REGISTRY_PATH))
+    prior = next((value for value in previous["items"] if value["item_id"] == item["item_id"]), None)
+    if (prior is None or prior["pending_status"] != "answered"
+            or any(prior[key] != item[key] for key in ("question", "source_refs", "object_refs", "run_ids", "reply_sources"))):
+        _fail("continuation_job_changed")
+    run = item["resolution"]["run_id"]
+    if state["publication"]["run_id"] != run:
+        _fail("continuation_publication_mismatch")
+    # The pending resolver checks deletion/current control scope BEFORE any
+    # historical publication is allowed to open its original source bodies.
+    resolution = resolve_pending(repo, item["item_id"], run)
+    publication = verify_publication(repo, run, source_paths=job["source_paths"], historical=True)
+    _verify_queue_publication(git, state, publication)
+    git.check(head)
+    return {"job_id": job["job_id"], "parent_item_id": item["item_id"], "status": "resolved",
+            "publication_run_id": run, "publication": publication, "resolution": resolution,
+            "resolved": True, "reused": True, "model_calls": 0}
+
+
 def execute_continuation(repo, job, *, process_call, publish_call=None, resolve_call=None):
     """Run a planned answer through independent Review, publication and resolve.
 
@@ -280,6 +368,9 @@ def execute_continuation(repo, job, *, process_call, publish_call=None, resolve_
         plan = plan_answered_pending(repo, **job["authorization"], **job["capacity"])
         actual = next((value for value in plan["jobs"] if value["job_id"] == job["job_id"]), None)
         if actual != job:
+            completed = _completed_continuation(repo, job)
+            if completed is not None:
+                return completed
             _fail("continuation_job_changed")
     except (KeyError, TypeError):
         _fail("invalid_continuation_job")

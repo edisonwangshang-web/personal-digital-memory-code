@@ -199,13 +199,13 @@ class M1InterfaceTests(unittest.TestCase):
             processed = process_call(repo, value)
             self.assertEqual(processed["status"], "passed")
             return {"status": "resolved", "resolved": True}
-        def process(repo, paths, head, *, related_runs, model_call, skill_bundle):
-            self.assertEqual((paths, head, related_runs), (["fixed-source"], self.base, ["fixed-run"]))
+        def process(repo, fixed_job, *, model_call, skill_bundle):
+            self.assertEqual(fixed_job, job)
             self.assert_skill_binding(skill_bundle)
             self.assertEqual(model_call.operation_id, job["job_id"])
             self.assertEqual(model_call.ledger.snapshot()["mode"], "audit")
             return {"status": "passed"}
-        with patch("pdm.context.execute_continuation", side_effect=execute), patch("pdm.pipeline.process_sources", side_effect=process):
+        with patch("pdm.context.execute_continuation", side_effect=execute), patch("pdm.context.process_continuation_job", side_effect=process):
             self.assertEqual(self.command(["context", "continuations", "execute", "--repo", str(self.repo),
                 "--input", job_path, "--budget-ledger", str(ledger)])[0], 0)
         code, result = self.command(["context", "continuations", "execute", "--repo", str(self.repo),
