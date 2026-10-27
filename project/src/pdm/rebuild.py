@@ -15,6 +15,8 @@ from .transaction import PipelineGit
 
 CONTRACT = "explicit-knowledge-rebuild-v1"
 SCHEMA = "0.4"
+CONTRACT_V2 = "explicit-knowledge-rebuild-v2"
+SCHEMA_V2 = "0.17"
 KIND = "knowledge_rebuild"
 ROOT = "memory/runs/processes/rebuilds/"
 _FORMAL = re.compile(r"memory/(records|topics)/([a-z][a-z0-9-]{0,95})\.md\Z")
@@ -108,9 +110,14 @@ def _decode(raw):
         return value
     try:
         metadata, body = parse_markdown(raw)
-        if metadata != {"schema_version": SCHEMA, "kind": KIND}:
+        if metadata not in ({"schema_version": SCHEMA, "kind": KIND},
+                            {"schema_version": SCHEMA_V2, "kind": KIND}):
             _fail()
-        return json.loads(body, object_pairs_hook=unique)
+        value = json.loads(body, object_pairs_hook=unique)
+        expected = CONTRACT_V2 if metadata["schema_version"] == SCHEMA_V2 else CONTRACT
+        if not isinstance(value, dict) or value.get("contract") != expected:
+            _fail()
+        return value
     except (ValueError, TypeError, UnicodeError, RecursionError):
         _fail()
 
@@ -122,6 +129,31 @@ def _original_context(git, path):
     return {"path": path, "commit_sha": additions[0], "sha256": _hash(git.read(additions[0], path))}
 
 
+def _reference(context):
+    if (not isinstance(context, dict) or set(context) != {"path", "commit_sha", "sha256"}
+            or not isinstance(context["path"], str) or _RECEIPT.fullmatch(context["path"]) is None
+            or not isinstance(context["commit_sha"], str) or _COMMIT.fullmatch(context["commit_sha"]) is None
+            or not isinstance(context["sha256"], str) or _DIGEST.fullmatch(context["sha256"]) is None):
+        _fail()
+
+
+def _previous_cleanup(git, context, paths, snapshot):
+    # Inspect the fixed receipt role before recursion. Reprocessing receipts
+    # cannot be chained to manufacture an unbounded authority graph.
+    _reference(context)
+    raw = git._existing(context["path"])
+    if raw is None or _decode(raw).get("contract") != CONTRACT:
+        _fail("rebuild_previous_must_cleanup")
+    return validate_rebuild_context(git, context, paths, at_commit=snapshot)
+
+
+def _unwritten_targets(git, targets, cleanup_commit, snapshot):
+    for path in targets:
+        if (git.run("ls-tree", "-z", snapshot, "--", path)
+                or git.text("log", "--full-history", "--format=%H", cleanup_commit + ".." + snapshot, "--", path)):
+            _fail("rebuild_target_changed")
+
+
 def validate_rebuild_context(git, context, source_paths=None, *, at_commit=None):
     """Validate the original cleanup, not whether targets are still unwritten.
 
@@ -130,11 +162,7 @@ def validate_rebuild_context(git, context, source_paths=None, *, at_commit=None)
     """
     from .pipeline import control_guard, normalize_source_paths
     from .controls import object_policy
-    if (not isinstance(context, dict) or set(context) != {"path", "commit_sha", "sha256"}
-            or not isinstance(context["path"], str) or _RECEIPT.fullmatch(context["path"]) is None
-            or not isinstance(context["commit_sha"], str) or _COMMIT.fullmatch(context["commit_sha"]) is None
-            or not isinstance(context["sha256"], str) or _DIGEST.fullmatch(context["sha256"]) is None):
-        _fail()
+    _reference(context)
     head, commit, path = git.head(), context["commit_sha"], context["path"]
     snapshot = head if at_commit is None else at_commit
     if not isinstance(snapshot, str) or _COMMIT.fullmatch(snapshot) is None:
@@ -145,8 +173,11 @@ def validate_rebuild_context(git, context, source_paths=None, *, at_commit=None)
     if raw is None or _hash(raw) != context["sha256"] or git.read(commit, path) != raw:
         _fail()
     value = _decode(raw)
+    reprocessing = value.get("contract") == CONTRACT_V2
     fields = {"contract", "intent_id", "base_head", "branch", "sources", "controls_digest", "targets", "created_at"}
-    if (not isinstance(value, dict) or set(value) != fields or value["contract"] != CONTRACT
+    if reprocessing:
+        fields.add("previous_rebuild_context")
+    if (not isinstance(value, dict) or set(value) != fields
             or _intent_path(value["intent_id"]) != path or not isinstance(value["base_head"], str)
             or _COMMIT.fullmatch(value["base_head"]) is None
             or not isinstance(value["branch"], str) or not value["branch"]
@@ -175,6 +206,24 @@ def validate_rebuild_context(git, context, source_paths=None, *, at_commit=None)
     if (control_guard(git, value["base_head"])["digest"] != value["controls_digest"]
             or control_guard(git, snapshot)["digest"] != value["controls_digest"]):
         _fail("rebuild_controls_changed")
+    if reprocessing:
+        if value["targets"] != []:
+            _fail("invalid_rebuild_scope")
+        changes = git.text("diff-tree", "--no-commit-id", "--name-status", "-r", commit).splitlines()
+        if changes != ["A\t" + path]:
+            _fail("rebuild_cleanup_not_atomic")
+        previous_ref = value["previous_rebuild_context"]
+        previous = _previous_cleanup(git, previous_ref, paths, snapshot)
+        git.run("merge-base", "--is-ancestor", previous_ref["commit_sha"], value["base_head"])
+        if previous["sources"] != value["sources"]:
+            _fail("rebuild_source_scope_changed")
+        if previous["controls_digest"] != value["controls_digest"]:
+            _fail("rebuild_controls_changed")
+        # This establishes the new intent's original empty state. A replay
+        # after its legitimate publication must not demand emptiness again.
+        _unwritten_targets(git, [item["path"] for item in previous["targets"]],
+                           previous_ref["commit_sha"], value["base_head"])
+        return value
     targets = _targets([item.get("path") if isinstance(item, dict) else None for item in value["targets"]])
     if targets != [item["path"] for item in value["targets"]]:
         _fail()
@@ -201,6 +250,10 @@ def allow_rebuild_targets(git, objects, context, *, at_commit=None):
     current HEAD for a pending publication. No write since cleanup is permitted.
     """
     value = validate_rebuild_context(git, context, at_commit=at_commit)
+    if value["contract"] == CONTRACT_V2:
+        # The new receipt grants a counted round, not a new deletion exception.
+        # The original V1 cleanup must still authorize every inherited path.
+        return allow_rebuild_targets(git, objects, value["previous_rebuild_context"], at_commit=at_commit)
     snapshot = git.head() if at_commit is None else at_commit
     paths = {item["path"] for item in value["targets"]}
     keys = {(source["source_id"], source["source_version"]) for source in value["sources"]}
@@ -214,14 +267,20 @@ def allow_rebuild_targets(git, objects, context, *, at_commit=None):
                 or not isinstance(references, list) or not references
                 or any(not _within_scope(ref, keys) for ref in references)):
             _fail("rebuild_source_scope_changed")
-    for path in paths:
-        if (git.run("ls-tree", "-z", snapshot, "--", path)
-                or git.text("log", "--full-history", "--format=%H", context["commit_sha"] + ".." + snapshot, "--", path)):
-            _fail("rebuild_target_changed")
+    _unwritten_targets(git, paths, context["commit_sha"], snapshot)
     return paths
 
 
-def prepare_rebuild(repo, intent_id, source_paths, target_paths, expected_head=None):
+def authority_refs(git, context, *, at_commit=None):
+    """Return both fixed receipts needed to verify a reprocessing authority."""
+    value = validate_rebuild_context(git, context, at_commit=at_commit)
+    refs = [dict(context)]
+    if value["contract"] == CONTRACT_V2:
+        refs.append(dict(value["previous_rebuild_context"]))
+    return refs
+
+
+def prepare_rebuild(repo, intent_id, source_paths, target_paths, expected_head=None, *, previous_rebuild_context=None):
     """Clear only selected formal files once, atomically recording their hashes.
 
     A caller creates this intent explicitly for an authorized cleanup. Queues do
@@ -230,7 +289,15 @@ def prepare_rebuild(repo, intent_id, source_paths, target_paths, expected_head=N
     from .pipeline import control_guard
     from .controls import object_policy
     git = PipelineGit(repo)
-    path, targets = _intent_path(intent_id), _targets(target_paths)
+    reprocessing = previous_rebuild_context is not None
+    if reprocessing:
+        if target_paths not in ([], ()):
+            _fail("invalid_rebuild_scope")
+        _reference(previous_rebuild_context)
+        targets = []
+    else:
+        targets = _targets(target_paths)
+    path = _intent_path(intent_id)
     with git.lock():
         head = git.check(expected_head)
         sources = _source_material(git, source_paths)
@@ -238,12 +305,31 @@ def prepare_rebuild(repo, intent_id, source_paths, target_paths, expected_head=N
         if existing is not None:
             context = _original_context(git, path)
             value = validate_rebuild_context(git, context, source_paths)
-            if targets != [item["path"] for item in value["targets"]]:
+            if (targets != [item["path"] for item in value["targets"]]
+                    or reprocessing != (value["contract"] == CONTRACT_V2)
+                    or reprocessing and value["previous_rebuild_context"] != previous_rebuild_context):
                 _fail("rebuild_intent_scope_changed")
             return {"status": "already_prepared", "head": head, "rebuild_context": context}
         if git.text("log", "--full-history", "--format=%H", head, "--", path):
             _fail()
         controls = control_guard(git)
+        if reprocessing:
+            previous = _previous_cleanup(git, previous_rebuild_context, source_paths, head)
+            if previous["sources"] != sources:
+                _fail("rebuild_source_scope_changed")
+            if previous["controls_digest"] != controls["digest"]:
+                _fail("rebuild_controls_changed")
+            _unwritten_targets(git, [item["path"] for item in previous["targets"]],
+                               previous_rebuild_context["commit_sha"], head)
+            value = {"contract": CONTRACT_V2, "intent_id": intent_id, "base_head": head,
+                     "branch": git.text("symbolic-ref", "--quiet", "--short", "HEAD"), "sources": sources,
+                     "controls_digest": controls["digest"], "targets": [], "created_at": timestamp(),
+                     "previous_rebuild_context": dict(previous_rebuild_context)}
+            raw = markdown({"schema_version": SCHEMA_V2, "kind": KIND}, canonical(value).decode() + "\n")
+            final = git.write_changes({path: raw}, {path: None}, head,
+                                      "rebuild: record explicit reprocessing of cleared knowledge")
+            return {"status": "prepared", "head": final,
+                    "rebuild_context": {"path": path, "commit_sha": final, "sha256": _hash(raw)}}
         keys = {(source["source_id"], source["source_version"]) for source in sources}
         before, entries = {}, []
         for target in targets:

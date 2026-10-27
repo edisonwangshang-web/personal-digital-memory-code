@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文补充`0.2.0.dev30`开发批次的操作接口，本批只补私有失败诊断；沿用Skill11/9、普通quality0.15、assembly0.14及重试门禁0.16；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
+本文补充`0.2.0.dev31`开发批次的操作接口，本批补已清空知识的明确新轮回执0.17；沿用Skill11/9、普通quality0.15、assembly0.14及重试门禁0.16；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -27,7 +27,7 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 
 ## 查看提取失败诊断
 
-本批只用虚构输入验证诊断，不调用真实模型或重新加工真实资料。本批接入的首轮提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
+诊断机制沿用dev30的虚构输入验证；本批新轮实际调用须先通过准确工程检查与CI，并限定于已有明确新授权的资料和原服务。本批接入的首轮提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
 
 先检查`status`：`unvalidated_not_publishable`才表示本次五字段可见返回已完整留存，`not_saved_capacity`或`not_saved_engineering_root`表示未保存原始返回，不可用摘要还原或声称完整保存。没有返回的unknown也不会补出response。诊断没有自动重验或发布命令；原次数和上限继续生效，耗尽后不因已有诊断而新增调用。没有历史原始输出时仍不能定位具体旧句子，不为了补日志再跑模型。字段和边界见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。
 
@@ -58,7 +58,23 @@ python -P -B -m pdm production run --repo "$PDM_DATA_REPO" \
 
 本轮新候选退回时，可将同一 `--rebuild-context` 与 `--revision-from-run` 一起交给 `process`；核心须核同回执、同来源和批次，仍不读取清理前旧知识。
 
-有效回执只授权重建它实际清理的目标，仍检查来源／控制、当前写入状态及完整证明。普通删除保护、旧 unknown 和计数保留；同一重建回执换队列、日期或工程版本不重置最多四次尝试。具体[字段契约](data-conventions.md#explicit-knowledge-rebuild)和[实现步骤](implementation-details.md#explicit-knowledge-rebuild)统一管理。原文清理、工程 CI、新知识审核、读取问答及私有恢复分别记录；任一步成功都不能单独证明 M1 整体验收完成。
+V1有效回执只授权重建它实际清理的目标，V2新轮则继承原V1的受限范围；两者仍检查来源／控制、当前写入状态及完整证明。普通删除保护、旧 unknown 和计数保留；同一重建回执换队列、日期或工程版本不重置最多四次尝试。具体[字段契约](data-conventions.md#explicit-knowledge-rebuild)和[实现步骤](implementation-details.md#explicit-knowledge-rebuild)统一管理。原文清理、工程 CI、新知识审核、读取问答及私有恢复分别记录；任一步成功都不能单独证明 M1 整体验收完成。
+
+<a id="cleared-knowledge-reprocessing"></a>
+
+### 原知识已空，再按明确新请求加工
+
+原V1已清理知识、目标仍空且清理后从未重写时，只有用户明确要求新一轮，才给新的稳定意图并引用原V1。不要填写不存在的target或重复声称清理；`--target`与`--previous-rebuild-context`必须恰选一个。下例均为人工占位：
+
+```bash
+python -P -B -m pdm rebuild-prepare --repo "$PDM_DATA_REPO" \
+  --intent-id "$new_rebuild_intent" --source "$source_path" \
+  --previous-rebuild-context "$previous_v1_reference_file" --expected-head "$data_head"
+```
+
+多份来源重复`--source`。引用文件严格只含原V1的`path`／`commit_sha`／`sha256`，不传整个旧命令响应或另一个V2。程序核相同来源／控制、原目标未重写后，只新增schema0.17回执，`targets=[]`，没有再次删除。将返回的新`rebuild_context`三键对象另存JSON，再交原`production prepare --rebuild-context`和`production run`；首次仍从完整原文重新提取、分类及独立审核，不引入旧候选。
+
+新引用绑定获准的新轮，仍最多4次；旧counter／unknown和历史不动，同一V2换queue不会清零。该分支不是自动续开工具，也不提供超出原V1的删除恢复权；父为V2、来源／控制变化、目标存在或曾写后再删均拒绝。完整合同见[空知识新轮](data-conventions.md#cleared-knowledge-reprocessing)。真实提取、Review、发布和模型读取各自记录结果，不以回执准备成功作为通过。
 
 ## 配置调用记录
 

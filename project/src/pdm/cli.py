@@ -66,9 +66,13 @@ def _selected_skills(args, *, default=False):
 
 def _rebuild_context(args):
     """Read only the receipt reference; the core verifies its Git authority."""
-    if args.rebuild_context is None:
+    return _read_rebuild_context(args.rebuild_context)
+
+
+def _read_rebuild_context(path):
+    if path is None:
         return None
-    value = _input_json(args.rebuild_context)
+    value = _input_json(path)
     if (not isinstance(value, dict) or set(value) != {"path", "commit_sha", "sha256"}
             or not isinstance(value["path"], str)
             or re.fullmatch(r"memory/runs/processes/rebuilds/[0-9a-f]{64}\.md", value["path"]) is None
@@ -154,7 +158,10 @@ def parser() -> argparse.ArgumentParser:
     rebuild.add_argument("--repo", type=Path, required=True)
     rebuild.add_argument("--intent-id", required=True, help="本次明确清理重建意图的稳定ID；重复调用不再次删除")
     rebuild.add_argument("--source", action="append", required=True, help="获准从头加工的现有原文路径")
-    rebuild.add_argument("--target", action="append", required=True, help="明确清理的现有record/topic路径")
+    rebuild_scope = rebuild.add_mutually_exclusive_group(required=True)
+    rebuild_scope.add_argument("--target", action="append", help="明确清理的现有record/topic路径")
+    rebuild_scope.add_argument("--previous-rebuild-context", type=Path,
+                               help="用户明确要求再次加工已清空资料时，引用原V1清理证明；不重置旧轮次")
     rebuild.add_argument("--expected-head")
     process = commands.add_parser("process", help="对显式选定的已采集来源联合加工并独立 Review；不自动发布")
     process.add_argument("--repo", type=Path, required=True)
@@ -426,8 +433,10 @@ def main(argv: list[str] | None = None) -> int:
             exit_code = 3 if result.get("remote_status") == "unconfirmed" else 0
         elif args.command == "rebuild-prepare":
             from .rebuild import prepare_rebuild
-            result = prepare_rebuild(args.repo, args.intent_id, args.source, args.target,
-                                     expected_head=args.expected_head)
+            previous = _read_rebuild_context(args.previous_rebuild_context)
+            result = prepare_rebuild(args.repo, args.intent_id, args.source, args.target or [],
+                                     expected_head=args.expected_head,
+                                     **({"previous_rebuild_context": previous} if previous is not None else {}))
             exit_code = 0
         elif args.command == "process":
             if args.rebuild_context is not None and args.related_run is not None:

@@ -2,9 +2,9 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev30`开发版，沿用Skill11/9、普通质量链0.15及assembly0.14，保留既有有限timeout重试证明／门禁0.16；本批只补失败诊断，新提交检查与准确CI另核，真实全链仍需实际证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev31`开发版，沿用Skill11/9、普通质量链0.15、assembly0.14及重试门禁0.16；只补空知识明确新轮的0.17回执，新提交先核工程检查与准确CI，随后按已有授权取得真实全链证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
 
-本批只补既有失败回执的私有可见返回留存与时态字段定位，不改原Skill、校验谓词、schema、重试计数或加工阶段；不调用真实模型，不用诊断文件作为恢复／发布权限。具体边界见[数据规范](data-conventions.md#failed-extraction-diagnostics)，准确新提交的工程检查和CI另核。
+本批只扩既有重建入口：原V1目标仍空且未重写时，用户明确新意图可记录V2新轮，提交仅新增回执，不假称删除。新旧两引用共同证明受限权限，新轮仍最多4次，旧unknown和counter不动；原Skill、时间谓词及模型阶段保持。具体边界见[空知识新轮](data-conventions.md#cleared-knowledge-reprocessing)，真实Review／发布／读取另行验收。
 
 ## 当前实现与双仓边界
 

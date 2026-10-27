@@ -2390,11 +2390,11 @@ def _computation_snapshots(git, candidate, visited=()):
         _error("publication_dependency_cycle")
     entries = []
     if "rebuild_context" in candidate:
-        from .rebuild import validate_rebuild_context
+        from .rebuild import validate_rebuild_context, authority_refs as rebuild_authority_refs
         ref = candidate["rebuild_context"]
         validate_rebuild_context(git, ref, source_paths=[item["path"] for item in _candidate_bindings(candidate)],
                                  at_commit=candidate["base_head"])
-        entries.append(copy.deepcopy(ref))
+        entries.extend(rebuild_authority_refs(git, ref, at_commit=candidate["base_head"]))
     if candidate.get("timeout_retry_ref") is not None:
         from .unknown_retry import authority_refs
         entries.extend(authority_refs(git, candidate["timeout_retry_ref"]))

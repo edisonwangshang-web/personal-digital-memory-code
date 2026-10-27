@@ -2,7 +2,17 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前开发批次：0.2.0.dev30
+## 当前开发批次：0.2.0.dev31
+
+本批仅在dev扩既有`rebuild-prepare`的空知识新轮：`--target`与`--previous-rebuild-context`互斥。用户明确新意图、同来源／控制、父仅原V1清理证明、原目标仍空且清理后未重写时，新增`explicit-knowledge-rebuild-v2`／schema0.17回执；该提交只A回执，`targets=[]`，不伪称再次删除或修改旧counter。
+
+V2继承原V1受限恢复范围，两引用均入证明；原unknown、失败、计数和父边保持，新轮仍最多4次，同一引用不能换queue刷新。Skill11/9、时态规则、普通0.15、assembly0.14及source0.1／formal0.2不变，不新增模型阶段。准确工程检查和CI后，按用户已有新授权执行实际提取／Review／发布／读取；这些结果和M1另取证，不预填成功、不更新master。
+
+字段和操作见[空知识新轮](data-conventions.md#cleared-knowledge-reprocessing)及[日常使用](daily-use.md#cleared-knowledge-reprocessing)。dev30诊断留存继续生效，但不使旧失败输出自动变为候选或恢复权限。
+
+## 历史：0.2.0.dev30
+
+准确快照`14a5dee7297c209a4648d81996c0d9a46101db17`的[CI 40468699938](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40468699938)八任务成功，两版Python各1321项、0跳过；只证明该提交的工程检查，不替代后续HEAD或真实资料验收。
 
 本批只在dev补普通提取失败诊断：原`failure.md`可保存可见模型返回、请求／返回摘要，以及时态错误的JSON字段、record／claim和实际正文位置。原Skill11/9、时间谓词、错误码、schema和加工阶段保持，不自动修正文、返还次数、复用诊断或绕过独立Review／发布。
 

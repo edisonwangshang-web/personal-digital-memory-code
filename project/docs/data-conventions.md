@@ -1,6 +1,6 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。本批为 `0.2.0.dev30` 开发版，只增加可选失败诊断和精确时态定位；沿用 `knowledge-extract@11`／`knowledge-review@9`、普通质量链 `0.15`、assembly `0.14`和超时门禁 `0.16`，不改变校验规则或加工阶段。新提交的检查与准确CI另核，本批不调用真实模型，不以诊断补丁声明历史内容已修好。本批仅在 `dev` 开发和验证，不合入或推送 `master`。基础规则、不可变 Skill、程序与资料版本分别绑定，M1 整体仍未验收。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。本批为 `0.2.0.dev31` 开发版，补既有重建入口的空知识新轮，新增回执schema `0.17`；沿用 `knowledge-extract@11`／`knowledge-review@9`、普通质量链 `0.15`、assembly `0.14`及超时门禁 `0.16`，不改变时间校验或加工阶段。新提交先核工程检查与准确CI，随后按已有明确授权实际验证；不能以新轮回执或旧CI声明真实链已通过。本批仅在 `dev` 开发和验证，不合入或推送 `master`。基础规则、不可变 Skill、程序与资料版本分别绑定，M1 整体仍未验收。
 
 <a id="failed-extraction-diagnostics"></a>
 
@@ -109,7 +109,7 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 
 ## 显式清理后重建回执
 
-只在用户明确清理后重建时创建。路径为 `memory/runs/processes/rebuilds/<intent_id的SHA256>.md`，封套严格为 `schema_version: 0.4`、`kind: knowledge_rebuild`，正文契约 `explicit-knowledge-rebuild-v1`。同一提交新增回执并删除列出的现有正式目标，不能混入其他写入；本版不迁移旧数据或变更默认 Skill。
+本段V1只在用户明确清理现有正式知识后重建时创建。路径为 `memory/runs/processes/rebuilds/<intent_id的SHA256>.md`，封套严格为 `schema_version: 0.4`、`kind: knowledge_rebuild`，正文契约 `explicit-knowledge-rebuild-v1`。同一提交新增回执并删除列出的现有正式目标，不能混入其他写入；本版不迁移旧数据或变更默认 Skill。
 
 | 字段 | 绑定 |
 | --- | --- |
@@ -125,6 +125,20 @@ current 证据可显式指定正式 `object_paths`；主题自动包含 `metadat
 `rebuild_context` 进入本次候选、请求和处理身份。生产工作及分解审核身份绑定有效回执；同一回执换队列、日期或工程版本不重置最多四次尝试。清理不会删除旧失败、unknown 或旧计数，也不让旧输出冒充本次结果。当前重建限单批完整来源，输入容量不足在新预约前阻塞。
 
 模型仅从本次来源重新生成正文、统计声明和分类，首次不提供旧related／revision／merge／复用输入；退回后`revision_from_run`仅引用同回执、同范围和批次的本轮候选及实际反馈，不引入其他generation。旧10/8原返回照常核验，不由程序补写；新11/9仅在[纯绑定合同](#metadata-only-statistic-repair)满足时保存原patch并物化固定声明，完整新Review仍必需。清理回执及工程检查不代表真实业务或M1通过。
+
+<a id="cleared-knowledge-reprocessing"></a>
+
+### dev31：目标已清空时的明确新轮
+
+只有用户已有明确的新一轮加工请求、且原V1目标仍空时，`rebuild-prepare`可用`--previous-rebuild-context`代替`--target`；二者必须恰选其一。操作者提供新的稳定`intent_id`、相同来源及原V1三键引用。程序不根据失败、换队列或日期自动创建新轮；新ID本身也不代替用户授权。
+
+新回执契约为`explicit-knowledge-rebuild-v2`、kind仍为`knowledge_rebuild`、schema为`0.17`，路径仍按新intent的SHA256生成。沿用`base_head`、`branch`、`sources`、`controls_digest`和`created_at`字段名，其中基线与记录时间属于本次新意图，来源和控制必须与V1一致；`targets`严格为`[]`，新增`previous_rebuild_context`，其值严格为原V1的`{path,commit_sha,sha256}`。新提交必须只有该回执的一条`A`，不带删除或其他写入，不能把“仍为空”说成又删除了资料。
+
+父引用只接受原`explicit-knowledge-rebuild-v1`清理证明，不接另一个V2递归续轮。创建时完整核父回执及其原子清理父边，来源绑定与控制摘要须相同；原目标须仍不存在，且从V1清理提交至新意图基线之间不得被重写，即使曾写后又删除也拒绝。来源、控制、父引用、branch或意图范围变化均拒绝。重复同一意图返回原引用，合法发布后重放也不会再次清理或生成新轮。
+
+V2只记录本次获准的新轮，不扩大旧删除例外。恢复受限旧路径时仍委托V1核其原目标、来源范围及清理后未重写条件；普通新路径沿原create检查，控制排除和其他历史删除保护保持。候选的`rebuild_context`仍是新回执的三键引用；计算、审核、发布和读取证明闭包同时固定新V2和原V1两份引用，不能只带新回执便声称有原清理权限。旧writer不支持0.17时拒写。
+
+本次新引用参与新的工作身份，新轮仍首次加最多3次重试、总attempt最多4；同一V2换queue／版本／日期不清零。旧轮counter、unknown、失败和完整历史全部保留，不把旧耗尽工作改成可重试。首次模型材料仍仅本轮完整原文与必要规则，不提供旧候选／related／revision／merge；新轮被退回才处理同V2范围的实际反馈。完整独立Review、条件发布与模型读取仍按原链路验证，回执存在不表示业务通过。
 
 <a id="quality-completed-recovery"></a>
 
