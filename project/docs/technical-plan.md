@@ -2,7 +2,9 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev29`开发版，沿用Skill11/9、普通质量链0.15及assembly0.14，新增有限timeout重试证明／门禁0.16；本批回归与准确dev CI待核，真实全链另行取得证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev30`开发版，沿用Skill11/9、普通质量链0.15及assembly0.14，保留既有有限timeout重试证明／门禁0.16；本批只补失败诊断，新提交检查与准确CI另核，真实全链仍需实际证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
+
+本批只补既有失败回执的私有可见返回留存与时态字段定位，不改原Skill、校验谓词、schema、重试计数或加工阶段；不调用真实模型，不用诊断文件作为恢复／发布权限。具体边界见[数据规范](data-conventions.md#failed-extraction-diagnostics)，准确新提交的工程检查和CI另核。
 
 ## 当前实现与双仓边界
 

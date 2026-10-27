@@ -6,18 +6,20 @@
 
 ## 当前阶段
 
-本批开发版为`0.2.0.dev29`，沿用`knowledge-extract@11`／`knowledge-review@9`、普通质量链`0.15`及assembly `0.14`，新增超时重试sidecar／门禁`0.16`；基础提示规则extract v14／review v10／answer v8保持。**本批仅在dev开发和验证，不合入或推送master；本批针对性人工回归已检查，准确dev CI待核。** M0已有历史验收，M1主要工程能力已有实现但整体未验收，M2—M4尚未完整交付。
+本批开发版为`0.2.0.dev30`，只补普通提取校验失败的诊断留存与时态错误定位。沿用Skill11/9、普通quality0.15、assembly0.14、重试门禁0.16及原提示规则，不改变时间判定或增加工阶段。**本批只在dev开发和用虚构输入检查，不调用真实模型，不更新master。** 新提交的完整工程检查与准确CI按该提交另核；M1整体仍未验收。
 
-本批按“超时后自动再重试最多3次”推进：新生产计划冻结`bounded-timeout-v1`，仅对独立人工队列的单完整批、已结束root提取（含反馈返工）timeout且该run无候选／Review／发布的情况，在同一work总4次内自动重跑，无需逐次确认。原调用和attempt继续保留unknown，自动回执链接原证明及唯一后继；旧队列不静默升级，当前目标计划仍延续原次数，不重新清理或新开业务意图。字段和反例见[数据规范](data-conventions.md#bounded-timeout-retry)与[场景验收](scenarios-and-acceptance.md#bounded-timeout-retry-acceptance)。
-
-仍在途、非timeout unknown、清理状态不明、权限／预算或Review调用超时（含分解审核）等不满足条件时停止并报告原因。第4次仍失败立即`attempt_limit`，没有第5次；第4次通过或待确认保持原语义。已确认失败的既有3次安全重试和审核子单元耗尽父工作停止规则继续生效。本地worker串行不证明服务端原请求已取消或没有重叠，重复调用消费及原历史保留，见[有限重试合同](data-conventions.md#bounded-processing-retries)。
+失败回执可保留本次可见模型返回、调用／请求摘要及具体错误位置；诊断本身不成为候选、审核、恢复权限或正式知识。容量不足或目标为工程根时明确未留存原文，不用截断内容冒充完整保存。没有历史原始返回时，不能声称补丁已定位或修好历史内容，也不能为了补日志重新调用模型。字段见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。
 
 | 本批验证 | 当前要求与状态 |
 | --- | --- |
-| 自动超时重试回归 | 人工替身验证旧timeout延续原计数、最多补3次、第4停止、后继零调用中断幂等、原unknown不改和迟到原run不发布；已按人工场景通过，最终准确提交由CI完整覆盖 |
-| 不适用及原保护 | 仍在途、非timeout、清理不明、范围变化、预算／权限及分解审核仍停止；原组装零调用恢复、已知失败耗尽和第四次通过／待确认保持；已运行受影响回归，最终准确提交由CI完整覆盖 |
-| 准确dev CI | 对最终受测提交核完整双Python检查、产物和兼容性；尚无本批通过结论，旧提交CI不代替 |
-| 获准真实全链 | 另核本轮获准范围与既有状态，沿原工作和意图接续，保留旧计数及unknown；人工通过不替代真实验收，代码升级不自动重跑成功资料 |
+| 缺失／不合规时态声明 | 用虚构返回核原错误码、record／claim／JSON字段定位及正文字符位置，失败不进入Review或发布；结果按实际检查记录 |
+| 有效输入与留存边界 | 有效声明照常完整Review；核私有资料路径、CLI／账本不含返回正文、容量与写入失败不误报保存；结果按实际检查记录 |
+| 准确dev CI | 最终受测提交核双Python完整测试、doctor和归档／代码包；旧提交成功不代替本批结果 |
+| 真实资料 | 本批0次真实调用；耗尽状态、unknown、计数和历史不重置，不另起工作绕过上限 |
+
+确定性时态检查不能覆盖全部语言语义。人工核对发现既有`source_time`正则对某些混合时间措辞仍有边界；本批只加诊断，不改原规则或将该边界归因于不可得的历史原文，完整独立Review仍必需。
+
+dev29的`bounded-timeout-v1`继续沿用：仅适用的已结束root提取timeout可在同work总4次内自动重跑，原unknown与次数保留；不适用的未知调用仍停止，不能靠诊断文件、换queue／intent／ledger或新工作得到额外尝试。详见[有限超时合同](data-conventions.md#bounded-timeout-retry)。
 
 dev28已修复纯程序组装在started／engine后、staging前的零调用中断恢复，以及已知失败耗尽即时停止。该恢复仍核原预约与全部子单元无状态，以原run／attempt继续；不能用于真实已启动模型结果找回，见[恢复合同](data-conventions.md#assembly-zero-call-resume)。
 
@@ -37,7 +39,7 @@ auto审核遇到共享编码器明确的容量上限时，转入已有分解审�
 
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 
-上一批已核对的dev28快照为[`d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3)，其[CI 40449641483](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40449641483)八任务成功，Python3.11／3.12各1288项及基础检查通过。它不证明本批dev29修改或后续HEAD已通过，不替代真实业务验收，也不授权本批更新master。
+上一批dev29准确快照[`6d5de6a2afb5074e834ffa9468d688b4747fe132`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/6d5de6a2afb5074e834ffa9468d688b4747fe132)的[CI 40458462677](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40458462677)八任务成功，Python3.11／3.12各1310项、0跳过及基础检查通过。它不证明本批dev30或后续HEAD通过，不替代真实业务验收，也不授权更新master。
 
 公库 `dev` 开发、`master` 稳定交付，公库成为代码、提示词、Skill、脚本、测试、CI、工作流定义及设计的唯一工程来源。真实加工从公库 checkout 加载，资料根指向私库，私库仅保留资料、审核、控制、私人验证、历史与导航。只读入口核对准确公开 CI 和代码／资料边界，不再复制或比对两份核心工程。定时与恢复工程归公库不代表目标 runner 已部署；本批代码、CI 与实际运行按各自证据记录。操作见[双仓库实际使用](dual-repository-operation.md)，CI 路线见[公开工程 CI](public-code-ci.md)。
 

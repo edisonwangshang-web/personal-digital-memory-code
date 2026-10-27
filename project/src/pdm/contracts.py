@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from copy import deepcopy
 from datetime import date, datetime, timezone
 from urllib.parse import urlsplit
 
@@ -43,9 +44,12 @@ def quality_schema_version(skill_bundle):
 
 
 class CaptureError(ValueError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, details=None):
         super().__init__(message)
         self.code = code
+        # Internal diagnostics only. Public CLI errors continue to expose the
+        # existing code/message, never a private record or model response.
+        self.details = deepcopy(details)
 
 
 def timestamp() -> str:

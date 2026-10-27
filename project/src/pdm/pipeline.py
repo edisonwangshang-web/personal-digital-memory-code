@@ -443,10 +443,18 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
         fields.add("reuse_refs")
     if quality_context is not None:
         from .knowledge_quality import validate_quality_output
+        def check_quality(checked_output):
+            try:
+                validate_quality_output(checked_output, quality_context)
+            except CaptureError as error:
+                # Pointers describe this checked view, which can include an
+                # explicitly reused record absent from the visible response.
+                error._diagnostic_validation_output = copy.deepcopy(checked_output)
+                raise
         if not isinstance(output, dict) or set(output) != fields | {"quality"}:
             _error("invalid_model_output")
         if not reuse_enabled:
-            validate_quality_output(output, quality_context)
+            check_quality(output)
         quality = output["quality"]
         output = {key: value for key, value in output.items() if key != "quality"}
     if not isinstance(output, dict) or set(output) != fields or not isinstance(output["objects"], list):
@@ -501,7 +509,7 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
             _error("invalid_wiki_dependency")
         result.append(wiki)
     if reuse_enabled and quality_context is not None:
-        validate_quality_output(_reuse_quality_output({**output, "quality": quality}, reused), quality_context)
+        check_quality(_reuse_quality_output({**output, "quality": quality}, reused))
     return result
 
 
@@ -1046,14 +1054,73 @@ def _reserve_processing_calls(model_call):
         adapter.reserve_calls(2)
 
 
-def _failure(git, run_id, phase, code, head, call=None, schema_version=PIPELINE_SCHEMA, attempted_calls=None, failure_name="failure"):
+def _extraction_diagnostic(git, error, response, request_binding=None, validation_output=None):
+    """Retain a visible returned value for diagnosis, never for adoption.
+
+    Transport failures have no completed response to invent. Only the five
+    public response fields are retained; provider/debug envelopes are excluded.
+    The existing separate private data checkout remains the storage boundary.
+    """
+    if not isinstance(error, CaptureError) or response is None:
+        return None
+    if (git.repo.resolve() == Path(__file__).resolve().parents[3]
+            or (git.repo / "project/src/pdm").exists()):
+        return {"status": "not_saved_engineering_root"}
+    try:
+        metadata = _call_metadata(response)
+        visible = {"output": copy.deepcopy(response["output"]),
+                   **{key: copy.deepcopy(metadata[key]) for key in
+                      ("model", "invocation_id", "elapsed_seconds", "usage")}}
+        encoded = json.dumps(visible, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (CaptureError, TypeError, ValueError, UnicodeError, RecursionError):
+        return None
+    diagnostic = {"status": "unvalidated_not_publishable", "response": visible,
+                  "response_sha256": _hash(encoded), "response_bytes": len(encoded),
+                  "request_binding": copy.deepcopy(request_binding),
+                  "validation_error": {"code": error.code, "message": str(error),
+                                       "details": copy.deepcopy(error.details)}}
+    validation_output = getattr(error, "_diagnostic_validation_output", validation_output)
+    if validation_output is not None and validation_output != response["output"]:
+        # A metadata-only repair can be checked after materialization. Preserve
+        # the exact checked value too, so its pointers are not mistaken for
+        # paths into the original visible patch.
+        diagnostic["validated_output"] = copy.deepcopy(validation_output)
+        diagnostic["validation_target"] = "validated_output"
+    else:
+        diagnostic["validation_target"] = "response.output"
+    return diagnostic
+
+
+def _failure(git, run_id, phase, code, head, call=None, schema_version=PIPELINE_SCHEMA, attempted_calls=None, failure_name="failure", *, extraction_diagnostic=None):
     if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
         code = "model_failed"
     value = {"run_id": run_id, "phase": phase, "status": "failed", "error": code,
              "call": call, "attempted_calls": attempted_calls if attempted_calls is not None else (1 if phase == "extract" else 2),
              "failed_at": timestamp()}
+    if extraction_diagnostic is not None:
+        value["extraction_diagnostic"] = extraction_diagnostic
+    data = _document("failure", value, schema_version)
+    from .storage_limits import LEGACY_FILE_BYTES
+    if extraction_diagnostic is not None and len(data) > LEGACY_FILE_BYTES:
+        # Keep the original file bound and the failure outcome. An oversized
+        # response is explicitly unavailable, never a silently truncated one.
+        summary = {key: item for key, item in extraction_diagnostic.items()
+                   if key not in {"response", "validated_output"}}
+        summary["status"] = "not_saved_capacity"
+        value["extraction_diagnostic"] = summary
+        data = _document("failure", value, schema_version)
+        if len(data) > LEGACY_FILE_BYTES:
+            value["extraction_diagnostic"] = {
+                "status": "not_saved_capacity",
+                "response_sha256": extraction_diagnostic.get("response_sha256"),
+                "response_bytes": extraction_diagnostic.get("response_bytes"),
+                "validation_error": {"code": code, "details": None},
+                "details_saved": False,
+            }
+            data = _document("failure", value, schema_version)
     path = _run_path(run_id, failure_name)
-    final = git.write_files({path: _document("failure", value, schema_version)}, head, f"process: preserve {phase} failure")
+    final = git.write_files({path: data}, head, f"process: preserve {phase} failure")
     return {"run_id": run_id, "status": "failed", "error": code, "failure_path": path, "head": final}
 
 
@@ -1781,6 +1848,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             payload["controls"] = controls
             context_fields.update(attempt_path=started_path, attempt_sha256=_hash(started_bytes))
         response = None
+        materialized_output = None
         try:
             if skill_bundle is not None:
                 original_payload = _revalidate_completed["original_payload"] if _revalidate_completed is not None else payload
@@ -1822,16 +1890,19 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     assert_fragment_refs(obj["metadata"]["sources"], source_views)
         except (ModelCallError, CaptureError) as error:
             git.check(head)
+            diagnostic = _extraction_diagnostic(git, error, response,
+                context_fields.get("extraction_request_binding"), materialized_output)
             if _revalidate_completed is not None:
                 if rebuild_revalidation:
                     return _failure(git, run_id, "extract", error.code, head,
                         _failure_call(error, response), schema_version, current_call_count(),
-                        failure_name="revalidation-failure")
+                        failure_name="revalidation-failure", extraction_diagnostic=diagnostic)
                 return {"run_id": run_id, "status": "failed", "error": error.code,
                         "failure_path": _run_path(run_id, "failure"), "head": head,
                         "attempted_calls": 0, "model_calls": 0, "extract_calls": 0}
             return _failure(git, run_id, "extract", getattr(error, "code", "model_failed"), head,
-                            _failure_call(error, response), schema_version, current_call_count())
+                            _failure_call(error, response), schema_version, current_call_count(),
+                            extraction_diagnostic=diagnostic)
         git.check(head)
         if execution_versions(git) != versions or _source_fields(_load_sources(repo, source_paths, allow_versions=incremental,
                 purpose="history" if incremental else "current", max_sources=source_limit)) != source_fields:

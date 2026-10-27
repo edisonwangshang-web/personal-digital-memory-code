@@ -2,7 +2,17 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前开发批次：0.2.0.dev29
+## 当前开发批次：0.2.0.dev30
+
+本批只在dev补普通提取失败诊断：原`failure.md`可保存可见模型返回、请求／返回摘要，以及时态错误的JSON字段、record／claim和实际正文位置。原Skill11/9、时间谓词、错误码、schema和加工阶段保持，不自动修正文、返还次数、复用诊断或绕过独立Review／发布。
+
+无可核验返回不伪造原件；工程根不保存raw，失败文件超1MiB仅保留明确未完整保存的容量摘要，I/O失败不误报成功。没有历史原始输出就不能定位具体句子或声称本次真实内容已修复。本批只运行虚构输入检查，不调用真实模型、不重开耗尽工作或更新master；准确提交的检查和CI单独核验。
+
+合同见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。确定性时间检查仍有既有语义边界，完整独立Review继续必要；诊断不增加语义正确性保证。
+
+## 历史：0.2.0.dev29
+
+准确快照`6d5de6a2afb5074e834ffa9468d688b4747fe132`的[CI 40458462677](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40458462677)八任务成功，两版Python各1310项、0跳过。该固定结果不证明后续HEAD通过或真实业务验收完成。
 
 本批仅在dev开发验证，不更新两个master。新生产计划默认冻结`bounded-timeout-v1`：符合单完整批、普通root extract（含真实反馈返工）已结束timeout、该run无候选／Review／发布、原source／控制／Skill／rebuild及audit池均可核验的条件时，在同一工作首次加最多3次自动重试，无需逐次人工确认；旧队列无marker不静默升级，目标计划继续原次数，不是新业务意图。
 

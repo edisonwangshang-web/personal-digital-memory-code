@@ -99,8 +99,11 @@ _CURRENT_TIME_WORDS = re.compile(r"当前|目前|现在|现已|\bcurrently\b|\bn
 _SENTENCE_BOUNDARY = re.compile(r"[。！？!?；;\n]|\.(?:\s+|$)")
 
 
-def _error(code, message):
-    raise CaptureError(code, message)
+def _error(code, message, *, details=None):
+    error = CaptureError(code, message)
+    if details is not None:
+        error.details = details
+    raise error
 
 
 def _hash(value):
@@ -124,21 +127,33 @@ def _list(value, code="invalid_quality_output"):
     return value
 
 
-def _schema(value, schema, code):
-    types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
-    valid = any((kind == "null" and value is None)
-                or (kind == "string" and isinstance(value, str))
-                or (kind == "array" and isinstance(value, list))
-                or (kind == "object" and isinstance(value, dict)) for kind in types)
-    if not valid or ("enum" in schema and value not in schema["enum"]):
-        _error(code, "质量输出字段类型或枚举无效")
-    if isinstance(value, dict):
-        _keys(value, schema["required"], code)
-        for key, child in schema["properties"].items():
-            _schema(value[key], child, code)
-    elif isinstance(value, list):
-        for item in value:
-            _schema(item, schema["items"], code)
+def _schema(value, schema, code, *, _path=()):
+    # Keep the original validation order. Only remember the innermost failure
+    # path; the caller decides whether this is a temporal diagnostic.
+    failure_path = _path
+    try:
+        types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
+        valid = any((kind == "null" and value is None)
+                    or (kind == "string" and isinstance(value, str))
+                    or (kind == "array" and isinstance(value, list))
+                    or (kind == "object" and isinstance(value, dict)) for kind in types)
+        if not valid or ("enum" in schema and value not in schema["enum"]):
+            _error(code, "质量输出字段类型或枚举无效")
+        if isinstance(value, dict):
+            if set(value) != set(schema["required"]):
+                missing = next((key for key in schema["required"] if key not in value), None)
+                extra = next((key for key in value if key not in schema["required"]), None)
+                failure_path = (*_path, missing if missing is not None else extra)
+            _keys(value, schema["required"], code)
+            for key, child in schema["properties"].items():
+                _schema(value[key], child, code, _path=(*_path, key))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                _schema(item, schema["items"], code, _path=(*_path, index))
+    except CaptureError as error:
+        if not hasattr(error, "_quality_field_path"):
+            error._quality_field_path = failure_path
+        raise
 
 
 def _unique_strings(value, code="invalid_quality_output"):
@@ -667,13 +682,63 @@ def _source_date_qualified(statement, refs):
     return bool(stated)
 
 
+def _temporal_details(output, field_path, *, claim_index=None, record_id=None,
+                      statement=None, body_span=None):
+    """Locate a failed declaration without including source or body text.
+
+    JSON Pointer paths address the output passed to this validator. Body offsets count
+    Unicode code points, starting at zero with an exclusive end; line and
+    column numbers start at one.
+    """
+    pointer = lambda path: "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1")
+                                          for part in path)
+    details = {"field_path": pointer(field_path)}
+    if claim_index is not None:
+        details["claim_index"] = claim_index
+    if not isinstance(record_id, str):
+        return details
+    details["record_id"] = record_id
+    objects = output.get("objects") if isinstance(output, dict) else None
+    if not isinstance(objects, list):
+        return details
+    matches = [(index, item["body"]) for index, item in enumerate(objects)
+               if isinstance(item, dict) and item.get("id") == record_id
+               and isinstance(item.get("body"), str)]
+    if len(matches) != 1:
+        return details
+    index, body = matches[0]
+    if body_span is None:
+        if not isinstance(statement, str) or not statement or statement not in body:
+            return details
+        start = body.index(statement)
+        body_span = (start, start + len(statement))
+    start, end = body_span
+    details["body_location"] = {
+        "field_path": pointer(("objects", index, "body")), "start": start, "end": end,
+        "line": body.count("\n", 0, start) + 1,
+        "column": start - body.rfind("\n", 0, start),
+    }
+    return details
+
+
 def validate_quality_output(output, context):
     """Reject absent/contradictory machine-verifiable commitments before Review."""
     _validate_context(context)
     if not isinstance(output, dict):
         _error("invalid_quality_output", "缺少质量输出")
     quality = output.get("quality")
-    _schema(quality, QUALITY_SCHEMA, "invalid_quality_output")
+    try:
+        _schema(quality, QUALITY_SCHEMA, "invalid_quality_output", _path=("quality",))
+    except CaptureError as error:
+        path = getattr(error, "_quality_field_path", ())
+        if path[:2] == ("quality", "temporal_claims"):
+            index = path[2] if len(path) > 2 and isinstance(path[2], int) else None
+            claims = quality.get("temporal_claims") if isinstance(quality, dict) else None
+            claim = claims[index] if isinstance(claims, list) and index is not None else None
+            error.details = _temporal_details(output, path, claim_index=index,
+                record_id=claim.get("record_id") if isinstance(claim, dict) else None,
+                statement=claim.get("statement") if isinstance(claim, dict) else None)
+        raise
     _keys(quality, ("coverage_disposition", "statistic_claims", "temporal_claims"))
     records = _record_map(output)
     targets = {item["target_id"]: item for item in context["targets"]}
@@ -742,33 +807,53 @@ def validate_quality_output(output, context):
         _record_refs_cover(record, refs)
     temporal = set()
     facts = {fact.get("system_fact_id"): fact for fact in context["system_facts"] if isinstance(fact, dict)}
-    for claim in _list(quality["temporal_claims"]):
-        _keys(claim, ("record_id", "statement", "basis", "source_refs", "system_fact_id"))
-        record = _body(records, claim["record_id"], claim["statement"])
-        key = (claim["record_id"], claim["statement"])
-        if key in temporal:
-            _error("quality_temporal_mismatch", "时间状态声明重复")
-        temporal.add(key)
-        if claim["basis"] == "source_time":
-            if claim["system_fact_id"] is not None:
-                _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
-            refs = _quality_refs(claim["source_refs"], context)
-            if not (_SOURCE_TIME_WORDS.search(claim["statement"])
-                    or _source_date_qualified(claim["statement"], refs)):
-                _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
-            _record_refs_cover(record, refs)
-        elif claim["basis"] == "unknown":
-            if claim["system_fact_id"] is not None or not _UNKNOWN_TIME_WORDS.search(claim["statement"]):
-                _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
-            _record_refs_cover(record, _quality_refs(claim["source_refs"], context))
-        elif claim["basis"] == "current_state":
-            fact = facts.get(claim["system_fact_id"]) if isinstance(claim["system_fact_id"], str) else None
-            if not fact or fact.get("statement") != claim["statement"] or not fact.get("binding"):
-                _error("quality_current_state_unverified", "当前系统状态必须绑定调用者核定的版本事实")
-            if claim["source_refs"]:
+    for index, claim in enumerate(_list(quality["temporal_claims"])):
+        field = None
+        try:
+            _keys(claim, ("record_id", "statement", "basis", "source_refs", "system_fact_id"))
+            field = "record_id" if claim["record_id"] not in records else "statement"
+            record = _body(records, claim["record_id"], claim["statement"])
+            key = (claim["record_id"], claim["statement"])
+            field = "statement"
+            if key in temporal:
+                _error("quality_temporal_mismatch", "时间状态声明重复")
+            temporal.add(key)
+            if claim["basis"] == "source_time":
+                field = "system_fact_id"
+                if claim["system_fact_id"] is not None:
+                    _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
+                field = "source_refs"
+                refs = _quality_refs(claim["source_refs"], context)
+                field = "statement"
+                if not (_SOURCE_TIME_WORDS.search(claim["statement"])
+                        or _source_date_qualified(claim["statement"], refs)):
+                    _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
+                field = "source_refs"
+                _record_refs_cover(record, refs)
+            elif claim["basis"] == "unknown":
+                field = "system_fact_id" if claim["system_fact_id"] is not None else "statement"
+                if claim["system_fact_id"] is not None or not _UNKNOWN_TIME_WORDS.search(claim["statement"]):
+                    _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
+                field = "source_refs"
                 _record_refs_cover(record, _quality_refs(claim["source_refs"], context))
-        else:
-            _error("quality_temporal_mismatch", "时间依据类型无效")
+            elif claim["basis"] == "current_state":
+                fact = facts.get(claim["system_fact_id"]) if isinstance(claim["system_fact_id"], str) else None
+                field = ("statement" if fact and fact.get("statement") != claim["statement"]
+                         else "system_fact_id")
+                if not fact or fact.get("statement") != claim["statement"] or not fact.get("binding"):
+                    _error("quality_current_state_unverified", "当前系统状态必须绑定调用者核定的版本事实")
+                field = "source_refs"
+                if claim["source_refs"]:
+                    _record_refs_cover(record, _quality_refs(claim["source_refs"], context))
+            else:
+                field = "basis"
+                _error("quality_temporal_mismatch", "时间依据类型无效")
+        except CaptureError as error:
+            path = ("quality", "temporal_claims", index) + ((field,) if field is not None else ())
+            error.details = _temporal_details(output, path, claim_index=index,
+                record_id=claim.get("record_id") if isinstance(claim, dict) else None,
+                statement=claim.get("statement") if isinstance(claim, dict) else None)
+            raise
     # A small deterministic guard catches the concrete stale-state regression;
     # semantic Review is still mandatory for less obvious temporal language.
     for record_id, record in records.items():
@@ -779,7 +864,9 @@ def validate_quality_output(output, context):
                                      for match in re.finditer(re.escape(statement), record["body"]))
         for match in _TEMPORAL_WORDS.finditer(record["body"]):
             if not any(start <= match.start() and match.end() <= end for start, end in covered_spans):
-                _error("quality_temporal_missing", "含当前/尚未等状态措辞的正文缺少时间声明")
+                _error("quality_temporal_missing", "含当前/尚未等状态措辞的正文缺少时间声明",
+                    details=_temporal_details(output, ("quality", "temporal_claims"),
+                        record_id=record_id, body_span=match.span()))
 
 
 def project_quality(context, scope=None):

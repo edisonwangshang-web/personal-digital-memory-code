@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文补充`0.2.0.dev29`开发批次的操作接口，沿用Skill11/9、普通quality0.15与assembly0.14，新增超时重试sidecar／门禁0.16；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
+本文补充`0.2.0.dev30`开发批次的操作接口，本批只补私有失败诊断；沿用Skill11/9、普通quality0.15、assembly0.14及重试门禁0.16；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -24,6 +24,12 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 模型调用还需要实际可用的服务与资料范围。工程仓库可读、GitHub 登录成功或命令存在，都不能证明具备模型服务访问权限。
 
 普通`process`（含`--revision-from-run`）、`production run`、`ask`及待确认执行的新模型调用默认等待900秒，可用`--model-timeout 900`显式设置，允许范围为1—1800秒；不是整条任务的总时长。专用resume／revalidate入口未指定时保留120秒兼容值，可显式覆盖。生产队列将worker参数传到实际调用；日程仍使用冻结的`timeout_seconds`，不因升级改旧值。原超时调用继续记unknown；符合下文有限timeout策略时自动最多补3次，其他unknown停止并报告原因，不能仅靠改timeout或身份重发，见[超时合同](data-conventions.md#model-call-timeout)。
+
+## 查看提取失败诊断
+
+本批只用虚构输入验证诊断，不调用真实模型或重新加工真实资料。本批接入的首轮提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
+
+先检查`status`：`unvalidated_not_publishable`才表示本次五字段可见返回已完整留存，`not_saved_capacity`或`not_saved_engineering_root`表示未保存原始返回，不可用摘要还原或声称完整保存。没有返回的unknown也不会补出response。诊断没有自动重验或发布命令；原次数和上限继续生效，耗尽后不因已有诊断而新增调用。没有历史原始输出时仍不能定位具体旧句子，不为了补日志再跑模型。字段和边界见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。
 
 <a id="explicit-knowledge-rebuild"></a>
 
