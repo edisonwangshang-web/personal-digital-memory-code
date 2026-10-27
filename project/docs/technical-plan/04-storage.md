@@ -4,7 +4,7 @@
 
 本层以 Markdown、开放结构化文件和私有 Git 保存长期资料、知识及执行状态。私有远程仓库作为同步依据，本地副本用于读取和恢复；临时工作区不承担唯一存储职责，第一版不建设专门索引。公开工程仓库保存通用方案、程序、Skill、人工测试与 CI，真实原文、知识、审核、模型返回及运行绑定保留在独立私有工作区。
 
-本批为dev28开发版，仅dev验证、不更新master；新11/9普通质量0.15，来源0.1及正式知识0.2保持。旧10/8的0.12、其他旧质量合同、专用恢复0.13和assembly0.14按原证明核验，不自动迁移或重加工。既有定点返工分别保存raw patch与可重算物化输出，完整历史与发布门禁保留，具体见[数据规范](../data-conventions.md#metadata-only-statistic-repair)，实现和验证以Roadmap为准。
+本批为dev29开发版，仅dev验证、不更新master；11/9普通质量0.15保持，另存0.16超时重试证明／门禁，来源0.1及正式知识0.2保持。旧10/8的0.12、其他旧质量合同、专用恢复0.13和assembly0.14按原证明核验，不自动迁移或重加工。既有定点返工分别保存raw patch与可重算物化输出，完整历史与发布门禁保留，具体见[数据规范](../data-conventions.md#metadata-only-statistic-repair)，实现和验证以Roadmap为准。
 
 dev26容量回退的原样最终候选使用独立`0.14`，固定全部草稿stage／Review、实际extract回执及完整plan，不虚构一次新的模型提取。来源、正文、引用、统计和关系保持原样，新最终Review及完整依赖组证明通过后才正式发布。普通queue／attempt／unit和历史任务保持原合同；适用范围与拒绝条件见[原样最终候选](../data-conventions.md#verbatim-draft-finalization)。
 

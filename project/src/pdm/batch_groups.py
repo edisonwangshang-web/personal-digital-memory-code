@@ -69,10 +69,14 @@ def _coverage(plan, candidates):
         _fail("batch_group_incomplete_coverage")
 
 
-def _proofs(git, plan, reviewed_runs, allowed_paths, *, historical):
+def _proofs(git, plan, reviewed_runs, allowed_paths, *, historical, check_publishable=None):
     from .pipeline import (_candidate_bindings, _committed, _hash, _last_commit,
                            _load, _publication_files, _read_reviewed)
 
+    if check_publishable is None:
+        check_publishable = not historical
+    if type(check_publishable) is not bool:
+        _fail()
     if (not isinstance(reviewed_runs, (list, tuple)) or not 1 <= len(reviewed_runs) <= 256
             or any(not isinstance(run, str) or not _RUN.fullmatch(run) for run in reviewed_runs)
             or len(set(reviewed_runs)) != len(reviewed_runs)):
@@ -89,6 +93,12 @@ def _proofs(git, plan, reviewed_runs, allowed_paths, *, historical):
         bound = sorted(binding["path"] for binding in bindings)
         if not set(bound) <= set(allowed_paths) or any(expected_sources.get(binding["path"]) != binding for binding in bindings):
             _fail("batch_group_scope_mismatch")
+        if check_publishable:
+            # Scope is established before the retirement gate follows any
+            # declared generation dependencies. Historical proof inspection is
+            # not permission to publish a replaced attempt's late result.
+            from .unknown_retry import assert_publishable
+            assert_publishable(git, [run])
         candidate, review, review_commit = _read_reviewed(git, run, source_paths=bound, historical=historical)
         if candidate.get("batch_material", {}).get("draft_only"):
             _fail("batch_requires_final_review")
@@ -240,8 +250,11 @@ def _verify_group_publication(repo, group_id, *, source_paths=None, historical=F
         if sorted(bound) != selected or manifest.get("run_id") != group_id:
             _fail("batch_group_scope_mismatch")
         _scope(plan, selected)
+        from .unknown_retry import assert_publishable
+        assert_publishable(git, [group_id], historical=historical)
         validate_plan(repo, plan, source_paths=selected, require_current_versions=False, historical=True, _locked=True)
-        assembled = _proofs(git, plan, [proof["run_id"] for proof in manifest["proofs"]], selected, historical=True)
+        assembled = _proofs(git, plan, [proof["run_id"] for proof in manifest["proofs"]], selected,
+                            historical=True, check_publishable=not historical)
         expected = _manifest(git, group_id, plan, assembled, manifest["parent_head"], manifest["published_at"])
         if manifest != expected:
             _fail("batch_group_manifest_mismatch")
@@ -324,7 +337,7 @@ def publish_final_group(repo, plan, final_objects, reviewed_runs, *, source_path
                 _fail("batch_group_plan_already_published")
             group_id = marker["run_id"]
             result = verify_group_publication(repo, group_id, source_paths=plan["source_paths"])
-            requested = _proofs(git, plan, reviewed_runs, scope, historical=True)
+            requested = _proofs(git, plan, reviewed_runs, scope, historical=True, check_publishable=True)
             if ({obj["path"]: _hash(obj) for obj in final_objects}
                     != {path: _hash(obj) for path, obj in requested["objects"].items()}
                     or {path: _hash(data) for path, data in requested["files"].items()} != result["files"]):
@@ -347,6 +360,8 @@ def publish_final_group(repo, plan, final_objects, reviewed_runs, *, source_path
                                  rebuild_context=candidate.get("rebuild_context"))
             group_id = group_id or "run-" + _hash({"plan_id": plan["plan_id"],
                 "files": {path: _hash(data) for path, data in assembled["files"].items()}})[7:39]
+            from .unknown_retry import assert_publishable
+            assert_publishable(git, [group_id])
             manifest_path = _run_path(group_id, "manifest")
             if git.path(manifest_path).exists() or git.text("log", "-1", "--format=%H", "--", manifest_path):
                 _fail("batch_group_id_exists")

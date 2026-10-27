@@ -2,7 +2,17 @@
 
 本页记录可公开的能力沿革。代码版本、规则、schema、准确提交的 CI、资料发布和业务验收分别管理；包版本号存在不能证明已打标签、合并、部署或通过整个阶段。私人资料版本与实跑历史保留在私库，工程文档以本公库为统一维护入口。
 
-## 当前开发批次：0.2.0.dev28
+## 当前开发批次：0.2.0.dev29
+
+本批仅在dev开发验证，不更新两个master。新生产计划默认冻结`bounded-timeout-v1`：符合单完整批、普通root extract（含真实反馈返工）已结束timeout、该run无候选／Review／发布、原source／控制／Skill／rebuild及audit池均可核验的条件时，在同一工作首次加最多3次自动重试，无需逐次人工确认；旧队列无marker不静默升级，目标计划继续原次数，不是新业务意图。
+
+原调用与attempt保持unknown，schema0.16 sidecar及`timeout_retry_ref`链接唯一后继，参与处理身份但不送模型；第4次仍失败即停止，绝不第5次。后继零调用预约可按原run／operation恢复；原run迟到结果不能再成为当前发布或被group采用。`timeout_cleanup_unknown`、仍在途、非timeout unknown、预算／权限、Review调用超时（含分解审核）等不适用。本地串行不证明服务端原请求取消或无重叠，原消费和历史保留。Skill11/9、quality0.15、assembly0.14不变，旧writer遇新门禁拒写。
+
+本批回归、准确提交CI、真实自动提取与完整Review／发布／读取分别取证，不预填通过，也不以重试实现或CI成功声明M1完成。合同与反例见[数据规范](data-conventions.md#bounded-timeout-retry)及[场景验收](scenarios-and-acceptance.md#bounded-timeout-retry-acceptance)。
+
+## 历史：0.2.0.dev28
+
+最终工程快照`d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3`的[CI 40449641483](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40449641483)八任务成功，两版Python各1288项。该固定工程证据不替代后续版本CI或真实业务验收。
 
 本批仅在dev开发验证，不合入或推送master。修复纯程序最终组装在started／engine已提交、staging写入前中断后无法由正常队列继续的问题；仅对原零调用预约、固定草稿／计划／规则／来源／控制及原审计身份全部可核验、root和所有分解审核子调用均未启动的情况，以原run和原attempt继续原样组装，再执行完整独立Review及group发布检查。
 

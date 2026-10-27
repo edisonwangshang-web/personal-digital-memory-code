@@ -687,6 +687,9 @@ def _related_context(git, related_runs, sources, *, at_commit=None, visited=(), 
         if not set(paths).issubset(scope):
             _error("evidence_source_mismatch")
         scopes[run] = paths
+    if at_commit is None:
+        from .unknown_retry import assert_publishable
+        assert_publishable(git, related_runs)
     result, seen = [], set()
     snapshot = at_commit or git.head()
     from .controls import object_policy
@@ -772,7 +775,7 @@ def _updated_objects(git, objects, related, *, check_current=False, rebuild_cont
     return operations
 
 
-def _merge_candidates(git, run_ids, source_paths, *, visited=()):
+def _merge_candidates(git, run_ids, source_paths, *, visited=(), historical=False):
     if (not isinstance(run_ids, (list, tuple)) or len(run_ids) > 256
             or len(set(run_ids)) != len(run_ids) or len(visited) >= 16):
         _error("invalid_merge_context")
@@ -784,6 +787,8 @@ def _merge_candidates(git, run_ids, source_paths, *, visited=()):
         stage = _load(_committed(git, _stage_path(run_id)), "candidate")
         if not {binding["path"] for binding in _candidate_bindings(stage)} <= set(source_paths):
             _error("evidence_source_mismatch")
+        from .unknown_retry import assert_publishable
+        assert_publishable(git, [run_id], historical=historical)
         candidate, review, _ = _read_reviewed(git, run_id, historical=True, visited=(*visited, run_id))
         result.append({"run_id": run_id, "binding": candidate["binding"], "objects": candidate["objects"],
                        "review_id": review["review_id"], "batch_context": candidate.get("batch_context")})
@@ -792,7 +797,7 @@ def _merge_candidates(git, run_ids, source_paths, *, visited=()):
 
 def _reused_extraction(git, run_id, source_fields, versions, controls_digest, source_views, batch_material,
                        continuation_context=None, review_strategy="legacy-v1", revision_context=None,
-                       skill_bundle=None, quality_context=None):
+                       skill_bundle=None, quality_context=None, historical=False):
     """Reuse a valid extraction only when Review demonstrably never started.
 
     A semantic Review rejection and any uncertain Review are deliberately not
@@ -814,6 +819,8 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
             or old.get("review_strategy", "legacy-v1") != review_strategy
             or {key: old[key] for key in source_fields} != source_fields):
         _error("extraction_not_reusable")
+    from .unknown_retry import assert_publishable
+    assert_publishable(git, [run_id], historical=historical)
     sources = _candidate_sources(git, old, historical=True)
     _validate_candidate_quality(git, old, sources)
     extraction = _call_metadata({**old["extraction"], "output": old["extraction_output"]})
@@ -828,7 +835,7 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
 
 def _processing_key(source_fields, versions, controls_digest, batch_context=None, batch_material=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_context=None, revision_resume=None,
-                    revision_revalidation=None, skill_bundle=None, rebuild_context=None):
+                    revision_revalidation=None, skill_bundle=None, rebuild_context=None, timeout_retry_ref=None):
     bindings = [source_fields["source"], *source_fields.get("additional_sources", [])]
     material = {"sources": [{"source_id": item["source_id"], "source_version": item["source_version"]} for item in bindings],
                 "rules_version": versions["rules_version"], "controls_digest": controls_digest}
@@ -849,6 +856,8 @@ def _processing_key(source_fields, versions, controls_digest, batch_context=None
         material["skill_bundle_sha256"] = skill_bundle["sha256"]
     if rebuild_context is not None:
         material["rebuild_context"] = rebuild_context
+    if timeout_retry_ref is not None:
+        material["timeout_retry_ref"] = timeout_retry_ref
     return _hash(material)
 
 
@@ -869,10 +878,11 @@ def _assert_substantive_revision(candidate):
         _error("revision_unchanged")
 
 
-def _revision_attempt_path(context):
+def _revision_attempt_path(context, timeout_retry_ref=None):
     # Stable across new code/rules/queue names: an unknown launch cannot gain a
     # fresh identity by changing extraction material or starting another run.
-    return "memory/runs/processes/revision-attempts/" + _hash(context) + ".md"
+    identity = context if timeout_retry_ref is None else {"context": context, "timeout_retry_ref": timeout_retry_ref}
+    return "memory/runs/processes/revision-attempts/" + _hash(identity) + ".md"
 
 
 def _existing_revision_attempt(git, context, source_paths, related_runs):
@@ -929,6 +939,8 @@ def _existing_processing(git, key, source_paths, related_runs):
     if marker != {"run_id": marker.get("run_id"), "processing_key": key,
                   "manifest_path": _run_path(marker.get("run_id"), "manifest")}:
         _error("processing_marker_mismatch")
+    from .unknown_retry import assert_publishable
+    assert_publishable(git, [marker["run_id"]])
     publication = verify_publication(git.repo, marker["run_id"], source_paths=source_paths, historical=True)
     if publication.get("processing_key") != key or _last_commit(git, git.head(), path) != publication["commit_sha"]:
         _error("processing_marker_mismatch")
@@ -1252,6 +1264,9 @@ def _review_payload(candidate, payload):
             for key in ("quality_repair_context", "raw_extraction_output"):
                 request["candidate"].pop(key, None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
+    if "timeout_retry_ref" in candidate or "timeout_retry_resume" in candidate:
+        request["candidate"] = {key: value for key, value in request["candidate"].items()
+                                if key not in {"timeout_retry_ref", "timeout_retry_resume"}}
     return request
 
 
@@ -1323,6 +1338,8 @@ def _assert_fixed_current(git, candidate, sources, stage_bytes):
     if "rebuild_context" in candidate:
         from .rebuild import validate_rebuild_context
         validate_rebuild_context(git, candidate["rebuild_context"], source_paths=source_paths)
+    from .unknown_retry import assert_publishable
+    assert_publishable(git, [candidate["run_id"]])
 
 
 def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, output,
@@ -1452,7 +1469,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     related_runs=None, run_id=None, execution_context=None,
                     batch_context=None, source_views=None, draft_only=False, merge_runs=(), reuse_extraction_run=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_from_run=None, _resume_unstarted=None,
-                    _revalidate_completed=None, skill_bundle=None, rebuild_context=None, _preflight_only=False):
+                    _revalidate_completed=None, skill_bundle=None, rebuild_context=None, _preflight_only=False, timeout_retry_ref=None):
     """Process selected sources; explicit revision retains a rejected fixed Review.
 
     Revision is interpretation work, never another fact source or permission to
@@ -1565,21 +1582,43 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         _execution_guard(repo, execution_context, run_id=run_id, source_paths=source_paths, related_runs=related_runs)
         if continuation_context is not None:
             _validate_continuation_context(git, continuation_context, source_paths, related_runs, draft_only=draft_only)
+        from .unknown_retry import assert_run_ref
+        assert_run_ref(git, run_id, timeout_retry_ref)
+        timeout_resume = None
+        if timeout_retry_ref is not None:
+            from .unknown_retry import validate_execution, unstarted_resume
+            if (execution_context is not None or not batch or draft_only or merge_runs
+                    or reuse_extraction_run is not None or continuation_context is not None
+                    or related_runs != [] or _resume_unstarted is not None or _revalidate_completed is not None):
+                _error("timeout_retry_scope_unsupported")
+            validate_execution(git, timeout_retry_ref, run_id, source_paths=source_paths,
+                               plan_id=batch_context["plan_id"], model_call=None if _preflight_only else model_call,
+                               require_claim=not _preflight_only, execution_options={
+                                   "batch_context": batch_context, "source_views": source_views,
+                                   "skill_bundle": skill_bundle, "review_strategy": review_strategy,
+                                   "rebuild_context": rebuild_context, "revision_from_run": revision_from_run,
+                                   "versions": execution_versions(git)})
+            if not _preflight_only:
+                timeout_resume = unstarted_resume(git, timeout_retry_ref, run_id, model_call)
+                if timeout_resume is None:
+                    _error("run_already_exists")
         revision_context = None
         if revision_from_run is not None:
             from .revision_context import build_revision_context
+            from .unknown_retry import assert_publishable
+            assert_publishable(git, [revision_from_run])
             revision_context = build_revision_context(git, revision_from_run, source_paths=source_paths, related_runs=related_runs)
-            if _resume_unstarted is None and _revalidate_completed is None:
+            if _resume_unstarted is None and _revalidate_completed is None and timeout_retry_ref is None:
                 existing_revision = _existing_revision_attempt(git, revision_context, source_paths, related_runs)
                 if existing_revision is not None:
                     return existing_revision
-            elif _revalidate_completed is None:
+            elif _resume_unstarted is not None and _revalidate_completed is None:
                 from .revision_resume import verify_unstarted_revision
                 _resume_unstarted = verify_unstarted_revision(git, run_id, revision_context,
                     model_call=model_call, source_paths=source_paths, related_runs=related_runs,
                     reservation=_resume_unstarted["reservation"],
                     expected_reservation_sha256=_resume_unstarted["expected_reservation_sha256"])
-            else:
+            elif _revalidate_completed is not None:
                 recovery = _completed_extraction_module(_revalidate_completed)
                 _revalidate_completed = recovery.verify_completed_extraction(git, run_id, model_call=model_call,
                     source_paths=source_paths, related_runs=related_runs,
@@ -1588,7 +1627,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     original_payload=_revalidate_completed["original_payload"],
                     response=_revalidate_completed["response"],
                     original_resume_context=_revalidate_completed["original_resume_context"])
-        if requested_run is not None and _resume_unstarted is None and _revalidate_completed is None:
+        if requested_run is not None and _resume_unstarted is None and _revalidate_completed is None and not timeout_resume:
             paths = [_stage_path(run_id), *[_run_path(run_id, name) for name in ("started", "review", "failure", "manifest", "receipt", "pending", "reused")]]
             if any(git.path(path).exists() or _last_commit(git, head, path) for path in paths):
                 _error("run_already_exists")
@@ -1608,6 +1647,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                    "related": [], "controls": {}, "rules_version": versions["rules_version"],
                    "domain_policy": domain_policy()}
         related, context_fields = [], {}
+        if timeout_retry_ref is not None:
+            context_fields["timeout_retry_ref"] = copy.deepcopy(timeout_retry_ref)
+            if timeout_resume:
+                context_fields["timeout_retry_resume"] = copy.deepcopy(timeout_resume)
         if rebuild_context is not None:
             payload["rebuild_context"] = copy.deepcopy(rebuild_context)
             context_fields["rebuild_context"] = copy.deepcopy(rebuild_context)
@@ -1643,7 +1686,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             context_fields.update(quality)
         if incremental:
             controls = control_guard(git)
-            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle, rebuild_context)
+            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle, rebuild_context, timeout_retry_ref)
             existing = _existing_processing(git, key, source_paths, related_runs)
             if existing is not None:
                 if requested_run is not None and not _preflight_only:
@@ -1706,11 +1749,13 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             _reserve_processing_calls(model_call)
         if incremental:
             started_path = _run_path(run_id, "started")
-            if _resume_unstarted is not None or _revalidate_completed is not None:
+            if _resume_unstarted is not None or _revalidate_completed is not None or timeout_resume:
                 started_bytes = _committed(git, started_path)
             else:
                 started = {"run_id": run_id, "processing_key": key, "execution_context": copy.deepcopy(execution_context),
                            "source_paths": source_paths, "related_runs": related_runs, "reserved_calls": 2, "started_at": timestamp()}
+                if timeout_retry_ref is not None:
+                    started["timeout_retry_ref"] = copy.deepcopy(timeout_retry_ref)
                 started_bytes = _document("processing_attempt", started,
                     _processing_header(skill_bundle, M1_SCHEMA_VERSION))
                 started_files = {started_path: started_bytes}
@@ -1719,9 +1764,14 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 if revision_context is not None:
                     pointer = {"run_id": run_id, "revision_context_sha256": _hash(revision_context),
                                "source_paths": source_paths, "related_runs": related_runs, "processing_key": key}
-                    started_files[_revision_attempt_path(revision_context)] = _document("revision_attempt", pointer,
+                    started_files[_revision_attempt_path(revision_context, timeout_retry_ref)] = _document("revision_attempt", pointer,
                         _processing_header(skill_bundle, REVISION_SCHEMA_VERSION))
                 head = git.write_files(started_files, head, "process: reserve immutable run before model calls")
+            if timeout_resume:
+                prior = _load(started_bytes, "processing_attempt")
+                from .engine_provenance import read_reservation
+                if prior.get("processing_key") != key or read_reservation(git, run_id)["versions"] != versions:
+                    _error("processing_attempt_mismatch")
             # The reservation advances HEAD; both model calls must receive the
             # control snapshot at the same base used by the fixed candidate.
             controls = control_guard(git, head)
@@ -2042,19 +2092,24 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         if (candidate.get("related") != related or candidate.get("controls_digest") != controls_digest
                 or candidate.get("processing_key") != _processing_key(_source_fields(sources), candidate["versions"], controls_digest,
                     candidate.get("batch_context"), candidate.get("batch_material"), candidate.get("continuation_context"), strategy, candidate.get("revision_context"), candidate.get("revision_resume"), candidate.get("revision_revalidation"),
-                    candidate.get("skill_bundle"), rebuild_context)):
+                    candidate.get("skill_bundle"), rebuild_context, candidate.get("timeout_retry_ref"))):
             _error("processing_context_changed")
         attempt_path = _run_path(run_id, "started")
         attempt_bytes = _committed(git, attempt_path)
         attempt = _load(attempt_bytes, "processing_attempt",
             _processing_header(candidate.get("skill_bundle"), M1_SCHEMA_VERSION))
-        if (candidate.get("attempt_path") != attempt_path or candidate.get("attempt_sha256") != _hash(attempt_bytes)
-                or _last_commit(git, git.head(), attempt_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])
-                or attempt != {"run_id": run_id, "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"]),
+        expected_attempt = {"run_id": run_id, "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"]),
                     "execution_context": candidate["execution_context"], "source_paths": [source["path"] for source in sources],
-                    "related_runs": runs, "reserved_calls": 2, "started_at": attempt.get("started_at")}):
+                    "related_runs": runs, "reserved_calls": 2, "started_at": attempt.get("started_at")}
+        if candidate.get("timeout_retry_ref") is not None:
+            expected_attempt["timeout_retry_ref"] = candidate["timeout_retry_ref"]
+        started_commit = candidate.get("timeout_retry_resume", {}).get("started", {}).get("commit_sha", candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"]))
+        if (candidate.get("attempt_path") != attempt_path or candidate.get("attempt_sha256") != _hash(attempt_bytes)
+                or _last_commit(git, git.head(), attempt_path) != started_commit or attempt != expected_attempt):
             _error("processing_attempt_mismatch")
         _time(attempt["started_at"])
+        from .unknown_retry import verify_candidate
+        verify_candidate(git, candidate)
     elif candidate.get("related") != []:
         _error("source_mismatch")
     repair_fields = {"quality_repair_context", "raw_extraction_output"}
@@ -2089,13 +2144,13 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         verify_revision_context(git, candidate["revision_context"], source_paths=[source["path"] for source in sources],
             related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical,
             include_snapshots=False)
-        pointer_path = _revision_attempt_path(candidate["revision_context"])
+        pointer_path = _revision_attempt_path(candidate["revision_context"], candidate.get("timeout_retry_ref"))
         pointer = _load(_committed(git, pointer_path), "revision_attempt",
             _processing_header(candidate.get("skill_bundle"), REVISION_SCHEMA_VERSION))
         if (pointer != {"run_id": run_id, "revision_context_sha256": _hash(candidate["revision_context"]),
                 "source_paths": [source["path"] for source in sources], "related_runs": candidate["related_runs"],
                 "processing_key": candidate.get("revision_resume", {}).get("reservation", {}).get("processing_key", candidate["processing_key"])}
-                or _last_commit(git, git.head(), pointer_path) != candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"])):
+                or _last_commit(git, git.head(), pointer_path) != candidate.get("timeout_retry_resume", {}).get("started", {}).get("commit_sha", candidate.get("revision_revalidation", {}).get("original_resume_context", {}).get("reservation", {}).get("head", candidate["base_head"]))):
             _error("revision_attempt_mismatch")
         from .quality_completed_extraction import CONTRACTS
         quality_revalidation = candidate.get("revision_revalidation", {}).get("contract") in CONTRACTS
@@ -2117,7 +2172,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     if batch:
         from .batching import validate_source_views, assert_fragment_refs
         validate_source_views(sources, candidate.get("source_views"), candidate["batch_context"])
-        prior = _merge_candidates(git, [item.get("run_id") for item in candidate.get("merge_inputs", [])], [source["path"] for source in sources], visited=visited)
+        prior = _merge_candidates(git, [item.get("run_id") for item in candidate.get("merge_inputs", [])], [source["path"] for source in sources], visited=visited, historical=historical)
         material = candidate.get("batch_material")
         if (not isinstance(material, dict) or set(material) != ({"draft_only", "merge_bindings", "review_strategy"} if strategy != "legacy-v1" else {"draft_only", "merge_bindings"})
                 or strategy != "legacy-v1" and material.get("review_strategy") != strategy
@@ -2128,7 +2183,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             reused = candidate["extraction_reused_from"]
             response, expected = _reused_extraction(git, reused.get("run_id"), _source_fields(sources), candidate["versions"],
                 candidate["controls_digest"], candidate["source_views"], material, candidate.get("continuation_context"), strategy, candidate.get("revision_context"),
-                candidate.get("skill_bundle"), candidate.get("quality_context"))
+                candidate.get("skill_bundle"), candidate.get("quality_context"), historical=historical)
             if reused != expected or response["output"] != candidate["extraction_output"] or _call_metadata(response) != extraction:
                 _error("extraction_not_reusable")
     _validate_candidate_quality(git, candidate, sources)
@@ -2269,6 +2324,9 @@ def _computation_snapshots(git, candidate, visited=()):
         validate_rebuild_context(git, ref, source_paths=[item["path"] for item in _candidate_bindings(candidate)],
                                  at_commit=candidate["base_head"])
         entries.append(copy.deepcopy(ref))
+    if candidate.get("timeout_retry_ref") is not None:
+        from .unknown_retry import authority_refs
+        entries.extend(authority_refs(git, candidate["timeout_retry_ref"]))
     if "revision_revalidation" in candidate:
         recovery = _completed_extraction_module(candidate["revision_revalidation"])
         entries.extend(recovery.verify_revalidated_extraction(git, candidate, historical=True))
@@ -2289,7 +2347,7 @@ def _computation_snapshots(git, candidate, visited=()):
             entries.extend(verify_decomposed_review(git, candidate, review, _candidate_payload(git, candidate, sources), sources, historical=True))
     if "revision_context" in candidate:
         from .revision_context import verify_revision_context
-        path = _revision_attempt_path(candidate["revision_context"])
+        path = _revision_attempt_path(candidate["revision_context"], candidate.get("timeout_retry_ref"))
         pointer_commit = _last_commit(git, git.head(), path)
         entries.append({"commit_sha": pointer_commit, "path": path, "sha256": _hash(git.read(pointer_commit, path))})
         entries.extend(verify_revision_context(git, candidate["revision_context"],
@@ -2357,6 +2415,8 @@ def verify_publication(repo, run_id, *, source_paths=None, historical=False, _vi
         return verify_group_publication(repo, run_id, source_paths=source_paths, historical=historical)
     candidate, review, review_commit = _read_reviewed(git, run_id, source_paths=source_paths,
                                                     historical=historical, visited=visited)
+    from .unknown_retry import assert_publishable
+    assert_publishable(git, [run_id], historical=historical)
     schema_version = _pipeline_schema(candidate)
     manifest = _load(manifest_bytes, "manifest", schema_version)
     commit = _last_commit(git, git.head(), manifest_path)
@@ -2418,6 +2478,8 @@ def publish(repo, run_id, expected_head=None):
     """Publish only a passed, unchanged Review; publication+manifest share one tree."""
     git = PipelineGit(repo)
     manifest_path = _run_path(run_id, "manifest")
+    from .unknown_retry import assert_publishable
+    assert_publishable(git, [run_id])
     if git.path(manifest_path).is_file():
         metadata, body = _parse_saved(_committed(git, manifest_path))
         if metadata.get("kind") == "batch_group_manifest":

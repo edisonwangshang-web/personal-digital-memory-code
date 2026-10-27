@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。本批开发版为`0.2.0.dev28`，主路径仍为 **source → staging → record／topic**。分类及质量检查嵌入原提取／独立Review，不增加阶段。本批纯程序组装中断恢复回归与准确dev CI待核，真实全链与M1整体另行验收，状态见Roadmap。本批仅dev开发验证，不合入或推送master。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。本批开发版为`0.2.0.dev29`，主路径仍为 **source → staging → record／topic**。分类及质量检查嵌入原提取／独立Review，不增加阶段。本批补提取超时自动有限重试，回归与准确dev CI待核，真实全链与M1整体另行验收，状态见Roadmap。本批仅dev开发验证，不合入或推送master。
 
 新默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
 
@@ -15,19 +15,29 @@
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发、云端持久恢复与第二模型独立读取仍待验证。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
 
+## dev29：提取超时后自动继续
+
+1. 新`production prepare`默认冻结`bounded-timeout-v1`。旧队列无marker不原地升级；当前工程的新目标计划必须与原工作保持相同source／fragment、控制、Skill及rebuild回执，继续原有限计数，不新建业务意图。
+2. 仅独立人工队列、单完整批、无related或答复续接的普通root提取适用，包括依据真实Review意见的返工extract。核原调用unknown＋`error_code=timeout`＋已保存`finished_at`、原extract timeout失败、原started／engine与计划；该超时run无任何候选、Review、审核计划或发布，来源及控制未变，且仍使用同一持久audit池，才自动记录重试回执。仍在途、非timeout、`timeout_cleanup_unknown`、预算／权限或任何Review超时（含分解审核）等保持停止并报告原因。
+3. 保存schema0.16 sidecar链接原run／operation、原证明和唯一后继，不修改原unknown或旧attempt条目。后继使用同work的下一attempt，candidate／started／attempt绑定`timeout_retry_ref`；该引用加入处理身份但不作为模型材料；返工仍提供原真实草稿及未解决Review意见，不把超时回执或传输错误历史送模型。后继零调用预约中断时继续原run／operation，不重复预约或计次。
+4. 在现有worker步数范围内自动继续，首次加最多3次，总attempt最多4；任务层可按failed继续，底层实际调用仍是unknown。第4次仍超时当即`attempt_limit`停止，不发第5次。已知失败的既有重试上限继续生效，成功后仍须完整独立审核和条件发布。
+5. 本地worker保持串行，不能据此声明服务端旧请求已取消或没有重叠。停用的旧run及依赖不得再被普通发布、group采用或当前证据作为正式结果；历史记录保留。Skill11/9、quality0.15、assembly0.14及来源／正式对象不迁移，旧writer遇0.16门禁拒写。
+
+无需每次失败再人工确认，程序自动保存受控重试回执。具体字段、适用范围和已用次数规则见[有限超时合同](data-conventions.md#bounded-timeout-retry)。工程与人工反例通过后，真实链仍需实际模型输出、Review、发布和读取证据。
+
 ## dev28：纯程序组装在保存候选前中断
 
 最终组装已提交`started.md`及同提交engine、但尚未写入staging时，生产队列先核原预约确属`verbatim-draft-finalization-v1`且`reserved_calls=0`，核原run、原attempt、计划、完整草稿、Skill、来源及控制不变。再以原审计pool和operation核root的calls为空、真实审核布局对应的子单元计数器及operation均未存在（包括仅预约），该run目录仅原started／engine且候选从未存在，才以原run重新进入确定性组装。没有原持久账本的调用者不能仅凭`reserved_calls=0`自动恢复。
 
 恢复保留原started／engine和attempt身份，不重新提取或刷新次数；原样候选仍需完整object／coverage／global独立Review及group发布检查，后续Review正常调用并计次。已有staging继续既有候选恢复路径。root已有任意调用记录、子单元已有状态，来源／计划／证明变化，或曾经有候选而当前缺失，都不能通过此零调用路径。当前版本仍须满足原plan绑定，不保证跨工程升级自动恢复。完整契约见[数据规范](data-conventions.md#assembly-zero-call-resume)，人工中断步骤见[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。
 
-实际模型超时且没有完整可核验返回时仍保持unknown；本修复不查询、终结或重发该调用，也没有为独立production队列新增“确认弃用未知结果后重试”的入口。
+实际模型超时不能走本节纯程序组装路径。符合[dev29有限超时合同](data-conventions.md#bounded-timeout-retry)时由自动重试回执处理，原unknown照常保留；其他未知结果继续停止对账。
 
-有限处理仍是首次加失败后最多3次安全重试，总attempt最多4。第4次已知失败在当前切片立即以`attempt_limit`停止；必需分解审核单元耗尽时父工作也停止，重开不会另起extract。第一次真实unknown就先停止对账；第4次通过或待确认分别保持正常后续与等待语义，不按次数误判。详见[有限重试合同](data-conventions.md#bounded-processing-retries)。
+有限处理仍是首次加失败后最多3次重试，总attempt最多4。第4次已知失败在当前切片立即以`attempt_limit`停止；必需分解审核单元耗尽时父工作也停止，重开不会另起extract。仅dev29明确适用的已结束提取timeout可自动继续；其他unknown停止对账。第4次通过或待确认分别保持正常后续与等待语义，不按次数误判。详见[有限重试合同](data-conventions.md#bounded-processing-retries)。
 
 ## dev27：等待时间与纯绑定返工
 
-新标准CLI单次模型调用默认900秒，`--model-timeout`可设1—1800秒，并实际传入子调用；专用历史恢复入口默认120秒保持可显式覆盖。production沿本次worker参数推进，不改变queue身份；schedule使用原冻结`timeout_seconds`，旧值不迁移。启动后超时仍先对账，不以更长等待或新operation重发unknown，详见[超时合同](data-conventions.md#model-call-timeout)。
+新标准CLI单次模型调用默认900秒，`--model-timeout`可设1—1800秒，并实际传入子调用；专用历史恢复入口默认120秒保持可显式覆盖。production沿本次worker参数推进，不改变queue身份；schedule使用原冻结`timeout_seconds`，旧值不迁移。提高等待时间本身不允许重发unknown，符合dev29有限超时策略时才自动重跑，详见[超时合同](data-conventions.md#model-call-timeout)。
 
 收到Review9的真实`needs_revision`后，先核`repair_scope`及完整旧证明。纯`statistic_bindings`且检查、目标pair和固定范围全部满足时，同一个revision extract11只取`{statistic_bindings:[{stat_id,record_id,body_evidence}]}`；程序从固定统计和原文物化value／根引用，其他正文、关系及旧quality保持。raw patch与完整输出分别绑定，完整新Review后才允许发布。内容或混合问题走原全稿，错误或歧义不能猜，原稳定次数及unknown保持。字段与拒绝条件见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)；该版隔离定向回归、标准CLI人工全链及准确CI的固定证据见Roadmap，不能移用于本批HEAD或真实验收。
 
@@ -222,7 +232,7 @@ Review 检查语义是否忠实、限定条件是否保留、时间和对象关�
 
 账本的持久位置、任务范围与原消费必须明确绑定。复制临时文件、清空账本、换 operation ID 或创建另一账本不能自动扩展范围或重置既有调用身份；本地存储与人工故障演练不能证明跨机器云持久状态或目标 runner 已接通。
 
-模型已启动后，selector创建、管道设为非阻塞、注册及读取都处于统一清理保护中。selector关闭、进程停止／回收和各管道关闭独立尝试，某项清理失败不能跳过其余动作。已有模型错误或取消保留；若读取原本成功而清理出现异常，则返回安全 `cli_cleanup_error`，不返回答案，异常链不带原始输入／输出。OS拒绝清理时，只能确认其余动作仍被尝试，不能断言进程已停止。清理不等于调用未发生，未知结果保留消费且不自动重试。预算错误同时区分本次attempted_calls与operation累计started；后续Review启动前失败不得抹去已经启动的提取消费。具体故障注入与检查方法见[场景与验收](scenarios-and-acceptance.md)。
+模型已启动后，selector创建、管道设为非阻塞、注册及读取都处于统一清理保护中。selector关闭、进程停止／回收和各管道关闭独立尝试，某项清理失败不能跳过其余动作。已有模型错误或取消按原保护保留；普通timeout若清理未能确认成功，返回`timeout_cleanup_unknown`，不能进入有限timeout自动重试。若读取原本成功而清理出现异常，仍返回安全`cli_cleanup_error`而不返回答案，异常链不带原始输入／输出。OS拒绝清理时不能断言进程已停止；本地清理也不证明服务端取消。原消费保留，适配器本身不自动重发，上层仅按[有限timeout合同](data-conventions.md#bounded-timeout-retry)处理符合条件的提取。预算错误同时区分本次attempted_calls与operation累计started；后续Review启动前失败不得抹去已经启动的提取消费。具体故障注入与检查方法见[场景与验收](scenarios-and-acceptance.md)。
 
 ### 2.7 人工触发、分解审核与显式返工
 
@@ -446,4 +456,4 @@ M1 验收包含“启用 → 暂停 → 核对在途结果 → 修复或恢复�
 
 字段、枚举、模板和目录变更统一更新数据规范；处理步骤更新本文；样例和检查方法更新场景验收；阶段完成情况只更新 Roadmap 并附运行证据。后续新增接口、提示词或配置按实际建设结果补充，不能仅因写入文档就标为已实现。
 
-原生模型适配器默认 120 秒；调用方可显式选择最长 1800 秒，以容纳较大的结构化期间总结。上限外或非法值在CLI启动前拒绝，实际超时仍记为未知并停止，不自动重发。每次实际超时设置随调用记录，不能把延长等候当作免费重试。
+原生模型适配器默认120秒；调用方可显式选择最长1800秒，以容纳较大的结构化期间总结。上限外或非法值在CLI启动前拒绝，适配器实际超时仍记为未知并返回错误，本身不自动重发。上层production仅对[有限timeout合同](data-conventions.md#bounded-timeout-retry)符合条件的提取最多补3次，原unknown与消费保留，不能把延长等候当作免费重试。

@@ -1,6 +1,27 @@
 # 场景与验收
 
-本文公开定义验收输入、步骤、反例和预期行为，不公布个人资料、私有标识、调用回执或真实验收结论。下文人工例子须在临时仓库执行；真实验收由获准资料及私有证据判断。本批为`0.2.0.dev28`开发版，默认extract@11／review@9、普通quality0.15与assembly0.14保持，仅在dev开发验证，不合入或推送master。本批相关定向回归已通过，准确dev CI待核，真实全链及M1整体未验收。
+本文公开定义验收输入、步骤、反例和预期行为，不公布个人资料、私有标识、调用回执或真实验收结论。下文人工例子须在临时仓库执行；真实验收由获准资料及私有证据判断。本批为`0.2.0.dev29`开发版，沿用extract@11／review@9、普通quality0.15与assembly0.14，新增超时重试sidecar／门禁0.16，仅在dev开发验证，不合入或推送master。本批回归与准确dev CI待核，真实全链及M1整体未验收。
+
+<a id="bounded-timeout-retry-acceptance"></a>
+
+## dev29 提取超时后自动有限重试
+
+使用临时Git仓库、明确人工来源与模型替身，按[有限超时合同](data-conventions.md#bounded-timeout-retry)核以下正反例；不调用真实服务，不预填通过。
+
+| 检查 | 必须观察的结果 |
+| --- | --- |
+| 默认冻结与旧计划 | 新prepare冻结`bounded-timeout-v1`；旧无marker队列不静默改写。当前目标计划同source／fragment／控制／Skill／rebuild继续旧timeout次数，不新建业务意图或空账本 |
+| 自动推进而原事实不变 | 单完整批普通root extract已结束timeout且该run无候选／Review／发布，自动生成0.16回执后继续下一attempt，无需逐次确认；原call及原attempt仍unknown，任务层可failed继续 |
+| 返工extract超时 | 同工作中真实Review退回后，返工extract超时可沿下一剩余attempt继续；当前草稿及未解决意见保持，不把回执或传输失败历史作为模型材料 |
+| 最多补3次 | 原第1次加最多3次，第4次仍失败立即`attempt_limit`，重开也无第5次；第4次通过仍完整审核／发布，待确认保持等待 |
+| 后继预约中断 | 回执已保存或后继已预约但0调用时中断，复跑沿原run／operation，不重复回执、不新增attempt或调用 |
+| 证明／范围改变 | 修改原failure／started／engine／计数前缀、audit池、来源、控制、Skill或rebuild引用均拒绝，不清原unknown或计数 |
+| 不支持的未知结果 | still-started、非timeout unknown、`timeout_cleanup_unknown`、预算／权限、Review调用的超时（含分解审核）、该超时run已有stage／Review或非完整单批均停止并报告原因，无新增模型调用 |
+| 清理失败归类 | 本地超时后无法确认子进程与管道清理结束时固定归类`timeout_cleanup_unknown`，不当作普通timeout自动重试 |
+| 迟到原run | 原run及其依赖不能再普通发布、group采用或作为当前正式证据；历史仍可审计，不能伪造原输出已找回或服务端取消成功 |
+| 格式与模型输入 | sidecar／门禁0.16，后继candidate／started／attempt精确绑定`timeout_retry_ref`，该ref参与处理身份但不发送模型；Skill11/9、quality0.15、assembly0.14与来源／正式对象保持，旧writer拒写新门禁 |
+
+工程检查通过后，真实全链仍需实际自动提取、独立Review、发布、读取与私有恢复证据。本地worker串行不能证明服务端无重叠；原调用消费与unknown保留，不把CI全绿作为M1完成。
 
 <a id="assembly-zero-call-resume-acceptance"></a>
 
@@ -15,12 +36,12 @@
 | 原预约及输入变化 | 修改started字段、engine来源、计划／Skill、来源／控制或草稿依赖后拒绝；不改写旧预约来适配当前输入 |
 | 曾写入候选再缺失 | 当前staging不存在但历史曾有候选时不当成首次零调用组装；不因删除文件绕过已有审核或未知调用 |
 | 已有完整候选 | 继续原分解审核恢复规则，已完成节点不重复调用；真正未知节点继续要求对账 |
-| 实际模型超时 | 保留实际调用和次数、没有完整结果则仍unknown；增大timeout、换queue／operation或本组装修复均不能重发 |
+| 实际模型超时 | 本组装路径不处理已启动模型；原调用unknown和次数保留。仅符合dev29有限timeout合同才能自动重跑，其他unknown仍停止 |
 | 已知失败的4次边界 | 前3次仅在安全条件满足时可推进；第4次仍失败，在同一短切片立即返回`attempt_limit`并停止，不显示`continue`；重开无新增调用或attempt |
 | 审核子单元耗尽 | 必需分解审核单元4次安全失败后父工作即停止，重开不另起extract或审核单元，不以父work尚有次数绕过子单元上限 |
-| 未知、通过和待确认 | 第一次真实unknown立即停止对账；第4次通过仍正常推进审核／发布，待确认仍等待用户，不仅凭次数误判失败 |
+| 未知、通过和待确认 | 不符合dev29有限timeout合同的unknown立即停止；第4次通过仍正常推进审核／发布，待确认仍等待用户，不仅凭次数误判失败 |
 
-这些人工中断反例只证明工程恢复边界，不证明真实模型输出、知识质量或完整M1通过。本批不新增模型调用、不修改历史Skill或schema，也不更新master。
+这些人工中断反例只证明工程恢复边界，不证明真实模型输出、知识质量或完整M1通过。dev28组装修复未改Skill或schema，当前新增timeout门禁按上文dev29单独核验；本批不更新master。
 
 ## dev27 标准CLI人工全链与反例
 

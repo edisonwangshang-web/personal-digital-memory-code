@@ -249,8 +249,38 @@ class ModelCallTests(unittest.TestCase):
                     self.assertEqual('invalid_payload_or_prompt', error.exception.code)
 
     def test_timeout_kills_cli_and_returns_safe_code(self):
-        error = self.error('timeout', 'time.sleep(30)', timeout=1)
+        original = model_calls.subprocess.Popen
+        children = []
+        def start(*args, **kwargs):
+            process = original(*args, **kwargs)
+            children.append(process)
+            return process
+        with patch.object(model_calls.subprocess, 'Popen', side_effect=start):
+            error = self.error('timeout', 'time.sleep(30)', timeout=1)
         self.assertLess(error.elapsed_seconds, 5)
+        self.assertEqual(1, len(children))
+        self.assertIsNotNone(children[0].poll())
+
+    def test_final_kill_waits_until_local_child_is_stopped(self):
+        process = Mock(pid=31415)
+        process.poll.side_effect = [None, -9]
+        process.wait.side_effect = [model_calls.subprocess.TimeoutExpired('artificial-cli', 5), -9]
+        with patch.object(model_calls.os, 'killpg', create=True) as group_kill:
+            model_calls._stop(process)
+        self.assertEqual([unittest.mock.call(timeout=5), unittest.mock.call(timeout=5)],
+                         process.wait.call_args_list)
+        self.assertEqual(1 if os.name == 'posix' else 2, process.kill.call_count)
+        if os.name == 'posix':
+            group_kill.assert_called_once_with(process.pid, model_calls.signal.SIGKILL)
+
+    def test_final_kill_without_confirmed_exit_is_not_accepted(self):
+        process = Mock(pid=31415)
+        process.poll.return_value = None
+        process.wait.side_effect = model_calls.subprocess.TimeoutExpired('artificial-cli', 5)
+        with patch.object(model_calls.os, 'killpg', create=True):
+            with self.assertRaises(model_calls.subprocess.TimeoutExpired):
+                model_calls._stop(process)
+        self.assertEqual(2, process.wait.call_count)
 
     def test_output_limit_counts_stderr_without_exposing_it(self):
         with patch.object(model_calls, 'MAX_STREAM_BYTES', 100):
@@ -414,7 +444,7 @@ class ModelCallTests(unittest.TestCase):
 
     def test_primary_safe_failure_survives_cleanup_errors(self):
         with self.mocked_process() as mocked:
-            primary = ModelCallError('timeout', 'model-' + 'a' * 32)
+            primary = ModelCallError('cli_permission_denied', 'model-' + 'a' * 32)
             mocked.selector.select.side_effect = primary
             for action in (mocked.selector.close, mocked.stop,
                            *[pipe.close for pipe in mocked.pipes]):
@@ -425,6 +455,65 @@ class ModelCallTests(unittest.TestCase):
         self.assertIs(primary, raised.exception)
         self.assert_cleanup_attempted(mocked)
         self.assert_unknown_operation('primary-failure')
+
+    def test_timeout_with_confirmed_cleanup_retains_original_error(self):
+        with self.mocked_process() as mocked:
+            primary = ModelCallError('timeout', 'model-' + 'a' * 32)
+            mocked.selector.select.side_effect = primary
+            with self.assertRaises(ModelCallError) as raised:
+                model_calls.call_model('answer', {}, ledger=self.ledger,
+                                       operation_id='timeout-stopped')
+        self.assertIs(primary, raised.exception)
+        self.assert_cleanup_attempted(mocked)
+        self.assert_unknown_operation('timeout-stopped')
+        self.assertEqual('timeout', self.ledger.operation('timeout-stopped')['calls']['answer']['error_code'])
+
+    def test_timeout_with_unconfirmed_cleanup_is_not_retryable_timeout(self):
+        for stage in ('selector', 'stop', 'stdin', 'stdout', 'stderr', 'all'):
+            with self.subTest(stage=stage), self.mocked_process() as mocked:
+                primary = ModelCallError('timeout', 'model-' + 'a' * 32)
+                mocked.selector.select.side_effect = primary
+                actions = {'selector': mocked.selector.close, 'stop': mocked.stop,
+                           'stdin': mocked.pipes[0].close, 'stdout': mocked.pipes[1].close,
+                           'stderr': mocked.pipes[2].close}
+                for name, action in actions.items():
+                    if stage in (name, 'all'):
+                        action.side_effect = OSError('PRIVATE_CLEANUP_DIAGNOSTIC_FIXTURE')
+                operation = 'timeout-cleanup-' + stage
+                with self.assertRaises(ModelCallError) as raised:
+                    model_calls.call_model('answer', {}, ledger=self.ledger,
+                                           operation_id=operation)
+                self.assertEqual('timeout_cleanup_unknown', raised.exception.code)
+                self.assertEqual(primary.invocation_id, raised.exception.invocation_id)
+                self.assertNotIn('PRIVATE_', ''.join(traceback.format_exception(raised.exception)))
+                self.assert_cleanup_attempted(mocked)
+                self.assert_unknown_operation(operation)
+                self.assertEqual('timeout_cleanup_unknown',
+                                 self.ledger.operation(operation)['calls']['answer']['error_code'])
+
+    def test_timeout_cleanup_cancellation_does_not_become_retryable(self):
+        with self.mocked_process() as mocked:
+            mocked.selector.select.side_effect = ModelCallError('timeout', 'model-' + 'a' * 32)
+            mocked.stop.side_effect = KeyboardInterrupt()
+            with self.assertRaises(KeyboardInterrupt):
+                model_calls.call_model('answer', {}, ledger=self.ledger,
+                                       operation_id='timeout-cleanup-cancelled')
+        self.assert_cleanup_attempted(mocked)
+        self.assert_unknown_operation('timeout-cleanup-cancelled')
+        self.assertEqual('transport_outcome_unknown',
+                         self.ledger.operation('timeout-cleanup-cancelled')['calls']['answer']['error_code'])
+
+    def test_primary_cancellation_survives_cleanup_errors(self):
+        with self.mocked_process() as mocked:
+            primary = KeyboardInterrupt()
+            mocked.selector.select.side_effect = primary
+            mocked.stop.side_effect = OSError('PRIVATE_CLEANUP_DIAGNOSTIC_FIXTURE')
+            with self.assertRaises(KeyboardInterrupt) as raised:
+                model_calls.call_model('answer', {}, ledger=self.ledger,
+                                       operation_id='primary-cancelled')
+        self.assertIs(primary, raised.exception)
+        self.assert_cleanup_attempted(mocked)
+        self.assert_unknown_operation('primary-cancelled')
 
     def test_setup_and_cleanup_combined_failures_preserve_safe_io_error(self):
         with self.mocked_process() as mocked:

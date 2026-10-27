@@ -1,6 +1,6 @@
 # 工程迭代、发布与回滚
 
-本批为dev28开发版，默认Skill11/9、普通quality0.15，**仅dev开发验证，不合入或推送master**。实现与验证状态见Roadmap；下文稳定交付流程为历史及后续规范，本批不执行。程序、规则、schema及资料版本分别固定，旧合同原证明保持；代码交付不等于部署或完整M1验收。
+本批为dev29开发版，沿用Skill11/9、普通quality0.15，新增超时重试证明／门禁0.16，**仅dev开发验证，不合入或推送master**。实现与验证状态见Roadmap；下文稳定交付流程为历史及后续规范，本批不执行。程序、规则、schema及资料版本分别固定，旧合同原证明保持；代码交付不等于部署或完整M1验收。
 
 [执行方案](m0-m1-execution-plan.md) · [数据规范](data-conventions.md) · [场景验收](scenarios-and-acceptance.md) · [Roadmap](roadmap.md) · [双仓操作](dual-repository-operation.md)
 

@@ -1,6 +1,6 @@
 # 日常使用：保存、加工、审核与读取
 
-本文补充`0.2.0.dev28`开发批次的操作接口，默认Skill11/9、普通quality0.15；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
+本文补充`0.2.0.dev29`开发批次的操作接口，沿用Skill11/9、普通quality0.15与assembly0.14，新增超时重试sidecar／门禁0.16；实现、准确CI、人工全链和真实运行状态以Roadmap为准。本批只在dev开发验证，不合入或推送master。真实资料仍在获准私库操作；参数按实际范围填写，先按[双仓方式](dual-repository-operation.md)核对版本，从公库加载程序、`--repo`指私库，不复制代码回私库。
 
 当前先人工触发。`capture` 只保存原文；加工、独立 Review、正式发布和问答是不同步骤。日程命令不会创建 GPT 云端任务，M1 整体仍未验收，见 [Roadmap](roadmap.md)。
 
@@ -23,7 +23,7 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 
 模型调用还需要实际可用的服务与资料范围。工程仓库可读、GitHub 登录成功或命令存在，都不能证明具备模型服务访问权限。
 
-普通`process`（含`--revision-from-run`）、`production run`、`ask`及待确认执行的新模型调用默认等待900秒，可用`--model-timeout 900`显式设置，允许范围为1—1800秒；不是整条任务的总时长。专用resume／revalidate入口未指定时保留120秒兼容值，可显式覆盖。生产队列将worker参数传到实际调用；日程仍使用冻结的`timeout_seconds`，不因升级改旧值。启动后超时先对账，不换operation或加长超时重发unknown，见[超时合同](data-conventions.md#model-call-timeout)。
+普通`process`（含`--revision-from-run`）、`production run`、`ask`及待确认执行的新模型调用默认等待900秒，可用`--model-timeout 900`显式设置，允许范围为1—1800秒；不是整条任务的总时长。专用resume／revalidate入口未指定时保留120秒兼容值，可显式覆盖。生产队列将worker参数传到实际调用；日程仍使用冻结的`timeout_seconds`，不因升级改旧值。原超时调用继续记unknown；符合下文有限timeout策略时自动最多补3次，其他unknown停止并报告原因，不能仅靠改timeout或身份重发，见[超时合同](data-conventions.md#model-call-timeout)。
 
 <a id="explicit-knowledge-rebuild"></a>
 
@@ -92,13 +92,17 @@ python -P -B -m pdm production run --repo "$PDM_DATA_REPO" --id "$queue_id" \
 python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 ```
 
+新prepare默认冻结`bounded-timeout-v1`，不需要每次失败再人工确认。对独立人工队列的单完整批、已结束且明确extract timeout、该超时run没有任何候选／审核／发布的普通root提取（含真实反馈返工），程序核同原文、控制、Skill、rebuild回执和audit池后，自动记录0.16重试回执，沿同一work最多补3次，总attempt最多4。原调用和原attempt仍保留unknown，不从零再开一轮；后继预约中断按原run／operation继续，第四次仍失败即停止，没有第五次。
+
+旧队列无该marker时不原地升级；若当前工程需要新的目标计划，仍承接原source／fragment、控制和rebuild工作身份及次数，不重清知识或更换账本。仍在途、非timeout unknown、`timeout_cleanup_unknown`、预算／权限、Review调用的超时（含分解审核）或该超时run已有候选均不进入该自动路径。worker本地串行不能证明服务端原请求已取消，原消费与历史保留；迟到原run不能再次发布或成为当前正式结果。完整条件见[有限超时合同](data-conventions.md#bounded-timeout-retry)。
+
 多来源重复 `--source`；需要旧知识时，准备阶段通过 `--allowed-source` 和 `--allowed-run` 明确全部允许的依赖。程序保存分批计划、各批候选与审核、最终依赖组证明和多主题原子发布结果。普通完整 Review 请求超过 256000 字节时，`auto` 按需转为 object／coverage／global 分解审核；完整必要语义仍超容量时保持 `blocked_capacity`，不能截断材料后宣称完成。
 
 普通多批的完整原文合并超容量时，程序可自动把已核完整草稿原样组成0.14最终候选，再真正独立分解审核；不增加extract调用或新的CLI参数。当前只接无旧关联、答复或重建上下文的普通草稿；对象、统计口径冲突或必要审核仍超容量时保留具体阻塞。若该原样最终候选审核要求实质修订且仍不能承载，后续`assembly_revision_required`表示需要处理，不能反复运行同一联合期待自动修好。完整边界见[数据规范](data-conventions.md#verbatim-draft-finalization)。
 
-所有必要独立审核通过后才正式发布。已完成节点按原身份复验；首次失败后最多再安全重试3次，总attempt最多4，第4次已知失败立即以`attempt_limit`表示本次处理失败并停止。必需审核子单元耗尽时父工作同样停止，重开不新增extract或审核调用；跨日、重启或改队列名不清零。第一次真实unknown就停止对账，不自动重发；第4次通过或待确认分别正常后续或等待，不误判失败，见[有限重试合同](data-conventions.md#bounded-processing-retries)。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
+所有必要独立审核通过后才正式发布。已完成节点按原身份复验；首次失败后最多再重试3次，总attempt最多4，第4次已知失败立即以`attempt_limit`表示本次处理失败并停止。必需审核子单元耗尽时父工作同样停止，重开不新增extract或审核调用；跨日、重启或改队列名不清零。只有上述有限timeout条件允许自动重跑，其他unknown停止并报告原因；第4次通过或待确认分别正常后续或等待，不误判失败，见[有限重试合同](data-conventions.md#bounded-processing-retries)。独立生产队列的 `published_local`／`not_requested` 只确认本地发布，远程交付另按既有规则完成。
 
-纯程序最终组装在started／engine已提交、staging尚未写入时中断，继续同一`production run`会先核原预约、原审计身份、root无调用且原审核子单元无状态，合格后按原run／attempt原样组装，再执行完整独立Review并正常计次。不要删除旧预约或新建队列来恢复；真正已启动或结果未知的模型调用不适用，仍先对账。具体条件见[组装零调用恢复](data-conventions.md#assembly-zero-call-resume)。
+纯程序最终组装在started／engine已提交、staging尚未写入时中断，继续同一`production run`会先核原预约、原审计身份、root无调用且原审核子单元无状态，合格后按原run／attempt原样组装，再执行完整独立Review并正常计次。不要删除旧预约来恢复；真正已启动或结果未知的模型调用不能使用此组装路径，其有限timeout例外按前文单独核验。具体条件见[组装零调用恢复](data-conventions.md#assembly-zero-call-resume)。
 
 Review9若明确只缺统计绑定，正常返工会在同一extract中要求精确`statistic_bindings`，程序补固定统计与根引用，原正文和关系保持后重新独立审核；没有新的补绑CLI命令或额外模型阶段。混合／正文问题仍需完整返工，不能手改模型返回或把旧证明补成通过。具体边界见[定点返工合同](data-conventions.md#metadata-only-statistic-repair)。新真实全链另核现有状态和明确意图，不把零调用复验当成新加工。
 

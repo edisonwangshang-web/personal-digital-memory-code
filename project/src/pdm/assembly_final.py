@@ -82,6 +82,9 @@ def _material(git, plan, draft_runs, run_id, base_head, created_at, *, historica
         bound = _candidate_bindings(peek)
         if any(expected_sources.get(item["path"]) != item for item in bound):
             _fail("assembly_source_mismatch")
+        if not historical:
+            from .unknown_retry import assert_publishable
+            assert_publishable(git, [source_run])
         candidate, review, review_commit = _read_reviewed(
             git, source_run, source_paths=sorted(item["path"] for item in bound), historical=True)
         if (candidate.get("assembly") is not None

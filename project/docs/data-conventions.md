@@ -1,6 +1,20 @@
 # 数据规范
 
-本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。本批为 `0.2.0.dev28` 开发版，新任务默认为 `knowledge-extract@11`／`knowledge-review@9`、普通质量链 `0.15`、assembly `0.14`保持；本批相关定向回归已通过，准确dev CI待核，真实全链另行取得证据。本批仅在 `dev` 开发和验证，不合入或推送 `master`。基础规则、不可变 Skill、程序与资料版本分别绑定，M1 整体仍未验收。
+本文是公开工程的数据契约；`memory/`、控制、账本和运行证据的路径均指独立私有资料工作区，公库不保存真实个人资料或私有验收结果。本批为 `0.2.0.dev29` 开发版，沿用 `knowledge-extract@11`／`knowledge-review@9`、普通质量链 `0.15`与assembly `0.14`，新增超时重试sidecar／门禁 `0.16`；本批回归与准确dev CI待核，真实全链另行取得证据。本批仅在 `dev` 开发和验证，不合入或推送 `master`。基础规则、不可变 Skill、程序与资料版本分别绑定，M1 整体仍未验收。
+
+<a id="bounded-timeout-retry"></a>
+
+## dev29：提取超时后自动有限重试
+
+新`production prepare`默认将`request.timeout_retry_policy="bounded-timeout-v1"`冻结进队列。符合本节条件的提取超时，在同一稳定工作内自动继续，首次加最多3次重试，总attempt最多4，无需逐次人工确认。旧队列没有该marker时不原地升级；需要当前工程目标计划时，必须核同source／fragment、控制、Skill和rebuild回执，继续原work与已用次数，不能当作新业务任务、换意图或清零。
+
+首版只接独立人工触发队列的单个完整批、无旧关联运行或答复续接的普通root extract（含根据真实Review意见的返工提取）：原attempt和调用均为unknown，错误严格为`timeout`，实际调用有`finished_at`，原failure同样证明extract timeout，且该超时run从未有staging、Review、decomposed-plan或发布。核原started／engine、完整原计划、当前来源与控制，以及同一持久audit池和operation后，才生成后继；显式重建仍绑定原回执。仍在途的调用、非timeout unknown、`timeout_cleanup_unknown`、权限／预算阻塞、任何Review调用的超时（含分解审核）、该超时run已有候选或范围变化均停止并返回实际原因，不扩大本合同。
+
+自动记录使用`automatic-extraction-timeout-retry-v1`、kind=`timeout_retry`、schema `0.16`的不可变sidecar，保存原调用／started／engine／failure及原计划、计数前缀、audit池与当前目标计划的绑定，链接唯一后继run／operation。后继candidate／started／attempt带`timeout_retry_ref`；该引用参与处理身份但不送给模型；返工提取保留前次真实草稿及未解决Review意见，超时回执和传输失败历史不作为事实或额外模型材料。原调用仍是unknown、原attempt条目和已用次数保持，不改写成未执行或已知完成；任务层将该次按失败推进。第四次仍超时即`attempt_limit`停止，没有第五次；后继已预约但尚未调用时按原run／operation幂等续接，不重复追加尝试。
+
+本地worker串行不代表服务端原请求已取消，服务端可能仍在处理并与后继重叠，调用额度可能重复消耗。本合同按已允许的有限重跑策略执行，不声称取回原结果或取消成功。原失败及历史可审计；已被重试回执停用的原run及依赖不能再由普通发布、group采用或当前证据作为正式结果，防止迟到原结果再次发布。
+
+来源`0.1`、正式知识`0.2`、普通quality `0.15`、assembly `0.14`和不可变Skill保持；`0.16`只用于该重试证明／写入门禁，旧writer不支持即拒写。其他已确认失败的最多3次安全重试及耗尽停止规则继续生效。本批人工测试、准确CI、真实自动提取／审核／发布／读取分别取得证据，不把自动重试本身写成M1通过。
 
 <a id="assembly-zero-call-resume"></a>
 
@@ -12,7 +26,7 @@
 
 恢复后候选仍为`0.14`，完整新独立Review及group发布要求保持；程序重组本身没有模型调用，后续首次Review仍会正常计次。Skill、质量schema和来源／正式对象不迁移。已有staging按原候选路径恢复；候选删除、原证明变化、root已有任意调用记录或原审核子单元已有状态均不属于此路径，不能删除记录或更换queue／operation绕过。当前版本仍须满足原plan与规则约束，不承诺跨工程升级自动恢复旧计划。
 
-真正已启动的模型调用超时仍是未知结果，须有可核验终态及完整输出才能按适用合同恢复；没有结果就保留unknown及次数。此规则没有新增独立production队列的未知结果终结或重发权限，不把纯程序组装可重建当成模型结果可找回。
+真正已启动的模型调用不能使用本节纯程序组装恢复；没有完整结果时，原调用继续保留unknown及次数。仅[dev29有限超时策略](#bounded-timeout-retry)另行允许符合条件的root提取在总4次内自动重跑；其他unknown仍停止对账，不把纯程序组装可重建当成模型结果可找回。
 
 <a id="bounded-processing-retries"></a>
 
@@ -20,7 +34,7 @@
 
 当前M1的`production`生产队列与`continuous-v1`使用同一稳定工作：首次处理失败后，最多再安全重试3次，总attempt最多4。前3次已知失败仅在满足原续接条件时推进；第4次仍为已知失败，当前切片立即返回既有`attempt_limit`，表示本次处理失败并停止，不再显示`continue`。任一必要分解审核单元耗尽其4次安全尝试时，父工作同样停止；任何登记或恢复动作前先检查已有耗尽终态；旧历史即使还留有后续partial／reserved，也不再启动调用。重开相同队列不另起extract或新审核调用，也不靠换队列、日期或规则刷新次数。
 
-结果未知不是安全重试许可：第一次出现started／unknown且无可核验终态，就保留原状态及计数并停止要求对账。第4次通过仍正常进入后续审核／发布，待用户确认的`needs_confirmation`保持等待语义，不能仅因次数为4就判定失败。沿用既有状态、计数和schema，不增加处理阶段。旧非continuous有限日程继续按其冻结`max_attempts`核验，不迁移旧配置；本节四次主路径不代表所有历史日程均已改成四次。
+未知状态本身不构成安全重试许可；只有[dev29有限超时策略](#bounded-timeout-retry)核准的已结束root extract timeout可自动继续，原unknown照常保留。其他started／unknown无可核验终态时即停止对账。第4次通过仍正常进入后续审核／发布，待用户确认的`needs_confirmation`保持等待语义，不能仅因次数为4就判定失败。已知失败沿用既有状态及计数，不增加处理阶段。旧非continuous有限日程继续按其冻结`max_attempts`核验，不迁移旧配置；本节四次主路径不代表所有历史日程均已改成四次。
 
 <a id="metadata-only-statistic-repair"></a>
 
@@ -38,7 +52,7 @@
 
 标准预算CLI的`--model-timeout`接受1—1800秒。新`process`（含普通`--revision-from-run`返工）、`production run`、`ask`及待确认执行默认900秒；专用`resume-unstarted-revision`／`revalidate-completed-extraction`未显式指定时维持120秒，可为后续新调用显式设置。底层Python调用默认120秒保持兼容。该参数约束一次实际模型调用，不是整个队列或全部分解审核的完成时限。
 
-production将本次worker参数传到各实际调用，不向已有queue或账本新增超时字段，不改变工作身份。日程通过原配置`timeout_seconds`设置，新配置默认900、上限1800，`lease_seconds`至少为两倍；重开旧日程且省略该项继承原冻结值，不自动迁移。run／drain执行时真正传入该冻结值，不用CLI覆盖原日程。调用启动后超时仍按unknown保留原审计、次数和对账要求，提高等待值不会使未知调用变成可重试。
+production将本次worker参数传到各实际调用，不向已有queue或账本新增超时字段，不改变工作身份。日程通过原配置`timeout_seconds`设置，新配置默认900、上限1800，`lease_seconds`至少为两倍；重开旧日程且省略该项继承原冻结值，不自动迁移。run／drain执行时真正传入该冻结值，不用CLI覆盖原日程。调用启动后超时仍按unknown保留原审计和次数；提高等待值本身不允许重发，只有满足[dev29有限超时策略](#bounded-timeout-retry)的调用才自动重跑。
 
 <a id="verbatim-draft-finalization"></a>
 

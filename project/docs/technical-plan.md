@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev28`开发版，默认Skill11/9、普通质量链0.15及assembly0.14保持；本批纯程序组装中断恢复回归与准确dev CI待核，真实全链另行取得证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
+本文说明系统组成、运行位置、模块交接和设计取舍。本批为`0.2.0.dev29`开发版，沿用Skill11/9、普通质量链0.15及assembly0.14，新增有限timeout重试证明／门禁0.16；本批回归与准确dev CI待核，真实全链另行取得证据。本批只在`dev`开发验证，不合入或推送`master`。字段统一在[数据规范](data-conventions.md)，执行在[实现明细](implementation-details.md)，检查方法在[场景与验收](scenarios-and-acceptance.md)；历史交付与回滚遵循[发布约定](release-and-rollback.md)。
 
 ## 当前实现与双仓边界
 
@@ -30,7 +30,7 @@ M1 整体尚未验收。目标 GPT 云端任务拟按 `Asia/Shanghai` 每日 22:
 
 现行质量路径为：固定来源及 Skill 引用 → 程序准备资料清单与可复算统计 → 模型按加工 Skill 提取分类和组织知识 → 程序校验覆盖、数字、引用、时间和版本 → 独立模型按审核 Skill 逐项复查 → 完整证明与条件发布。Skill、必要依赖或检查失败时保留原因，不退回普通提示词绕过发布门禁。
 
-增量输出自9/7引入`reuse_refs`，11/9继续支持精确版本复用，不能把引用当成免审或新的事实来源。新Review9明确纯统计绑定缺失时，只在原返工extract补`statistic_bindings`，程序按固定统计与原引用物化，正文和旧quality保持，完整新Review仍必需；内容或混合问题走原全稿。模型等待时间由新标准CLI默认900秒、最多1800秒控制，旧冻结日程不迁移，超时未知不重发。具体边界见[定点返工](data-conventions.md#metadata-only-statistic-repair)与[超时合同](data-conventions.md#model-call-timeout)。
+增量输出自9/7引入`reuse_refs`，11/9继续支持精确版本复用，不能把引用当成免审或新的事实来源。新Review9明确纯统计绑定缺失时，只在原返工extract补`statistic_bindings`，程序按固定统计与原引用物化，正文和旧quality保持，完整新Review仍必需；内容或混合问题走原全稿。模型等待时间由新标准CLI默认900秒、最多1800秒控制，旧冻结日程不迁移；仅符合[有限timeout策略](data-conventions.md#bounded-timeout-retry)的root提取自动最多补3次，原unknown保持，其他未知调用停止。质量和等待字段见[定点返工](data-conventions.md#metadata-only-statistic-repair)与[超时合同](data-conventions.md#model-call-timeout)。
 
 | 层次 | 质量路径的职责 |
 | --- | --- |

@@ -29,7 +29,7 @@ class RetryFinalityTests(unittest.TestCase):
                 topic["record_ids"] = [value + "-later" for value in topic["record_ids"]]
         mode = getattr(self, "failure_mode", None)
         if mode == "unknown" and role == "extract":
-            raise ModelCallError("timeout", response["invocation_id"])
+            raise ModelCallError("cli_turn_failed", response["invocation_id"])
         if mode == "extract" and role == "extract":
             response["output"]["objects"] = []
         if mode == "review" and role == "review":
@@ -122,7 +122,7 @@ class RetryFinalityTests(unittest.TestCase):
         self.assertEqual(self.run_slice()["status"], "needs_confirmation")
         self.assertEqual(self.frozen_accounting(), before)
 
-    def test_first_unknown_stops_without_consuming_the_remaining_three_attempts(self):
+    def test_first_non_timeout_unknown_stops_without_consuming_the_remaining_three_attempts(self):
         self.prepare()
         self.failure_mode = "unknown"
         result = self.run_slice()

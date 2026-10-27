@@ -502,6 +502,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
         existing_plan, _ = _read(git, plan_path, 'decomposed_review_plan')
     plan = _plan(git, candidate, stage_commit, payload,
                  request_contract=existing_plan.get('request_contract') if existing_plan is not None else REQUEST_CONTRACT)
+    from .unknown_retry import assert_publishable
+    assert_publishable(git, [candidate["run_id"]])
     _write(git, plan_path, plan, "decomposed_review_plan")
     if existing_plan is None or _untouched_plan(git, plan, adapter):
         # Static object/coverage requests do not depend on earlier model

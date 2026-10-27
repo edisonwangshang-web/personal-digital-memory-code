@@ -6,13 +6,15 @@
 
 项目保存明确提交的原文，经模型提取组织、自动分类、独立 Review 后形成可追溯知识，供限定范围问答和后续模型读取。长期分为知识库、分析、计划与复盘四个阶段，先完成可持续维护的知识库。三个稳定领域为 `health`、`career`、`learning`，同一事实不为分类复制多份。
 
-本批开发版为`0.2.0.dev28`，默认Skill11/9、普通quality0.15、assembly0.14及基础提示规则extract v14／review v10／answer v8保持。**本批只在dev开发验证，不合入或推送master。** 本批相关定向回归已通过，准确dev CI待核，不用上一批成功代替新结果，真实全链与M1整体另行验收。
+本批开发版为`0.2.0.dev29`，沿用Skill11/9、普通quality0.15、assembly0.14及基础提示规则extract v14／review v10／answer v8，新增超时重试sidecar／门禁0.16。**本批只在dev开发验证，不合入或推送master。** 本批针对性人工回归已检查，准确dev CI待核，不用上一批成功代替新结果，真实全链与M1整体另行验收。
 
-本批最小目标是纯程序组装保存候选前的中断恢复：只对原started／engine精确绑定、原pool／operation及所有分解审核子调用均未启动的预约，用原run和原attempt继续组装，再执行完整独立Review；没有原账本、候选曾存在或真实模型已启动／结果未知均不适用。契约和反例见[数据规范](data-conventions.md#assembly-zero-call-resume)与[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。没有为真实超时结果新增查询、弃用或重发入口，接手续跑前必须核真实状态，不换身份或清次数。
+本批最小目标是“超时后自动最多再重试3次”，不要求逐次人工确认。新prepare冻结`bounded-timeout-v1`，首版仅对独立人工队列的单完整批、已结束普通root extract（含真实反馈返工）timeout、该run从未有候选／Review／发布、原来源／控制／Skill／rebuild及audit身份可核验的情况自动继续。旧无marker队列不静默升级；当前目标计划沿同work和原次数推进，不是新业务意图。原调用仍unknown，0.16自动回执链接唯一后继，`timeout_retry_ref`参与处理身份但不送模型；第4次仍失败停止，绝不第5次。契约与反例见[数据规范](data-conventions.md#bounded-timeout-retry)及[场景验收](scenarios-and-acceptance.md#bounded-timeout-retry-acceptance)。
 
-失败次数口径为首次加失败后最多3次安全重试，总attempt最多4。第4次已知失败或必需审核子单元耗尽，立即用既有`attempt_limit`表示处理失败并停止，重开父工作不再extract；第一次真实unknown就停止对账。第4次通过或待确认仍按原语义处理，不因次数误判。契约见[有限重试](data-conventions.md#bounded-processing-retries)，本批测试与准确CI另核。
+仍在途、非timeout unknown、`timeout_cleanup_unknown`、预算／权限或Review调用的超时（含分解审核）不适用，停止并报告原因。后继0调用预约按原run／operation幂等，迟到原run不能再发布、被group采用或成为当前正式结果。原消费与历史保留；本地串行不代表服务端取消或无重叠。其他已确认失败的3次安全重试、审核子单元耗尽父工作停止、第4次通过和待确认原语义继续，见[有限重试](data-conventions.md#bounded-processing-retries)。
 
-dev27沿用的等待时间与纯统计绑定返工仍有效：普通CLI新调用默认900秒、可设1—1800秒，旧冻结日程不迁移且实际传参，unknown不重发；Review9确认纯缺失后，原revision extract11仅补statistic_bindings，程序以固定统计与根引用物化，旧正文／关系／quality条目保持，完整新Review照常。内容或混合问题走原全稿。旧10/8及assembly0.14原证明不改，字段及边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。可配置等待不保证真实调用完成，增加等待时间不能让原unknown自动重试。
+dev28纯程序组装保存候选前的恢复仍只接原零调用预约：严格核原started／engine、原pool／operation与全部子单元无状态，用原run／attempt继续原样组装再完整Review。它不取回已启动模型的原结果，不能与dev29另行记录的有限timeout后继混用，见[组装恢复合同](data-conventions.md#assembly-zero-call-resume)。
+
+dev27沿用的等待时间与纯统计绑定返工仍有效：普通CLI新调用默认900秒、可设1—1800秒，旧冻结日程不迁移且实际传参；Review9确认纯缺失后，原revision extract11仅补statistic_bindings，程序以固定统计与根引用物化，旧正文／关系／quality条目保持，完整新Review照常。内容或混合问题走原全稿。旧10/8及assembly0.14原证明不改，字段及边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。可配置等待本身不保证完成或允许重发，dev29有限timeout策略以外的unknown仍停止。
 
 本批修复多批容量回退、10/8草稿／答复反馈、读取重复Git I/O、调度退出码与控制写前容量。受限原样finalization使用0.14且没有新extract，最终仍独立分解审核；related、答复或重建大组及跨批实质修订不因此获得任意容量支持。普通10/8质量链0.12和历史Skill不迁移，现有成功业务链不全量重加工。准确工程CI与真实业务出口分别检查，见[M1交付核对](m1-delivery-readiness.md)。
 
@@ -34,7 +36,7 @@ dev27沿用的等待时间与纯统计绑定返工仍有效：普通CLI新调用
 
 工程在公开 `dev` 开发，通过审查和准确提交的 CI 后，经 PR 交付 `master`。`master` 是稳定交付分支；初始化 `main` 不作为开发入口。远端默认展示分支设置存在管理权限限制，访问代码可直接使用 [dev](https://github.com/edisonwangshang-web/personal-digital-memory-code/tree/dev)／[master](https://github.com/edisonwangshang-web/personal-digital-memory-code/tree/master)。
 
-上一批dev27快照[`df9ceba78e1e9a722ec660350f0442a5e9a7d545`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/df9ceba78e1e9a722ec660350f0442a5e9a7d545)的[CI 40349119582](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40349119582)八任务成功，Python3.11／3.12各1273项及基础检查通过。它不证明本批dev28或后续HEAD通过，不替代真实业务，也不授权本批更新master。
+上一批dev28快照[`d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3)的[CI 40449641483](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40449641483)八任务成功，Python3.11／3.12各1288项及基础检查通过。它不证明本批dev29或后续HEAD通过，不替代真实业务，也不授权本批更新master。
 
 标准公开 Linux CI 是主路线，不需要 Mac 常开。离线工程检查使用 [check_local.py](../scripts/check_local.py)，见[本地检查](local-checks.md)；自托管／Mac 容器仅保留为可选未验收方案，公库没有专用注册或 Mac 启停工具。
 

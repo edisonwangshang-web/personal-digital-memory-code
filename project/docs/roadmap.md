@@ -6,20 +6,22 @@
 
 ## 当前阶段
 
-本批开发版为`0.2.0.dev28`，默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链`0.15`；基础提示规则extract v14／review v10／answer v8及assembly `0.14`保持。**本批仅在dev开发和验证，不合入或推送master；本批相关定向回归已通过，准确dev CI待核。** M0已有历史验收，M1主要工程能力已有实现但整体未验收，M2—M4尚未完整交付。
+本批开发版为`0.2.0.dev29`，沿用`knowledge-extract@11`／`knowledge-review@9`、普通质量链`0.15`及assembly `0.14`，新增超时重试sidecar／门禁`0.16`；基础提示规则extract v14／review v10／answer v8保持。**本批仅在dev开发和验证，不合入或推送master；本批针对性人工回归已检查，准确dev CI待核。** M0已有历史验收，M1主要工程能力已有实现但整体未验收，M2—M4尚未完整交付。
 
-本批补纯程序最终组装的中断恢复：`started.md`与engine已提交、staging尚未写入时，仅在严格核对原零调用预约、完整草稿与计划，以及原审计身份和所有子调用均未启动后，以原run和原attempt继续原样组装，再执行完整独立Review。实际已启动或结果未知的模型调用继续先对账，不能用此路径重发。契约与反例见[数据规范](data-conventions.md#assembly-zero-call-resume)和[场景验收](scenarios-and-acceptance.md#assembly-zero-call-resume-acceptance)。不增加加工阶段，不改变Skill、schema、计数或两个master。
+本批按“超时后自动再重试最多3次”推进：新生产计划冻结`bounded-timeout-v1`，仅对独立人工队列的单完整批、已结束root提取（含反馈返工）timeout且该run无候选／Review／发布的情况，在同一work总4次内自动重跑，无需逐次确认。原调用和attempt继续保留unknown，自动回执链接原证明及唯一后继；旧队列不静默升级，当前目标计划仍延续原次数，不重新清理或新开业务意图。字段和反例见[数据规范](data-conventions.md#bounded-timeout-retry)与[场景验收](scenarios-and-acceptance.md#bounded-timeout-retry-acceptance)。
 
-同时收紧既有4次边界：首次失败后最多再安全重试3次，第4次仍失败立即以`attempt_limit`表示本次处理失败并停止；必需审核子单元耗尽时父工作也停止，重开不再extract。第一次真实unknown仍先停止对账；第4次通过和待确认保持各自语义。沿用原状态与计数，见[有限重试合同](data-conventions.md#bounded-processing-retries)。
+仍在途、非timeout unknown、清理状态不明、权限／预算或Review调用超时（含分解审核）等不满足条件时停止并报告原因。第4次仍失败立即`attempt_limit`，没有第5次；第4次通过或待确认保持原语义。已确认失败的既有3次安全重试和审核子单元耗尽父工作停止规则继续生效。本地worker串行不证明服务端原请求已取消或没有重叠，重复调用消费及原历史保留，见[有限重试合同](data-conventions.md#bounded-processing-retries)。
 
 | 本批验证 | 当前要求与状态 |
 | --- | --- |
-| 中断恢复回归 | 用临时Git仓库和人工两批资料，在最终组装提交started／engine后、写staging前注入中断；核同run继续、不重复提取、不增加attempt，并检查真正已启动调用仍拦截；新8项回归已通过（人工替身），真实unknown不重发 |
-| 有限重试回归 | 新7项及已有分解审核12项通过：第4次已知失败同切片停止，耗尽父工作不重新提取；首次unknown停止，第4次通过／待确认保留 |
+| 自动超时重试回归 | 人工替身验证旧timeout延续原计数、最多补3次、第4停止、后继零调用中断幂等、原unknown不改和迟到原run不发布；已按人工场景通过，最终准确提交由CI完整覆盖 |
+| 不适用及原保护 | 仍在途、非timeout、清理不明、范围变化、预算／权限及分解审核仍停止；原组装零调用恢复、已知失败耗尽和第四次通过／待确认保持；已运行受影响回归，最终准确提交由CI完整覆盖 |
 | 准确dev CI | 对最终受测提交核完整双Python检查、产物和兼容性；尚无本批通过结论，旧提交CI不代替 |
-| 获准真实全链 | 另核资料范围、既有状态和独立验证意图，保留旧计数及unknown；人工通过不替代真实验收，代码升级不自动重跑成功资料 |
+| 获准真实全链 | 另核本轮获准范围与既有状态，沿原工作和意图接续，保留旧计数及unknown；人工通过不替代真实验收，代码升级不自动重跑成功资料 |
 
-dev27补标准模型调用默认等待900秒、可设1—1800秒，旧冻结日程不迁移且执行传实际配置；Review9确认纯统计绑定缺失时，沿原返工extract11补精确关联，程序取固定统计与根引用，正文、关系和旧quality不改，完整新独立Review仍必需。具体字段和边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。等待参数并不保证任意真实调用都能按时返回；没有可核验终态或完整输出的已启动调用仍保持unknown，不加长超时或换身份重发。
+dev28已修复纯程序组装在started／engine后、staging前的零调用中断恢复，以及已知失败耗尽即时停止。该恢复仍核原预约与全部子单元无状态，以原run／attempt继续；不能用于真实已启动模型结果找回，见[恢复合同](data-conventions.md#assembly-zero-call-resume)。
+
+dev27补标准模型调用默认等待900秒、可设1—1800秒，旧冻结日程不迁移且执行传实际配置；Review9确认纯统计绑定缺失时，沿原返工extract11补精确关联，程序取固定统计与根引用，正文、关系和旧quality不改，完整新独立Review仍必需。具体字段和边界见[数据规范](data-conventions.md#metadata-only-statistic-repair)。等待参数本身不保证完成或允许重发；当前只有dev29明确适用的有限timeout策略可自动重跑，其他unknown仍保留并停止。
 
 dev26处理本轮架构审阅：普通多批的完整原文合并超容量时，限定范围内原样组成0.14最终候选，明确无新extract，再执行真正独立分解审核与原子发布；不凭不同来源推断独立。该回退不覆盖related、答复或重建上下文，语义冲突或实质跨批修订仍受容量边界约束，具体见[数据合同](data-conventions.md#verbatim-draft-finalization)。另补固定10/8草稿与答复续接反馈返工、单次验证内不可变Git读取复用、日程退出码和控制写前容量检查。answer v8补逐句引用自查；结构检查不替代语义验收。人工反例、准确提交CI和真实业务分别取证，不预先声明本批提交通过。
 
@@ -35,7 +37,7 @@ auto审核遇到共享编码器明确的容量上限时，转入已有分解审�
 
 当前先人工触发保存、提取分类、独立 Review、发布与读取。目标 GPT 云端 runner、每天北京时间 22:00 的两轮真实触发、目标环境持久状态恢复及获准第二模型读取仍需实际证据，不能用本机连续执行、模拟模型或工程 CI 替代。
 
-上一批已核对的dev27快照为[`df9ceba78e1e9a722ec660350f0442a5e9a7d545`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/df9ceba78e1e9a722ec660350f0442a5e9a7d545)，其[CI 40349119582](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40349119582)八任务成功，Python3.11／3.12各1273项及基础检查通过；该批标准CLI人工全链也已取得工程证据。它不证明本批dev28修改或后续HEAD已通过，不替代真实业务验收，也不授权本批更新master。
+上一批已核对的dev28快照为[`d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/d9116dd1f8c2f70624dde96cc01ea827ff2cb7e3)，其[CI 40449641483](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40449641483)八任务成功，Python3.11／3.12各1288项及基础检查通过。它不证明本批dev29修改或后续HEAD已通过，不替代真实业务验收，也不授权本批更新master。
 
 公库 `dev` 开发、`master` 稳定交付，公库成为代码、提示词、Skill、脚本、测试、CI、工作流定义及设计的唯一工程来源。真实加工从公库 checkout 加载，资料根指向私库，私库仅保留资料、审核、控制、私人验证、历史与导航。只读入口核对准确公开 CI 和代码／资料边界，不再复制或比对两份核心工程。定时与恢复工程归公库不代表目标 runner 已部署；本批代码、CI 与实际运行按各自证据记录。操作见[双仓库实际使用](dual-repository-operation.md)，CI 路线见[公开工程 CI](public-code-ci.md)。
 

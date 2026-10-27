@@ -216,6 +216,9 @@ def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=Non
         validate_rebuild_context(git, rebuild_context, source_paths=selected)
         request["rebuild_context"] = deepcopy(rebuild_context)
     existing = _read(git, path, "production_queue")
+    from .unknown_retry import POLICY
+    if existing is None or "timeout_retry_policy" in existing["request"]:
+        request["timeout_retry_policy"] = POLICY if existing is None else existing["request"]["timeout_retry_policy"]
     if type(use_default_skills) is not bool:
         _fail("invalid_skill_default_policy")
     if skill_bundle is None and existing is not None:
@@ -432,8 +435,13 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     for old in previous.get("attempts", []) if previous else []:
         if old["status"] == "attempt_limit":
             return deepcopy(old)
+    from .unknown_retry import timeout_context
+    retired, next_timeout_ref = (timeout_context(repo, state, work_key, previous, model_call)
+                                 if previous is not None and execution_guard is None else (set(), None))
     registrations, resumptions = {}, {}
     for old in previous.get("attempts", []) if previous else []:
+        if old["run_id"] in retired:
+            continue
         if old["status"] not in {"reserved", "unknown", "partial", "needs_confirmation", "registration_required"}:
             continue
         marker = _run_path(old["run_id"], "pending-registration")
@@ -441,10 +449,11 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             from .pipeline import resume_pending_registration
             registrations[old["run_id"]] = resume_pending_registration(
                 repo, old["run_id"], allowed_source_paths=state["request"]["allowed_source_paths"])
-        elif old["status"] in {"reserved", "unknown", "partial"} and strategy in {"auto", "decomposed-v1"}:
+        elif old["status"] in {"reserved", "unknown", "partial"} and (strategy in {"auto", "decomposed-v1"} or old.get("timeout_retry_ref") is not None):
             from .pipeline import _stage_path, resume_decomposed_processing
             stage = _stage_path(old["run_id"])
-            if git.path(stage).is_file() and not git.path(_run_path(old["run_id"], "review")).is_file():
+            if (strategy in {"auto", "decomposed-v1"} and git.path(stage).is_file()
+                    and not git.path(_run_path(old["run_id"], "review")).is_file()):
                 candidate = _load(_committed(git, stage), "candidate")
                 if reusable(candidate):
                     delegate = (model_call.for_operation(old["operation_id"])
@@ -453,6 +462,19 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     resumptions[old["run_id"]] = resume_decomposed_processing(
                         repo, old["run_id"], allowed_source_paths=state["request"]["allowed_source_paths"],
                         model_call=delegate)
+                    break
+            elif old.get("timeout_retry_ref") is not None and not git.path(stage).is_file():
+                from .unknown_retry import unstarted_resume
+                delegate = model_call.for_operation(old["operation_id"]) if isinstance(model_call, BudgetedModelCall) else model_call
+                delegate = _guarded(delegate, execution_guard, repo, state["queue_id"], old["run_id"])
+                if isinstance(delegate, BudgetedModelCall) and unstarted_resume(git, old["timeout_retry_ref"], old["run_id"], delegate) is not None:
+                    options = {"related_runs": [], "run_id": old["run_id"], "batch_context": projection["batch_context"],
+                               "source_views": projection["source_views"], "review_strategy": strategy,
+                               "skill_bundle": skill_bundle, "rebuild_context": rebuild_context,
+                               "timeout_retry_ref": old["timeout_retry_ref"]}
+                    if old.get("revision_from_run") is not None:
+                        options["revision_from_run"] = old["revision_from_run"]
+                    resumptions[old["run_id"]] = process_sources(repo, processing_paths, model_call=delegate, **options)
                     break
             elif assembly and not git.path(stage).is_file():
                 from .assembly_final import can_resume_unstaged_assembly, finalize_drafts
@@ -480,6 +502,8 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             if selected_schema != QUALITY_SCHEMA:
                 attempts["schema_version"] = selected_schema
         for old in attempts["attempts"]:
+            if old["run_id"] in retired:
+                continue
             if old["run_id"] in registrations:
                 restored = registrations[old["run_id"]]
                 old.update(status=restored["status"], error=restored.get("error"))
@@ -489,7 +513,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                 restored = resumptions[old["run_id"]]
                 old.update(status=restored["status"], error=restored.get("error"))
                 head = _save(git, path, attempts, "production_attempts", head)
-                return _attempt_result({**deepcopy(old), **restored}, old["attempt"])
+                result = _attempt_result({**deepcopy(old), **restored}, old["attempt"])
+                # Receipt creation takes its own short lock, below this block.
+                return result
             if old["status"] == "passed":
                 candidate, _, _ = _read_reviewed(git, old["run_id"], historical=True)
                 if reusable(candidate):
@@ -569,6 +595,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                            "continuation_context": continuation,
                            **({"skill_bundle": skill_bundle} if skill_bundle is not None else {}),
                            **({"review_strategy": strategy} if strategy != "legacy-v1" else {})}
+        if next_timeout_ref is not None:
+            current["timeout_retry_ref"] = deepcopy(next_timeout_ref)
+            process_options["timeout_retry_ref"] = deepcopy(next_timeout_ref)
         if rebuild_context is not None:
             process_options["rebuild_context"] = deepcopy(rebuild_context)
         if feedback is not None:
@@ -818,6 +847,9 @@ def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=
             single = len(batches) == 1
             result = _attempt(repo, state, projection, pending["batch_id"], model_call, draft=not single,
                               execution_guard=execution_guard)
+            from .unknown_retry import auto_timeout_result
+            if execution_guard is None:
+                result = auto_timeout_result(repo, state, None, result, model_call)
             state.update(last_result=deepcopy(result), active_run_id=result.get("run_id"))
             steps += 1
             if result["status"] == "passed":
@@ -841,6 +873,9 @@ def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=
             result = _attempt(repo, state, projection, "final", model_call, draft=False,
                               merge_runs=sorted(set(state["completed_batches"].values())), execution_guard=execution_guard,
                               assembly=assembly)
+            from .unknown_retry import auto_timeout_result
+            if execution_guard is None:
+                result = auto_timeout_result(repo, state, None, result, model_call)
             state.update(last_result=deepcopy(result), active_run_id=result.get("run_id"))
             steps += 1
             if result["status"] == "passed":

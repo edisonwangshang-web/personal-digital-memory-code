@@ -355,6 +355,9 @@ def _stop(process: subprocess.Popen) -> None:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+        process.wait(timeout=5)
+    if process.poll() is None:
+        raise RuntimeError("CLI process stop was not confirmed")
 
 
 def _decode(value: bytes | str) -> Any:
@@ -459,6 +462,7 @@ def _events(process: subprocess.Popen, prompt: bytes, timeout: int,
     sent = 0
     selector = None
     failed = False
+    primary_error = None
 
     def fail(code: str) -> None:
         raise ModelCallError(code, invocation_id, time.monotonic() - started) from None
@@ -535,8 +539,9 @@ def _events(process: subprocess.Popen, prompt: bytes, timeout: int,
         if return_code != 0:
             fail("cli_exit_{}".format(return_code))
         return events
-    except ModelCallError:
+    except ModelCallError as error:
         failed = True
+        primary_error = error
         raise
     except Exception:
         failed = True
@@ -545,8 +550,9 @@ def _events(process: subprocess.Popen, prompt: bytes, timeout: int,
         failed = True
         raise
     finally:
-        # Cleanup actions are independent. Preserve a primary failure, while a
-        # cleanup failure after otherwise successful IO must not return output.
+        # Cleanup actions are independent. Only a fully stopped/closed timeout
+        # may be considered for a later bounded retry; other primary failures
+        # retain their original diagnostic and cancellation semantics.
         cleanup_failed = False
         interrupted = None
         actions = [lambda: _stop(process)]
@@ -562,7 +568,13 @@ def _events(process: subprocess.Popen, prompt: bytes, timeout: int,
                 cleanup_failed = True
                 if not isinstance(error, Exception) and interrupted is None:
                     interrupted = error
-        if not failed:
+        if primary_error is not None and primary_error.code == "timeout":
+            if interrupted is not None:
+                raise interrupted from None
+            if cleanup_failed:
+                raise ModelCallError("timeout_cleanup_unknown", primary_error.invocation_id,
+                                     time.monotonic() - started) from None
+        elif not failed:
             if interrupted is not None:
                 raise interrupted from None
             if cleanup_failed:
