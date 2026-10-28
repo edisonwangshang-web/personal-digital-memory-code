@@ -288,7 +288,8 @@ def _feedback_enabled(bundle):
             and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
                         for role, ref in pair) for pair in (
                     (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
-                    (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")))))
+                    (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
+                    (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")))))
 
 
 def _revision_feedback(git, previous, state, projection, processing_paths, *, draft, merge_runs):
@@ -556,6 +557,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
         operation = "batch:" + work_key + ":" + str(number)
         delegate = model_call.for_operation(operation) if isinstance(model_call, BudgetedModelCall) else model_call
         reuse_extraction = None
+        reused_feedback = None
         if isinstance(model_call, BudgetedModelCall) and rebuild_context is None:
             for old in reversed(attempts["attempts"]):
                 if old["status"] != "failed" or old.get("error") not in SAFE_REVIEW_PRELAUNCH_ERRORS:
@@ -566,8 +568,10 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     candidate = _load(_committed(git, "memory/staging/" + old["run_id"] + ".md"), "candidate")
                     if reusable(candidate):
                         reuse_extraction = old["run_id"]
+                        reused_feedback = deepcopy(candidate.get("extraction_feedback_ref"))
                         break
         feedback = None
+        validation_feedback = reused_feedback
         if feedback_policy and not assembly:
             try:
                 feedback = _revision_feedback(git, attempts["attempts"], state, projection,
@@ -577,6 +581,20 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     raise
                 return {"status": "blocked_context", "error": error.code,
                         "attempted_calls": 0, "model_calls": 0}
+        if not assembly and reuse_extraction is None and attempts["attempts"]:
+            from .extraction_feedback import enabled, prepare_feedback
+            previous_failed = attempts["attempts"][-1]
+            if enabled(skill_bundle) and previous_failed["status"] == "failed":
+                number_before = previous_failed.get("attempt")
+                if (type(number_before) is not int or not 1 <= number_before < 4
+                        or previous_failed.get("operation_id") != "batch:" + work_key + ":" + str(number_before)
+                        or previous_failed.get("run_id") != "run-" + _hash({"work": work_key, "attempt": number_before})[:32]):
+                    _fail("queue_attempt_identity_conflict")
+                try:
+                    validation_feedback = prepare_feedback(git, previous_failed, delegate)
+                except CaptureError as error:
+                    return {"status": "blocked_context", "error": error.code,
+                            "attempted_calls": 0, "model_calls": 0}
         # Account for prior candidates, control/related payload and actual rules at
         # the real transport boundary, before reserving a durable processing run.
         # The transport rechecks the exact full serialized payload for each role.
@@ -607,6 +625,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                            revision_candidate_binding=feedback["candidate_binding"],
                            revision_source_plan_id=feedback["source_plan_id"],
                            revision_target_plan_id=feedback["target_plan_id"])
+        if validation_feedback is not None:
+            process_options["extraction_feedback_ref"] = validation_feedback
+            current["extraction_feedback_ref"] = deepcopy(validation_feedback)
         if not admission_policy:
             attempts["attempts"].append(current)
             _save(git, path, attempts, "production_attempts", head)

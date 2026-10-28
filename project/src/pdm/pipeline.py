@@ -370,7 +370,8 @@ def _reuse_refs_enabled(skill_bundle):
         for role, ref in pair) for pair in (
             (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")),
             (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
-            (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9"))))
+            (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
+            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10"))))
 
 
 def _feedback_quality_enabled(skill_bundle):
@@ -378,7 +379,8 @@ def _feedback_quality_enabled(skill_bundle):
     return isinstance(skills, dict) and any(all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
         for role, ref in pair) for pair in (
             (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
-            (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9"))))
+            (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
+            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10"))))
 
 
 def _processing_header(skill_bundle, fallback):
@@ -805,7 +807,8 @@ def _merge_candidates(git, run_ids, source_paths, *, visited=(), historical=Fals
 
 def _reused_extraction(git, run_id, source_fields, versions, controls_digest, source_views, batch_material,
                        continuation_context=None, review_strategy="legacy-v1", revision_context=None,
-                       skill_bundle=None, quality_context=None, historical=False):
+                       skill_bundle=None, quality_context=None, historical=False,
+                       extraction_feedback_ref=None):
     """Reuse a valid extraction only when Review demonstrably never started.
 
     A semantic Review rejection and any uncertain Review are deliberately not
@@ -823,27 +826,25 @@ def _reused_extraction(git, run_id, source_fields, versions, controls_digest, so
             or old.get("batch_material") != batch_material
             or old.get("continuation_context") != continuation_context
             or old.get("revision_context") != revision_context
+            or old.get("extraction_feedback_ref") != extraction_feedback_ref
             or old.get("skill_bundle") != skill_bundle or old.get("quality_context") != quality_context
             or old.get("review_strategy", "legacy-v1") != review_strategy
             or {key: old[key] for key in source_fields} != source_fields):
         _error("extraction_not_reusable")
     from .unknown_retry import assert_publishable
     assert_publishable(git, [run_id], historical=historical)
-    sources = _candidate_sources(git, old, historical=True)
-    _validate_candidate_quality(git, old, sources)
-    extraction = _call_metadata({**old["extraction"], "output": old["extraction_output"]})
-    expected = _objects(old["extraction_output"], sources, run_id, extraction, versions, old["created_at"],
-                        batch=True, quality_context=old.get("quality_context"),
-                        related=old["related"], skill_bundle=old.get("skill_bundle"))
-    _updated_objects(git, expected, old["related"])
-    if old["objects"] != expected:
-        _error("candidate_mismatch")
-    return {**extraction, "output": old["extraction_output"]}, {"run_id": run_id, "binding": old["binding"], "stage_sha256": _hash(data)}
+    # The stage is complete even when Review never launched. Verify its raw
+    # response and any program materialization through the same fixed reader.
+    _read_fixed_candidate(git, run_id, historical=historical)
+    raw = old.get("raw_extraction_output", old["extraction_output"])
+    extraction = _call_metadata({**old["extraction"], "output": raw})
+    return {**extraction, "output": raw}, {"run_id": run_id, "binding": old["binding"], "stage_sha256": _hash(data)}
 
 
 def _processing_key(source_fields, versions, controls_digest, batch_context=None, batch_material=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_context=None, revision_resume=None,
-                    revision_revalidation=None, skill_bundle=None, rebuild_context=None, timeout_retry_ref=None):
+                    revision_revalidation=None, skill_bundle=None, rebuild_context=None, timeout_retry_ref=None,
+                    extraction_feedback_ref=None):
     bindings = [source_fields["source"], *source_fields.get("additional_sources", [])]
     material = {"sources": [{"source_id": item["source_id"], "source_version": item["source_version"]} for item in bindings],
                 "rules_version": versions["rules_version"], "controls_digest": controls_digest}
@@ -866,6 +867,8 @@ def _processing_key(source_fields, versions, controls_digest, batch_context=None
         material["rebuild_context"] = rebuild_context
     if timeout_retry_ref is not None:
         material["timeout_retry_ref"] = timeout_retry_ref
+    if extraction_feedback_ref is not None:
+        material["extraction_feedback_ref"] = extraction_feedback_ref
     return _hash(material)
 
 
@@ -1054,7 +1057,8 @@ def _reserve_processing_calls(model_call):
         adapter.reserve_calls(2)
 
 
-def _extraction_diagnostic(git, error, response, request_binding=None, validation_output=None):
+def _extraction_diagnostic(git, error, response, request_binding=None, validation_output=None,
+                           validation_context=None):
     """Retain a visible returned value for diagnosis, never for adoption.
 
     Transport failures have no completed response to invent. Only the five
@@ -1080,6 +1084,8 @@ def _extraction_diagnostic(git, error, response, request_binding=None, validatio
                   "request_binding": copy.deepcopy(request_binding),
                   "validation_error": {"code": error.code, "message": str(error),
                                        "details": copy.deepcopy(error.details)}}
+    if validation_context is not None:
+        diagnostic["validation_context"] = copy.deepcopy(validation_context)
     validation_output = getattr(error, "_diagnostic_validation_output", validation_output)
     if validation_output is not None and validation_output != response["output"]:
         # A metadata-only repair can be checked after materialization. Preserve
@@ -1288,6 +1294,10 @@ def _candidate_payload(git, candidate, sources):
                         ("quality_contract", "skill_bundle", "quality_context")})
         if _feedback_quality_enabled(candidate["skill_bundle"]):
             payload["reuse_quality_requirements"] = copy.deepcopy(candidate["reuse_quality_requirements"])
+    if "extraction_feedback_ref" in candidate:
+        from .extraction_feedback import load_feedback
+        payload["extraction_feedback"] = load_feedback(git, candidate["extraction_feedback_ref"],
+                                                       payload, candidate["versions"])
     return payload
 
 
@@ -1328,7 +1338,9 @@ def _review_payload(candidate, payload):
             # and publication proof, not in this model request.
             request.pop("revision_context", None)
             request.pop("quality_repair_context", None)
-            for key in ("quality_repair_context", "raw_extraction_output"):
+            request.pop("extraction_feedback", None)
+            for key in ("quality_repair_context", "raw_extraction_output", "reuse_statistic_inheritance",
+                        "extraction_feedback_ref"):
                 request["candidate"].pop(key, None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
     if "timeout_retry_ref" in candidate or "timeout_retry_resume" in candidate:
@@ -1536,7 +1548,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     related_runs=None, run_id=None, execution_context=None,
                     batch_context=None, source_views=None, draft_only=False, merge_runs=(), reuse_extraction_run=None,
                     continuation_context=None, review_strategy="legacy-v1", revision_from_run=None, _resume_unstarted=None,
-                    _revalidate_completed=None, skill_bundle=None, rebuild_context=None, _preflight_only=False, timeout_retry_ref=None):
+                    _revalidate_completed=None, skill_bundle=None, rebuild_context=None, _preflight_only=False, timeout_retry_ref=None,
+                    extraction_feedback_ref=None):
     """Process selected sources; explicit revision retains a rejected fixed Review.
 
     Revision is interpretation work, never another fact source or permission to
@@ -1545,6 +1558,9 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
     """
     if type(_preflight_only) is not bool or _preflight_only and (_resume_unstarted is not None or _revalidate_completed is not None):
         _error("invalid_preflight")
+    from .skill_support import incremental_repair_enabled
+    if extraction_feedback_ref is not None and not incremental_repair_enabled(skill_bundle):
+        _error("invalid_extraction_feedback")
     from .quality_completed_extraction import CONTRACT_V2
     rebuild_revalidation = (_revalidate_completed is not None
         and isinstance(_revalidate_completed, dict)
@@ -1753,7 +1769,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             context_fields.update(quality)
         if incremental:
             controls = control_guard(git)
-            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle, rebuild_context, timeout_retry_ref)
+            key = _processing_key(source_fields, versions, controls["digest"], batch_context, context_fields.get("batch_material"), continuation_context, review_strategy, revision_context, context_fields.get("revision_resume"), _revalidate_completed, skill_bundle, rebuild_context, timeout_retry_ref, extraction_feedback_ref)
             existing = _existing_processing(git, key, source_paths, related_runs)
             if existing is not None:
                 if requested_run is not None and not _preflight_only:
@@ -1778,6 +1794,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             requirements = _reuse_requirements(git, related, sources, context_fields["quality_context"])
             payload["reuse_quality_requirements"] = requirements
             context_fields["reuse_quality_requirements"] = copy.deepcopy(requirements)
+        if extraction_feedback_ref is not None:
+            context_fields["extraction_feedback_ref"] = copy.deepcopy(extraction_feedback_ref)
         if revision_context is not None:
             from .statistic_repairs import build_repair_context, is_enabled
             if is_enabled(skill_bundle):
@@ -1788,6 +1806,9 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                         _error("quality_repair_recovery_unsupported")
                     payload["quality_repair_context"] = copy.deepcopy(repair)
                     context_fields["quality_repair_context"] = copy.deepcopy(repair)
+        if extraction_feedback_ref is not None:
+            from .extraction_feedback import load_feedback
+            payload["extraction_feedback"] = load_feedback(git, extraction_feedback_ref, payload, versions)
         if _preflight_only or _feedback_quality_enabled(skill_bundle):
             from .model_calls import MAX_INPUT_BYTES
             admission = _model_request_binding("extract", payload)
@@ -1862,7 +1883,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             else:
                 response, reused = _reused_extraction(git, reuse_extraction_run, source_fields, versions,
                     context_fields["controls_digest"], source_views, context_fields["batch_material"], continuation_context, review_strategy, revision_context,
-                    skill_bundle, context_fields.get("quality_context"))
+                    skill_bundle, context_fields.get("quality_context"), extraction_feedback_ref=extraction_feedback_ref)
                 context_fields["extraction_reused_from"] = reused
             extraction = _call_metadata(response)
             if _resume_unstarted is not None:
@@ -1876,6 +1897,17 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 materialized_output = materialize_patch(response["output"], context_fields["quality_repair_context"],
                     context_fields["quality_context"], sources, source_views, revision_context["candidate"]["extraction_output"],
                     frozen_objects=revision_context["candidate"]["objects"], controls_digest=controls["digest"])
+            else:
+                from .skill_support import incremental_repair_enabled
+                if incremental_repair_enabled(skill_bundle) and isinstance(materialized_output, dict):
+                    from .reuse_quality import materialize_reuse_statistic_claims
+                    materialized_output, inherited = materialize_reuse_statistic_claims(
+                        git, related, sources, context_fields["quality_context"],
+                        _reuse_objects(materialized_output.get("reuse_refs"), related, sources),
+                        materialized_output, controls_digest=controls["digest"])
+                    if inherited["claims"]:
+                        context_fields["raw_extraction_output"] = copy.deepcopy(response["output"])
+                        context_fields["reuse_statistic_inheritance"] = inherited
             objects = _objects(materialized_output, sources, run_id, response, versions, created, batch=batch,
                                quality_context=context_fields.get("quality_context"),
                                related=related, skill_bundle=skill_bundle)
@@ -1890,8 +1922,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     assert_fragment_refs(obj["metadata"]["sources"], source_views)
         except (ModelCallError, CaptureError) as error:
             git.check(head)
+            from .extraction_feedback import failure_context
             diagnostic = _extraction_diagnostic(git, error, response,
-                context_fields.get("extraction_request_binding"), materialized_output)
+                context_fields.get("extraction_request_binding"), materialized_output,
+                failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call) if response is not None else None)
             if _revalidate_completed is not None:
                 if rebuild_revalidation:
                     return _failure(git, run_id, "extract", error.code, head,
@@ -1934,8 +1968,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                            _reuse_objects(materialized_output.get("reuse_refs"), related, sources)))
             except CaptureError as error:
                 git.check(head)
+                from .extraction_feedback import failure_context
                 diagnostic = _extraction_diagnostic(git, error, response,
-                    context_fields.get("extraction_request_binding"), materialized_output)
+                    context_fields.get("extraction_request_binding"), materialized_output,
+                    failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call))
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
                                 current_call_count(),
                                 failure_name="revalidation-failure" if _revalidate_completed is not None else "failure",
@@ -2166,7 +2202,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         if (candidate.get("related") != related or candidate.get("controls_digest") != controls_digest
                 or candidate.get("processing_key") != _processing_key(_source_fields(sources), candidate["versions"], controls_digest,
                     candidate.get("batch_context"), candidate.get("batch_material"), candidate.get("continuation_context"), strategy, candidate.get("revision_context"), candidate.get("revision_resume"), candidate.get("revision_revalidation"),
-                    candidate.get("skill_bundle"), rebuild_context, candidate.get("timeout_retry_ref"))):
+                    candidate.get("skill_bundle"), rebuild_context, candidate.get("timeout_retry_ref"),
+                    candidate.get("extraction_feedback_ref"))):
             _error("processing_context_changed")
         attempt_path = _run_path(run_id, "started")
         attempt_bytes = _committed(git, attempt_path)
@@ -2187,12 +2224,31 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     elif candidate.get("related") != []:
         _error("source_mismatch")
     repair_fields = {"quality_repair_context", "raw_extraction_output"}
-    repair_mode = bool(repair_fields.intersection(candidate))
+    repair_mode = "quality_repair_context" in candidate
+    inheritance_mode = "reuse_statistic_inheritance" in candidate
+    if "raw_extraction_output" in candidate and not (repair_mode or inheritance_mode):
+        _error("invalid_quality_repair")
     if repair_mode and (not repair_fields <= candidate.keys() or "revision_context" not in candidate
                         or "extraction_reused_from" in candidate or "revision_resume" in candidate
                         or "revision_revalidation" in candidate):
         _error("invalid_quality_repair")
-    raw_output = candidate["raw_extraction_output"] if repair_mode else candidate["extraction_output"]
+    if inheritance_mode:
+        from .skill_support import incremental_repair_enabled
+        if (repair_mode or "raw_extraction_output" not in candidate
+                or not incremental_repair_enabled(candidate.get("skill_bundle"))):
+            _error("invalid_reuse_inheritance")
+        from .reuse_quality import materialize_reuse_statistic_claims
+        raw = candidate["raw_extraction_output"]
+        if not isinstance(raw, dict):
+            _error("invalid_reuse_inheritance")
+        rebuilt, inherited = materialize_reuse_statistic_claims(
+            git, related, sources, candidate["quality_context"],
+            _reuse_objects(raw.get("reuse_refs"), related, sources), raw,
+            controls_digest=candidate["controls_digest"], at_commit=candidate["base_head"])
+        if (not inherited["claims"] or inherited != candidate["reuse_statistic_inheritance"]
+                or rebuilt != candidate["extraction_output"]):
+            _error("reuse_inheritance_changed")
+    raw_output = candidate["raw_extraction_output"] if repair_mode or inheritance_mode else candidate["extraction_output"]
     extraction = _call_metadata({**candidate["extraction"], "output": raw_output})
     if extraction != candidate["extraction"]:
         _error("candidate_mismatch")
@@ -2257,8 +2313,9 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             reused = candidate["extraction_reused_from"]
             response, expected = _reused_extraction(git, reused.get("run_id"), _source_fields(sources), candidate["versions"],
                 candidate["controls_digest"], candidate["source_views"], material, candidate.get("continuation_context"), strategy, candidate.get("revision_context"),
-                candidate.get("skill_bundle"), candidate.get("quality_context"), historical=historical)
-            if reused != expected or response["output"] != candidate["extraction_output"] or _call_metadata(response) != extraction:
+                candidate.get("skill_bundle"), candidate.get("quality_context"), historical=historical,
+                extraction_feedback_ref=candidate.get("extraction_feedback_ref"))
+            if reused != expected or response["output"] != raw_output or _call_metadata(response) != extraction:
                 _error("extraction_not_reusable")
     _validate_candidate_quality(git, candidate, sources)
     expected_objects = _objects(candidate["extraction_output"], sources, run_id, extraction, candidate["versions"], candidate["created_at"],
@@ -2401,6 +2458,9 @@ def _computation_snapshots(git, candidate, visited=()):
     if candidate.get("timeout_retry_ref") is not None:
         from .unknown_retry import authority_refs
         entries.extend(authority_refs(git, candidate["timeout_retry_ref"]))
+    if candidate.get("extraction_feedback_ref") is not None:
+        from .extraction_feedback import authority_refs as feedback_authority_refs
+        entries.extend(feedback_authority_refs(git, candidate["extraction_feedback_ref"]))
     if "revision_revalidation" in candidate:
         recovery = _completed_extraction_module(candidate["revision_revalidation"])
         entries.extend(recovery.verify_revalidated_extraction(git, candidate, historical=True))

@@ -1,9 +1,11 @@
 """Keep applicable, already-reviewed statistical obligations on exact reuse.
 
-Callers select the versioned contract. This module never repairs model output,
-infers statistics from prose, or opens an authority outside the selected sources.
+Callers select the versioned contract. Legacy validation never repairs model
+output. The explicit inheritance helper returns a separate materialized copy;
+it never infers statistics from prose or opens an authority outside the selection.
 """
 
+from copy import deepcopy
 from contextvars import ContextVar
 import hashlib
 import re
@@ -94,7 +96,7 @@ def _publication(git, related, selected, cache):
     return snapshots
 
 
-def _collect(git, related, sources, context, reused_objects, cache):
+def _collect(git, related, sources, context, reused_objects, cache, *, include_claims=False):
     from .pipeline import _candidate_binding, _candidate_bindings, _load, _run_path
     selected = {}
     for source in sources:
@@ -130,7 +132,7 @@ def _collect(git, related, sources, context, reused_objects, cache):
             reused[obj["path"]] = obj
     current = {stat["stat_id"]: stat for stat in context["statistics"]}
     resolved = {}
-    obligations = {}
+    obligations, inherited = {}, {}
     # A group DAG can omit snapshots for an older ordinary nonincremental
     # publication. Follow related authority only for these exact record versions.
     for path in pending:
@@ -162,7 +164,7 @@ def _collect(git, related, sources, context, reused_objects, cache):
         if candidate.get("quality_contract") != "skill-quality-v1":
             continue
         previous = {stat["stat_id"]: stat for stat in candidate["quality_context"]["statistics"]}
-        for claim in candidate["extraction_output"]["quality"]["statistic_claims"]:
+        for claim_index, claim in enumerate(candidate["extraction_output"]["quality"]["statistic_claims"]):
             old = old_records.get(claim["record_id"])
             sid = claim["stat_id"]
             if old is None or sid not in current:
@@ -174,7 +176,34 @@ def _collect(git, related, sources, context, reused_objects, cache):
             key = (old["path"], old["metadata"]["content_version"], sid)
             obligations[key] = {"record_path": old["path"], "record_id": claim["record_id"],
                                 "content_version": old["metadata"]["content_version"], "stat_id": sid}
-    return [obligations[key] for key in sorted(obligations)]
+            if include_claims:
+                origin = {"stage_path": entry["path"], "stage_commit": entry["commit_sha"],
+                          "stage_sha256": entry["sha256"], "claim_index": claim_index}
+                value = {"claim": deepcopy(claim), "origin": origin,
+                         "claim_sha256": _sha(canonical(claim))}
+                # Several verified generations may prove the same unchanged
+                # claim. Select one deterministically, never merge their text.
+                if key not in inherited or canonical(value) < canonical(inherited[key]):
+                    inherited[key] = value
+    values = [obligations[key] for key in sorted(obligations)]
+    return (values, inherited) if include_claims else values
+
+
+def _verified_collection(git, related, sources, context, reused_objects, *, include_claims=False):
+    cache = _VERIFICATION.get()
+    token = None
+    if cache is None:
+        cache = {"publications": {}, "active": set()}
+        token = _VERIFICATION.set(cache)
+    try:
+        return _collect(git, related, sources, context, reused_objects, cache, include_claims=include_claims)
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as error:
+        if isinstance(error, CaptureError):
+            raise
+        _fail()
+    finally:
+        if token is not None:
+            _VERIFICATION.reset(token)
 
 
 def collect_reuse_statistical_obligations(git, related, sources, context, reused_objects):
@@ -185,20 +214,94 @@ def collect_reuse_statistical_obligations(git, related, sources, context, reused
     than recursively re-verifying each candidate a second time. No cache survives
     the outer call, and no files or model outputs are written.
     """
-    cache = _VERIFICATION.get()
-    token = None
-    if cache is None:
-        cache = {"publications": {}, "active": set()}
-        token = _VERIFICATION.set(cache)
+    return _verified_collection(git, related, sources, context, reused_objects)
+
+
+INHERITANCE_CONTRACT = "exact-statistic-inheritance-v1"
+
+
+def materialize_reuse_statistic_claims(git, related, sources, context, reused_objects, output, *,
+                                     controls_digest=None, at_commit=None):
+    """Materialize omitted, proven claims for explicitly reused exact records.
+
+    Only the new opt-in caller contract may use this helper. The caller retains
+    the actual response separately and later reconstructs this materialization
+    and its provenance at the candidate's fixed base commit during verification.
+    Current deletion guards remain in the complete publication verifier; a past
+    materialization does not grant permission to use an old fact as current.
+    Existing supplied claims
+    are never corrected or overwritten; normal complete quality/Review checks
+    still validate the resulting output.
+    """
+    from .controls import object_policy, read_controls, source_policy
+    from .pipeline import _committed
+
+    head = git.check()
+    controls = read_controls(git.repo, head=head, at_commit=at_commit)
+    snapshot_head = at_commit or head
+    if controls_digest is not None and controls_digest != controls["digest"]:
+        _fail("reuse_quality_controls_changed")
     try:
-        return _collect(git, related, sources, context, reused_objects, cache)
-    except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as error:
-        if isinstance(error, CaptureError):
-            raise
-        _fail()
-    finally:
-        if token is not None:
-            _VERIFICATION.reset(token)
+        claims = output["quality"]["statistic_claims"]
+        if not isinstance(claims, list):
+            _fail("invalid_reuse_quality_output")
+        declared = set()
+        for claim in claims:
+            if not isinstance(claim, dict) or any(not isinstance(claim.get(key), str)
+                                                   for key in ("record_id", "stat_id")):
+                _fail("invalid_reuse_quality_output")
+            declared.add((claim["record_id"], claim["stat_id"]))
+    except (KeyError, TypeError):
+        _fail("invalid_reuse_quality_output")
+
+    obligations, originals = _verified_collection(
+        git, related, sources, context, reused_objects, include_claims=True)
+    by_source = {}
+    for source in sources:
+        identity = source.get("metadata", {})
+        key = tuple(source.get(field, identity.get(field)) for field in ("source_id", "source_version"))
+        if key in by_source and by_source[key] != source["path"]:
+            _fail("reuse_quality_source_scope")
+        by_source[key] = source["path"]
+    eligible = set()
+    for obj in reused_objects:
+        path = obj["path"]
+        if _RECORD.fullmatch(path) is None:
+            continue
+        metadata = obj["metadata"]
+        policy = object_policy(controls, path, content_version=metadata["content_version"])
+        if policy["excluded"] or policy["control_ids"]:
+            continue
+        # Initial materialization checks the live formal bytes. Historical proof
+        # reconstruction checks the exact original input snapshot instead.
+        formal = _committed(git, path) if at_commit is None else git.read(snapshot_head, path)
+        if formal != markdown(metadata, obj["body"]):
+            continue
+        for reference in metadata["sources"]:
+            source_path = by_source.get((reference["source_id"], reference["source_version"]))
+            if source_path is None:
+                _fail("reuse_quality_source_scope")
+            policy = source_policy(controls, source_path)
+            if policy["excluded"] or policy["control_ids"]:
+                break
+        else:
+            eligible.add((path, metadata["content_version"]))
+
+    materialized = deepcopy(output)
+    provenance = []
+    for item in obligations:
+        pair = (item["record_id"], item["stat_id"])
+        if pair in declared or (item["record_path"], item["content_version"]) not in eligible:
+            continue
+        key = (item["record_path"], item["content_version"], item["stat_id"])
+        original = originals[key]
+        materialized["quality"]["statistic_claims"].append(deepcopy(original["claim"]))
+        provenance.append({**deepcopy(item), "origin": deepcopy(original["origin"]),
+                           "claim_sha256": original["claim_sha256"]})
+        declared.add(pair)
+    git.check(head)
+    return materialized, {"contract": INHERITANCE_CONTRACT, "controls_digest": controls["digest"],
+                          "claims": provenance}
 
 
 def model_reuse_requirements(obligations):

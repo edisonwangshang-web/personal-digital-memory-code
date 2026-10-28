@@ -125,15 +125,15 @@ def output_schema(role, payload):
         return _statistic_repair_output_schema(payload)
     result = (_object(dict(base["properties"], quality=QUALITY_SCHEMA)) if role == "extract"
               else _object(dict(base["properties"], checks=_array(QUALITY_REVIEW_CHECK_SCHEMA))))
-    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] == "knowledge-review@9":
+    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-review@9", "knowledge-review@10"}:
         result["properties"]["repair_scope"] = deepcopy(REPAIR_SCOPE_SCHEMA)
         result["required"].append("repair_scope")
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12"}:
         result["properties"]["reuse_refs"] = _array(_object({"path": _STRING, "content_version": _STRING}))
         result["required"].append("reuse_refs")
         if payload.get("output_contract") != "batch-v1":
             result["properties"]["wiki"] = {"anyOf": [result["properties"]["wiki"], {"type": "null"}]}
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12"}:
         context = payload.get("quality_context")
         targets = context.get("targets") if isinstance(context, dict) else None
         if not isinstance(targets, list):
@@ -149,7 +149,7 @@ def output_schema(role, payload):
         return result
     if payload["skill_bundle"]["skills"][role]["ref"] in {
             "knowledge-extract@5", "knowledge-review@4", "knowledge-extract@6", "knowledge-review@5",
-            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9"}:
+            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10"}:
         return _reference_schema(result, role, payload)
     return result
 
@@ -253,8 +253,8 @@ def render_model_request(role, payload):
             wire_instructions = KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
             encoder = encode_shared_json_v2
         elif bundle["skills"][role]["ref"] in {
-                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11",
-                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9"}:
+                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12",
+                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10"}:
             from .skill_wire_v2 import WIRE_INSTRUCTIONS as KEY_INSTRUCTIONS
             from .skill_wire_v3 import WIRE_INSTRUCTIONS as TABLE_INSTRUCTIONS, encode_shared_json_v3
             wire_instructions = TABLE_INSTRUCTIONS + "\n\n" + KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
@@ -272,7 +272,8 @@ def render_model_request(role, payload):
             "review_skill_ref": bundle["skills"]["review"]["ref"],
         })
         if (bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]) in {
-                ("knowledge-extract@10", "knowledge-review@8"), ("knowledge-extract@11", "knowledge-review@9")}:
+                ("knowledge-extract@10", "knowledge-review@8"), ("knowledge-extract@11", "knowledge-review@9"),
+                ("knowledge-extract@12", "knowledge-review@10")}:
             from .quality_projection import PROJECTION_INSTRUCTIONS, project_quality_payload
             instructions += "\n\n" + PROJECTION_INSTRUCTIONS
             material = project_quality_payload(material)

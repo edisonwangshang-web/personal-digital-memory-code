@@ -983,6 +983,22 @@ def build_review_checks(candidate, context, scope=None):
     roles = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     review = roles.get("review") if isinstance(roles, dict) else None
     context_readability = isinstance(review, dict) and review.get("ref") in {"knowledge-review@6", "knowledge-review@7"}
+    completion_policy = isinstance(review, dict) and review.get("ref") == "knowledge-review@10"
+    batch_material = candidate.get("batch_material")
+    draft_only = isinstance(batch_material, dict) and batch_material.get("draft_only") is True
+    dispositions = {}
+    if completion_policy:
+        # Use the complete candidate, before a decomposed request projects its
+        # declarations. A missing map must not silently disable this gate.
+        try:
+            declarations = candidate["extraction_output"]["quality"]["coverage_disposition"]
+            dispositions = {item["target_id"]: item["status"] for item in declarations}
+        except (KeyError, TypeError, AttributeError):
+            _error("invalid_quality_scope", "完成度审核缺少候选的完整内容去向")
+        if (not isinstance(declarations, list) or len(dispositions) != len(declarations)
+                or set(dispositions) != {target["target_id"] for target in context["targets"]}
+                or any(status not in {"summarized", "deferred"} for status in dispositions.values())):
+            _error("invalid_quality_scope", "完成度审核须绑定全部候选内容去向")
     material = project_quality(context, scope)
     kind = "complete" if scope is None else scope["kind"]
     paths = sorted(objects) if scope is None else sorted(_unique_strings(scope.get("object_paths", []), "invalid_quality_scope"))
@@ -994,10 +1010,29 @@ def build_review_checks(candidate, context, scope=None):
 
     def add(label, instruction, selected_paths, selected_targets, evidence, selected_scopes):
         evidence = sorted(set(evidence))
+        allowed_results = None
         binding = {"kind": kind, "check_kind": label,
                    "objects": [{"path": path, "sha256": _hash(objects[path])} for path in selected_paths],
                    "source_scope_ids": sorted(selected_scopes), "target_ids": selected_targets,
                    "quality_sha256": _hash(material)}
+        if completion_policy:
+            binding["completion_policy"] = "draft-content-v1" if draft_only else "final-content-completion-v1"
+            if label in {"metric_coverage", "semantic_coverage", "global_organization"}:
+                selected_dispositions = {target: dispositions[target] for target in selected_targets}
+                binding["declared_dispositions"] = selected_dispositions
+                if not draft_only and "deferred" in selected_dispositions.values():
+                    allowed_results = ["needs_revision", "needs_confirmation"]
+                    binding["allowed_results"] = allowed_results
+                    instruction += (
+                        " This final scope still declares deferred content, so this check cannot pass. "
+                        "Use needs_confirmation for a genuine unresolved evidence limitation; use needs_revision "
+                        "when supplied, processable content was left undone. Explain the actual evidence and affected "
+                        "scope; length, future work or a coverage label alone does not establish an evidence gap.")
+                elif not draft_only:
+                    instruction += (
+                        " Confirm the declared summarized targets convey actual provided content in the cited final "
+                        "records. A package description, task list or promise to finish later cannot substitute for "
+                        "that content. Judge semantic evidence gaps from the supplied sources rather than keywords.")
         if context_readability:
             binding["reading_policy"] = "knowledge-context-v1"
             instruction += {
@@ -1018,10 +1053,13 @@ def build_review_checks(candidate, context, scope=None):
                     "or claims that unprovided knowledge does not exist. Use only visible final objects and preceding "
                     "certificates; do not claim to have reread absent sources or related documents."),
             }.get(label, "")
-        checks.append({"check_id": "quality-check-" + _hash(binding), "kind": label,
-                       "scope_sha256": _hash(binding), "object_paths": selected_paths,
-                       "source_scope_ids": sorted(selected_scopes), "target_ids": selected_targets,
-                       "evidence_ids": evidence, "instruction": instruction})
+        check = {"check_id": "quality-check-" + _hash(binding), "kind": label,
+                 "scope_sha256": _hash(binding), "object_paths": selected_paths,
+                 "source_scope_ids": sorted(selected_scopes), "target_ids": selected_targets,
+                 "evidence_ids": evidence, "instruction": instruction}
+        if allowed_results is not None:
+            check["allowed_results"] = allowed_results
+        checks.append(check)
 
     if kind in {"complete", "object"}:
         for path in paths:
@@ -1110,6 +1148,10 @@ def validate_quality_review(output, checks, *, repair_scope_supported=False):
             _error("quality_review_scope_mismatch", "审核结果没有绑定实际候选与资料范围")
         if result["result"] not in {"passed", "needs_revision", "needs_confirmation"}:
             _error("invalid_quality_review", "审核结论无效")
+        if "allowed_results" in check and result["result"] not in check["allowed_results"]:
+            _error("quality_review_incomplete", "候选仍有暂缓内容，最终完成度检查不能通过",
+                   details={"check_id": check_id, "target_ids": list(check["target_ids"]),
+                            "allowed_results": list(check["allowed_results"])})
         if not isinstance(result["reason"], str) or len(result["reason"].strip()) < 8:
             _error("quality_review_reason_missing", "逐项审核必须给出可核对理由")
         evidence = _unique_strings(result["evidence_ids"], "invalid_quality_review")

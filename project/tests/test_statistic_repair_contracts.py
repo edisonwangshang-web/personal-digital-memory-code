@@ -39,13 +39,17 @@ class StatisticRepairContractTests(unittest.TestCase):
     def test_new_default_pair_and_schema_are_explicit_without_mixed_role_downgrade(self):
         bundle = resolve_skill_refs()
         self.assertEqual((bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]),
-                         ("knowledge-extract@11", "knowledge-review@9"))
+                         ("knowledge-extract@12", "knowledge-review@10"))
         self.assertTrue(statistic_repair_enabled(bundle))
-        self.assertEqual(quality_schema_version(bundle), "0.15")
+        self.assertEqual(quality_schema_version(bundle), "0.18")
+        previous = resolve_skill_refs("knowledge-extract@11", "knowledge-review@9")
+        self.assertEqual(quality_schema_version(previous), "0.15")
+        self.assertTrue(statistic_repair_enabled(previous))
         old = resolve_skill_refs("knowledge-extract@10", "knowledge-review@8")
         self.assertEqual(quality_schema_version(old), "0.12")
         self.assertFalse(statistic_repair_enabled(old))
-        for refs in (("knowledge-extract@11", "knowledge-review@8"), ("knowledge-extract@10", "knowledge-review@9")):
+        for refs in (("knowledge-extract@11", "knowledge-review@8"), ("knowledge-extract@10", "knowledge-review@9"),
+                     ("knowledge-extract@12", "knowledge-review@9"), ("knowledge-extract@11", "knowledge-review@10")):
             with self.subTest(refs=refs), self.assertRaisesRegex(SkillError, "invalid_skill_pair"):
                 resolve_skill_refs(*refs)
 
@@ -130,13 +134,17 @@ class StatisticRepairContractTests(unittest.TestCase):
         self.assertIn("quality_projection", restored)
         self.assertEqual(restored["quality_context"]["statistics"], payload["quality_context"]["statistics"])
 
-    def test_preexisting_10_8_skills_and_manifest_bytes_are_unchanged(self):
+    def test_preexisting_skills_and_manifest_bytes_are_unchanged(self):
         root = Path(__file__).resolve().parents[1] / "skills"
         expected = {
             "knowledge-extract/10/SKILL.md": "9ac93bb929818e7abe4eb0be96cf46f08ad2a5ccc8350cb40326bc6893fdd812",
             "knowledge-extract/10/manifest.json": "0e58d98a748f4c85882b1c54c74b2dc4b27a5936af154bbc76c977d4a8350816",
             "knowledge-review/8/SKILL.md": "50a37e1273a2f95609e75b8f0e93c36aa2bd04e1621ce7c12bec8ac806667720",
             "knowledge-review/8/manifest.json": "b6314501bcf69f42d5d7c6336354bfc45db1ac176baa266f6efe49d7d1a8044c",
+            "knowledge-extract/11/SKILL.md": "0e1bb161347d59332740fd2334200566ea959829afa633b72f3d9cc2aa8ae6de",
+            "knowledge-extract/11/manifest.json": "763660e25629a48644c6e06364c0fa3f4766f6f96d384ca90ce9906f82961133",
+            "knowledge-review/9/SKILL.md": "556aeba6a83a32a2fdecbddf26afc01534bccaa20a594a865056cb0f71db1f29",
+            "knowledge-review/9/manifest.json": "e225a117fc552bff0bee58dbf4b81cd7bc177f03ca8099a5a56c4557690c847a",
         }
         for relative, digest in expected.items():
             with self.subTest(relative=relative):
@@ -151,6 +159,23 @@ class StatisticRepairContractTests(unittest.TestCase):
                         "d52730f9fac3b70324eb33c09bd2a1d32ab19926f61ea86391a3c302c9b35e1e"),
             "review": ("05fd425dbacf2286a9ca153cddad416f28b63aa3a5938018c5cae699635bacdf",
                        "9f0f61d594bb87cac69ee941097e3065645a2b21ab8969e66ecba620e42d09bf"),
+        }
+        for role, (request_digest, schema_digest) in expected.items():
+            with self.subTest(role=role):
+                self.assertEqual(hashlib.sha256(render_model_request(role, payload)).hexdigest(), request_digest)
+                encoded = json.dumps(output_schema(role, payload), ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode()
+                self.assertEqual(hashlib.sha256(encoded).hexdigest(), schema_digest)
+
+    def test_preexisting_11_9_request_and_schema_match_pre_12_10_transport(self):
+        # Captured with the committed 07c001d renderer, isolated from current
+        # implementation changes, for this exact artificial payload.
+        payload = request(resolve_skill_refs("knowledge-extract@11", "knowledge-review@9"))
+        expected = {
+            "extract": ("17a71865ed1d9090e97c2d4fb27ba064ea1246c06313569a1cce7aec6c228aef",
+                        "d52730f9fac3b70324eb33c09bd2a1d32ab19926f61ea86391a3c302c9b35e1e"),
+            "review": ("485d4c33651bb9f295765b9f2b47dec2a63ba71940bec0ea5660fb67ec480250",
+                       "448878c31097a28ace9cf6aeba1b6b6428c26310ea803d4f32d96f87c2321f6c"),
         }
         for role, (request_digest, schema_digest) in expected.items():
             with self.subTest(role=role):

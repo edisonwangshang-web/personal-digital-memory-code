@@ -122,6 +122,25 @@ class CandidateStorageTests(unittest.TestCase):
         self.assertEqual(read_limit("memory/records/artificial.md"), LEGACY_FILE_BYTES)
         self.assertEqual(read_limit(self.path), MAX_CANDIDATE_BYTES)
 
+    def test_incremental_pair_requires_its_own_schema_and_preserves_storage_bounds(self):
+        value = self.candidate()
+        value["skill_bundle"] = resolve_skill_refs("knowledge-extract@12", "knowledge-review@10")
+        data = self.saved(value, schema="0.18")
+        self.assertGreater(len(data), LEGACY_FILE_BYTES)
+        self.assertEqual(validate_candidate_bytes(data)["total_bytes"], len(data))
+        previous = self.candidate()
+        previous["skill_bundle"] = resolve_skill_refs("knowledge-extract@11", "knowledge-review@9")
+        for wrong in (self.saved(value, schema="0.15"), self.saved(previous, schema="0.18")):
+            with self.subTest(header=wrong[:100]):
+                self.assert_rejected(lambda: self.write({self.path: wrong}, self.head))
+                self.assertEqual(self.adapter.head(), self.head)
+        oversized = self.candidate(padding=1)
+        oversized["skill_bundle"] = value["skill_bundle"]
+        oversized["raw_extraction_output"] = {"objects": [{"body": "x" * LEGACY_FILE_BYTES}]}
+        self.assert_rejected(lambda: self.write({self.path: self.saved(oversized, schema="0.18")}, self.head))
+        commit = self.write({self.path: data})
+        self.assertEqual(self.adapter.read(commit, self.path), data)
+
     def test_current_body_and_full_history_caps_remain_separate(self):
         current = self.candidate(padding=100)
         current["objects"][0]["body"] = "X" * LEGACY_FILE_BYTES

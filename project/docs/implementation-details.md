@@ -2,9 +2,9 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。本批 `0.2.0.dev32` 修复既有M1入口与状态交接；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移格式。工程使用虚构资料，不新增真实模型调用或自动重做已完成资料；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev34`修复现有增量复用、程序校验反馈及最终完成度交接；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移格式。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
 
-新默认为`knowledge-extract@11`／`knowledge-review@9`、普通质量链0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
+新默认为`knowledge-extract@12`／`knowledge-review@10`、普通质量链0.18，旧11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
 
 文档分工如下：
 
@@ -15,7 +15,17 @@
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发与云端持久恢复仍待验证。第二模型实际问答已移出M1门槛，当前由模型查找文件并通过现有CLI读取，暂不建设索引层。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
 
+## dev34：现有增量链路的三处修复
+
+1. 对显式精确refs核旧正文、版本、来源、统计定义／范围、控制及passed证明，继承原真实统计关联；模型同pair声明不覆盖。原返回、物化输出及继承依据分别绑定，候选复验须重建一致。
+2. 普通提取校验失败时，下一次既有extract取得当前失败稿、准确错误和必要证据，核原failure／started／engine、来源范围与真实completed调用；不把程序反馈伪装成Review。缺raw、unknown或上下文改变时停止，仍沿同一work总4次上限，不重开耗尽工作。
+3. Review10最终候选的deferred覆盖和对应全局检查不能passed；已有材料未做走needs_revision，真实缺口走needs_confirmation。draft_only只证明本批草稿，未完成资料不能被证明为最终完成。
+
+普通质量schema0.18只用于新12/10，旧11/9及历史合同保持，来源与正式对象不迁移。字段集中在[增量修复合同](data-conventions.md#incremental-repair-contract)，检查见[dev34场景](scenarios-and-acceptance.md#incremental-repair-acceptance)。
+
 ## dev33：复用统计失败保留诊断
+
+历史说明：dev33仅增加未来失败留存，不能视为已修复先前模型内容；新12/10的反馈使用还须满足上述dev34合同。
 
 增量复用的统计完整性校验失败时，调用既有私有诊断helper，保存原可见返回、请求绑定和精确缺失的record/stat对；原拒绝条件、次数和发布门槛保持。该返回仅供定位，不成为候选或自动修复依据，不恢复历史丢失内容，也不授权耗尽工作再次调用。字段见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。
 

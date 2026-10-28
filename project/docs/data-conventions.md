@@ -1,12 +1,28 @@
 # 数据规范
 
-本文是公开工程的数据契约；所有memory、控制、账本和运行路径均指独立私有工作区。本批 `0.2.0.dev32` 修复M1既有接口，不增加schema或迁移数据；沿用Skill11/9、普通quality0.15、assembly0.14及既有0.16／0.17证明，来源0.1／正式0.2保持。工程检查、准确CI与真实验收分别记录；本批dev-only，不更新master、不启动M2、不重做已完成的真实资料。
+当前增量修复为`0.2.0.dev34`、新Skill12/10及普通质量schema0.18；来源0.1和正式知识0.2保持。下文按dev标记保留旧合同，不将新字段回填到历史运行。
+
+<a id="incremental-repair-contract"></a>
+
+## dev34：增量复用、校验反馈与完成度
+
+仅新12/10启用。显式`reuse_refs`指向的记录必须与已核passed证明中的正文、元数据和内容版本精确一致；对应来源、当前控制、统计定义和输入范围也须仍有效。程序只继承原真实统计关联，不推算新值、不覆盖模型已声明的同一关联。原可见模型返回、物化后输出及每项继承的旧版本／证明位置分别绑定，候选核验时重建并比较；任何变化或冲突仍拒绝或重新加工。旧11/9的“显式交齐旧声明”合同保持。
+
+程序校验失败的后继提取只收到当前失败稿、准确错误／缺项及对应必要证据；完整原返回留在私有失败记录。反馈必须绑定原failure、started／engine、来源与批次范围、控制、Skill和原真实completed调用。未知调用、缺原返回或上下文变化时停止，不凭诊断新建候选、伪造Review或取得额外读取／调用权限。后继仍使用同一持久工作，首次加最多3次、总4次，代码升级和新队列不重置旧耗尽状态。
+
+候选仅在实际继承时保存`raw_extraction_output`（原模型输出）、`extraction_output`（物化结果）和`reuse_statistic_inheritance`。后者含`contract: exact-statistic-inheritance-v1`、`controls_digest`及`claims`；每项固定`record_path/record_id/content_version/stat_id`、旧`origin.stage_path/stage_commit/stage_sha256/claim_index`与`claim_sha256`。固定候选重读在原`base_head`重算物化，不能以新正文套用旧证明。模型自行提供的错误关联不会被覆盖。继承只涉及统计声明，覆盖和时间声明仍须按实际正文交齐。
+
+可用于后继提取的失败诊断另带`validation_context`，固定`extraction-validation-feedback-v1`、原`run_id/processing_key`、完整任务范围摘要、版本、请求绑定及原audit池／operation／completed提取观察。后继attempt及候选保存`extraction_feedback_ref`，指向原`failure/started/engine`的路径、Git提交和摘要；这些证明进入现有恢复链。模型只收到`extraction_feedback`中的当前失败稿、错误相关质量声明和准确`validation_error`。独立Review不重复接收这份失败历史，仍审当前物化后的完整候选与必要证据。历史证明重读无需库外账本，实时选择反馈仍须核对原持久账本的completed调用。
+
+Review10对最终候选中deferred的覆盖检查及相应全局完成度检查，不允许结果为passed；已有资料未整理须needs_revision，真实缺少必要事实须needs_confirmation。分批draft_only仍可保留局部未完成项，但不能据此发布最终知识。summarized须有实际正文与依据，程序核可判定结构，语义理由由独立Review判断。不把旧11/9请求改成新合同。
+
+本文是公开工程的数据契约；所有memory、控制、账本和运行路径均指独立私有工作区。dev32批次修复M1既有接口，不增加schema或迁移数据；沿用Skill11/9、普通quality0.15、assembly0.14及既有0.16／0.17证明，来源0.1／正式0.2保持。工程检查、准确CI与真实验收分别记录；本批dev-only，不更新master、不启动M2、不重做已完成的真实资料。
 
 <a id="failed-extraction-diagnostics"></a>
 
 ## dev30：提取校验失败的私有诊断
 
-dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。当前11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。对象更新、领域等其他独立失败分支仍不承诺保存返回。
+dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。对象更新、领域等其他独立失败分支仍不承诺保存返回。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -21,7 +37,7 @@ dev30接入普通提取的首轮输出校验路径：已取得合格调用元信
 
 诊断只写到已核对的私有资料根。若目标是当前工程checkout或含活动工程副本，不追加原始返回，标记`not_saved_engineering_root`；该检查不替代既有双仓分支与仓库可见性核对。仍使用失败文件现有1MiB上限；完整诊断超限时，基本失败和`not_saved_capacity`摘要、返回摘要／字节数及错误信息保留，不保存截断`response`冒充原件。若连错误详情摘要也超限，则仅保存返回摘要／字节数和原错误码，明确`details_saved=false`，不声称具体定位已落盘。写入本身失败则传播实际错误，不能报告已经留存成功。
 
-未取得可核验返回、传输超时或其他unknown不生成模型`response`。诊断不自动用于下一次提取、零调用恢复、Review或正式发布，不返还调用次数；没有历史原始返回时仍无法找回具体句子，不能为补日志重发模型。人工输入仅验证诊断机制，不证明历史真实内容已定位或修好。
+未取得可核验返回、传输超时或其他unknown不生成模型`response`。旧11/9诊断不自动用于下一次提取；新12/10只按[增量修复合同](#incremental-repair-contract)核验后提供校验反馈。诊断本身不作为零调用恢复、Review或正式发布依据，不返还调用次数；没有历史原始返回时仍无法找回具体句子，不能为补日志重发模型。人工输入仅验证诊断机制，不证明历史真实内容已定位或修好。
 
 现有时态谓词与Skill11要求保持。确定性校验只是必要检查，不是对提示全部语义的等价实现；已知某些混合时间措辞仍有既有识别边界，完整独立Review不可省略，本批不借诊断放宽或重写时间规则。人工核对中，将“截至目前已经导入。”配旧来源并标`source_time`，现有“截至”正则可能使确定性检查放行；这不满足Skill对当前系统事实的绑定要求，仍须由完整Review核对。该虚构反例不证明任何历史真实失败的具体原因。
 
@@ -91,7 +107,7 @@ production将本次worker参数传到各实际调用，不向已有queue或账�
 
 原样最终候选真实Review退回后保留原意见。若需实质跨批修订而现有请求仍不能承载，后续返回`blocked_context`／`assembly_revision_required`及零新调用，不重复原样再审或刷新次数。正常可承载final、10/8草稿及答复续接仍按下文有限反馈返工。该安全回退不代表已经实现任意大规模跨批语义修订。
 
-来源及采集`0.1`、正式对象`0.2`保持；本批11/9普通质量链为`0.15`，旧10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
+来源及采集`0.1`、正式对象`0.2`保持；新12/10普通质量链为`0.18`，旧11/9为`0.15`，旧10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。11/9继续引用`knowledge-context-v1`核来源、时间、范围和已提供关系，旧审核只证明其原版本。
 
@@ -204,13 +220,13 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 <a id="skill-quality-contract"></a>
 
-## M1 Skill 引用与知识质量契约（11/9为 `0.15`，旧10/8为 `0.12`）
+## M1 Skill 引用与知识质量契约（12/10为 `0.18`，旧11/9为 `0.15`）
 
-显式bundle启用`quality_contract="skill-quality-v1"`，新11/9使用0.15、旧10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
+显式bundle启用`quality_contract="skill-quality-v1"`，新12/10使用0.18、旧11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
 
 ### Skill 引用、展开与运行绑定
 
-CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@11／review@9，历史extract@1—@10与review@1—@8原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
+CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@12／review@10，历史extract@1—@11与review@1—@9原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
 
 `skill_bundle` 顶层为 `schema_version="skill-bundle-v1"`、`quality_contract`、`skills`、`shared_policy` 和 `sha256`。`skills.extract`／`skills.review` 各保存 `ref`、`role`、`version`、`manifest`、`files`、`base_prompt`；每个内容快照包含 `path`、`content`、`sha256`、`bytes`。manifest 和完整依赖按注册摘要核验，bundle摘要覆盖除其自身 `sha256` 外的规范JSON；角色和共享规范必须一致。设计阶段的 `skill_binding` 在实际格式中由完整bundle与请求绑定共同承担，不另存同名字段。
 
@@ -246,7 +262,7 @@ summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一�
 
 `pdm-shared-json-v1`是共享值的基础无损表示：`{format,root,shared}`保存输入根与完整共享值表，只有`{"$pdm_ref": id}`的对象指向共享表中的完整值。原资料对象含`$pdm_ref`或`$pdm_literal`保留键时，编码器使用`$pdm_literal`转义，避免把资料误解释成引用。只共享能减少字节的重复值，其余完整内联；原文、统计、上下文、候选和检查项均能解引用还原，不靠删除辅助材料或拆小语义范围满足容量。
 
-本批11/9继续按其冻结角色配置使用`pdm-columnar-shared-json-v3`，依次还原列式结构、v2字段字典和v1共享值。旧10/8及更早角色按原配置、原字节渲染，不把新默认套到历史请求。
+新12/10及旧11/9继续按各自冻结角色配置使用`pdm-columnar-shared-json-v3`，依次还原列式结构、v2字段字典和v1共享值。旧10/8及更早角色按原配置、原字节渲染，不把新默认套到历史请求。
 
 `encode_shared_json`在每次编码时调用`decode_shared_json`核对规范JSON与原输入相等；解码拒绝循环、悬空引用、非法结构及超限展开。模型请求同时提供解引用说明，模型输出仍按原业务schema，不能用共享ID代替真实来源、quote、正文或检查标识。`request_binding`和容量门禁核实际编码后的完整线上字节，包括规则与编码说明；编码前原payload审计和完整候选继续保留。旧契约请求维持原字节渲染，历史输出不追写共享引用。
 
@@ -386,7 +402,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增0.15普通质量合同，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
+Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增0.18普通质量合同，旧11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 

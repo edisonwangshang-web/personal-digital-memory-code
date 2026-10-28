@@ -51,19 +51,31 @@ class M1CommandWorkflowTests(unittest.TestCase):
                        "valid_to": None, "verification_status": "unverified", "lifecycle_status": "undetermined",
                        "body": text}], "wiki": {"id": "topic-artificial", "title": "人工主题",
                        "sources": [ref], "body": text}, "reuse_refs": []}
-            # The corrected source supplies the effective state. The superseded
-            # source remains explicit history, rather than pretending its old
-            # value was summarized as an independently valid current fact.
+            # Summarize the correction history separately from the effective
+            # current state. Neither the old value nor an unprocessed target
+            # is presented as a completed current observation.
             coverage = []
             for target in payload["quality_context"]["targets"]:
                 selected = (target["source_id"], target["source_version"]) == (
                     ref["source_id"], ref["source_version"])
+                record_id, summary = "state-artificial", text
+                if not selected:
+                    old_source = next(source for source in payload["sources"]
+                        if (source["metadata"]["source_id"], source["metadata"]["source_version"]) ==
+                           (target["source_id"], target["source_version"]))
+                    old_text = old_source["body"].splitlines()[0]
+                    old_ref = {"source_id": target["source_id"], "source_version": target["source_version"],
+                               "locator": "L1-L1", "quote": old_text}
+                    record_id = "correction-history-artificial"
+                    summary = f"原始资料曾记录：{old_text}。用户纠正原文明确写为：{text}。旧说法仅作纠正对象保留，不作为有效值使用。"
+                    output["objects"].append({"id": record_id, "type": "knowledge", "title": "人工纠正历史",
+                        "source_kind": "user_statement", "sources": [old_ref, ref], "domains": [],
+                        "valid_from": None, "valid_to": None, "verification_status": "unverified",
+                        "lifecycle_status": "undetermined", "body": summary})
                 coverage.append({
                     "target_id": target["target_id"],
-                    "status": "summarized" if selected else "deferred",
-                    "record_ids": ["state-artificial"] if selected else [],
-                    "body_evidence": [{"record_id": "state-artificial", "text": text}] if selected else [],
-                    "reason": "" if selected else "所选用户纠正原文否定了该来源的旧数值；保留原版本作为纠正历史，不再作为有效状态。",
+                    "status": "summarized", "record_ids": [record_id],
+                    "body_evidence": [{"record_id": record_id, "text": summary}], "reason": "",
                 })
             output["quality"] = {"coverage_disposition": coverage, "statistic_claims": [], "temporal_claims": []}
         else:
@@ -96,7 +108,7 @@ class M1CommandWorkflowTests(unittest.TestCase):
             old = self.process([self.paths[0]])
             self.assertEqual(old["status"], "passed")
             metadata, body = parse_markdown((self.repo / old["stage_path"]).read_bytes())
-            self.assertEqual(metadata["schema_version"], "0.15")
+            self.assertEqual(metadata["schema_version"], "0.18")
             self.assertEqual(json.loads(body)["quality_contract"], "skill-quality-v1")
             original = self.invoke("publish", "--repo", str(self.repo), "--run", old["run_id"])
             payload = {"request_key": "artificial:cli-correction", "action": "corrects",
@@ -116,7 +128,7 @@ class M1CommandWorkflowTests(unittest.TestCase):
             update = self.process(self.paths[:2], [old["run_id"]])
             self.assertEqual(update["status"], "passed")
             metadata, body = parse_markdown((self.repo / update["stage_path"]).read_bytes())
-            self.assertEqual(metadata["schema_version"], "0.15")
+            self.assertEqual(metadata["schema_version"], "0.18")
             candidate = json.loads(body)
             selected_paths = {(source["source_id"], source["source_version"]): source["path"]
                               for source in candidate["quality_context"]["sources"]}
@@ -124,12 +136,13 @@ class M1CommandWorkflowTests(unittest.TestCase):
                             for target in candidate["quality_context"]["targets"]}
             dispositions = {source_paths[item["target_id"]]: item
                             for item in candidate["extraction_output"]["quality"]["coverage_disposition"]}
-            self.assertEqual(dispositions[self.paths[0]]["status"], "deferred")
-            self.assertIn("纠正", dispositions[self.paths[0]]["reason"])
+            self.assertEqual(dispositions[self.paths[0]]["status"], "summarized")
+            self.assertEqual(dispositions[self.paths[0]]["record_ids"], ["correction-history-artificial"])
+            self.assertIn("旧说法仅作纠正对象保留", dispositions[self.paths[0]]["body_evidence"][0]["text"])
             self.assertEqual(dispositions[self.paths[1]]["status"], "summarized")
             self.assertIn("实际是1", dispositions[self.paths[1]]["body_evidence"][0]["text"])
             review_meta, review_body = parse_markdown((self.repo / update["review_path"]).read_bytes())
-            self.assertEqual(review_meta["schema_version"], "0.15")
+            self.assertEqual(review_meta["schema_version"], "0.18")
             reviewed = json.loads(review_body)["output"]
             self.assertEqual(reviewed["verdict"], "passed")
             self.assertEqual(len(self.review_requests), 2)
