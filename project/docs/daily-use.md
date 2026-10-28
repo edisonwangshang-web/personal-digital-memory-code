@@ -153,6 +153,8 @@ python -P -B -m pdm verify-publication --repo "$PDM_DATA_REPO" --run "$run_id"
 
 ## 只读取需要的记录或主题
 
+先由模型在获准范围内通过目录、文件名和文本查找定位记录／主题，再根据来源引用和发布记录确定下列命令所需的`source_path`、`run_id`和`--object`。查找结果只用于选择候选，仍须由`evidence --current`核验来源、版本、依赖和纠正／删除控制后使用。当前不建索引，也不将现有CLI描述为自动全库搜索；完整顺序见[文件查找与读取](m0-m1-execution-plan.md#agent-cli-index-work)。
+
 ```bash
 python -P -B -m pdm evidence --repo "$PDM_DATA_REPO" --current \
   --source "$source_path" --run "$run_id" \

@@ -6,6 +6,8 @@
 
 产品目标、用户场景、技术方案、实现明细、数据契约及阶段计划统一在本工程仓库维护，入口见[项目文档导航](project/README.md)。
 
+当前知识读取由模型在获准范围内通过目录、文件名和文本查找定位，再使用现有CLI核验来源、版本和纠正／删除状态。暂不建设索引层，资料增长且查找出现实际困难后再评估。操作见[知识查找与读取](project/docs/daily-use.md#selected-knowledge-reading)。
+
 - [总体方案](project/docs/overall-plan.md)：产品目标、用户场景与范围。
 - [技术方案](project/docs/technical-plan.md)：四层架构与实现原理。
 - [实现明细](project/docs/implementation-details.md)、[数据规范](project/docs/data-conventions.md)、[场景与验收](project/docs/scenarios-and-acceptance.md)：具体执行与检查要求。
