@@ -373,6 +373,39 @@ def _timeout_feedback(git, ref, attempts, model_call):
     return actual
 
 
+def _stage_reuse_successor(git, source, successor, work_id):
+    """Recognize a bound immediate adoption before considering the old source.
+
+    The successor's actual candidate and Review still pass the normal recovery
+    or revision verifier below; this linkage alone grants no model call.
+    """
+    witness = successor.get("stage_reuse")
+    if witness is None:
+        return False
+    from .pipeline import _committed, _stage_path
+    from .stage_extraction_reuse import CONTRACT
+    target = witness.get("target") if isinstance(witness, dict) else None
+    snapshots = witness.get("snapshots") if isinstance(witness, dict) else None
+    ref = snapshots.get("stage") if isinstance(snapshots, dict) else None
+    number = source.get("attempt")
+    path = _stage_path(source["run_id"])
+    if (not isinstance(witness, dict) or not isinstance(target, dict) or not isinstance(ref, dict)
+            or witness.get("contract") != CONTRACT
+            or witness.get("source_run_id") != source["run_id"]
+            or successor.get("stage_reuse_sha256") != "sha256-" + _hash(witness)
+            or type(number) is not int or not 1 <= number < 4
+            or successor.get("attempt") != number + 1 or target.get("attempt") != number + 1
+            or target.get("work_id") != work_id
+            or any(successor.get(key) != target.get(key) for key in ("run_id", "operation_id"))
+            or target.get("run_id") != "run-" + _hash({"work": work_id, "attempt": number + 1})[:32]
+            or target.get("operation_id") != "batch:" + work_id + ":" + str(number + 1)
+            or set(ref) != {"path", "commit_sha", "sha256"} or ref["path"] != path
+            or ref["sha256"] != "sha256-" + hashlib.sha256(_committed(git, path)).hexdigest()
+            or ref["commit_sha"] != git.text("log", "-1", "--format=%H", "HEAD", "--", path)):
+        _fail("stage_reuse_attempt_mismatch")
+    return True
+
+
 def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(), execution_guard=None, assembly=False):
     from .budget import BudgetedModelCall
     from .model_calls import MAX_INPUT_BYTES, PROMPTS
@@ -536,7 +569,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             if selected_schema != QUALITY_SCHEMA:
                 attempts["schema_version"] = selected_schema
         stage_source_run = None
-        for old in attempts["attempts"]:
+        for index, old in enumerate(attempts["attempts"]):
             if old["run_id"] in retired:
                 continue
             if old["run_id"] in registrations:
@@ -593,6 +626,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                         previous_candidate = _load(_committed(git, previous_stage), "candidate")
                         if (previous_candidate.get("batch_context", {}).get("plan_id") != plan["plan_id"]
                                 and previous_candidate.get("stage_reuse_ref") is None):
+                            if (index + 1 < len(attempts["attempts"])
+                                    and _stage_reuse_successor(git, old, attempts["attempts"][index + 1], work_key)):
+                                continue
                             stage_source_run = old["run_id"]
                             continue
             if old["status"] in {"needs_confirmation", "registration_required", "blocked_capacity", "blocked_context", "attempt_limit"}:
