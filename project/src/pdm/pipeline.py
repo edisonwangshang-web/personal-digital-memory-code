@@ -1934,9 +1934,12 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                            _reuse_objects(materialized_output.get("reuse_refs"), related, sources)))
             except CaptureError as error:
                 git.check(head)
+                diagnostic = _extraction_diagnostic(git, error, response,
+                    context_fields.get("extraction_request_binding"), materialized_output)
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
                                 current_call_count(),
-                                failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
+                                failure_name="revalidation-failure" if _revalidate_completed is not None else "failure",
+                                extraction_diagnostic=diagnostic)
         try:
             _validate_domains(objects, related, context_fields.get("operations", {}), versions)
         except CaptureError as error:

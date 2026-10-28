@@ -6,7 +6,7 @@
 
 ## dev30：提取校验失败的私有诊断
 
-本批仅接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。当前11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。后续对象更新、复用质量、领域等独立失败分支尚未接入该留存，不承诺所有失败路径均保存返回。
+dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。当前11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。对象更新、领域等其他独立失败分支仍不承诺保存返回。
 
 | 字段 | 含义 |
 | --- | --- |

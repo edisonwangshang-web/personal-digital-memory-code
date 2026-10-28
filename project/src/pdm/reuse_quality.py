@@ -18,8 +18,8 @@ _RECORD = re.compile(r"memory/records/[a-z][a-z0-9-]{0,95}\.md\Z")
 _VERIFICATION = ContextVar("reuse_quality_verification", default=None)
 
 
-def _fail(code="invalid_reuse_quality_authority"):
-    raise CaptureError(code, "复用统计义务未通过固定证明与显式声明核验")
+def _fail(code="invalid_reuse_quality_authority", *, details=None):
+    raise CaptureError(code, "复用统计义务未通过固定证明与显式声明核验", details=details)
 
 
 def _sha(raw):
@@ -221,6 +221,11 @@ def validate_reuse_quality(git, related, sources, context, reused_objects, outpu
         declared = {(claim["record_id"], claim["stat_id"]) for claim in claims}
     except (KeyError, TypeError, ValueError):
         _fail("invalid_reuse_quality_output")
-    if any((item["record_id"], item["stat_id"]) not in declared for item in obligations):
-        _fail("reuse_statistic_claims_missing")
+    missing = sorted({(item["record_id"], item["stat_id"]) for item in obligations
+                      if (item["record_id"], item["stat_id"]) not in declared})
+    if missing:
+        _fail("reuse_statistic_claims_missing", details={
+            "field_path": "/quality/statistic_claims",
+            "missing_claims": [{"record_id": record_id, "stat_id": stat_id}
+                               for record_id, stat_id in missing]})
     return obligations

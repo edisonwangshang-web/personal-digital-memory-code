@@ -14,6 +14,7 @@ from pdm.batch_groups import publish_final_group
 from pdm.capture import capture
 from pdm.contracts import CaptureError
 from pdm.knowledge_quality import prepare_quality, resolve_statistic, validate_quality_output
+from pdm.model_calls import request_binding
 from pdm.pipeline import (_load, _related_context, _objects, load_source, process_sources,
                           publish, verify_publication)
 from pdm.reuse_quality import (collect_reuse_statistical_obligations, model_reuse_requirements,
@@ -80,7 +81,7 @@ class ReuseQualityTests(unittest.TestCase):
             if payload.get("output_contract") == "batch-v1":
                 output["wikis"] = [{**output.pop("wiki"), "record_ids": [self.record_id]}]
             if payload.get("skill_bundle", {}).get("skills", {}).get("extract", {}).get("ref") in {
-                    "knowledge-extract@9", "knowledge-extract@10"}:
+                    "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11"}:
                 output["reuse_refs"] = []
             if self.reuse:
                 documents = [doc for item in payload["related"] for doc in item["documents"]]
@@ -126,7 +127,15 @@ class ReuseQualityTests(unittest.TestCase):
         for claims in ([], self.output["quality"]["statistic_claims"][:1]):
             output = {"quality": {"statistic_claims": deepcopy(claims)}}
             before = deepcopy(output)
-            self.assert_error("reuse_statistic_claims_missing", lambda: self.validate(output))
+            with self.assertRaises(CaptureError) as caught:
+                self.validate(output)
+            self.assertEqual(caught.exception.code, "reuse_statistic_claims_missing")
+            missing = sorted((item["record_id"], item["stat_id"])
+                             for item in self.output["quality"]["statistic_claims"][len(claims):])
+            self.assertEqual(caught.exception.details, {
+                "field_path": "/quality/statistic_claims",
+                "missing_claims": [{"record_id": record_id, "stat_id": stat_id}
+                                   for record_id, stat_id in missing]})
             self.assertEqual(output, before)
         before = deepcopy(self.output)
         self.assertEqual(self.validate(), obligations)
@@ -235,17 +244,41 @@ class ReuseQualityTests(unittest.TestCase):
 
     def test_new_contract_omission_fails_before_review_or_formal_writes(self):
         formal = {path: (self.repo / path).read_bytes() for path in self.publication["files"]}
+        missing = sorted((item["record_id"], item["stat_id"])
+                         for item in self.output["quality"]["statistic_claims"])
+        self.assertEqual(len(missing), 2)
         self.omit_claims = True
-        for self.reuse in (True, False):
-            with self.subTest(explicit_refs=self.reuse):
-                self.roles.clear()
-                result = process_sources(self.repo, [self.saved["path"]], related_runs=[self.old["run_id"]],
-                    model_call=self.model, skill_bundle=resolve_skill_refs("knowledge-extract@10", "knowledge-review@8"))
-                self.assertEqual((result["status"], result["error"]), ("failed", "reuse_statistic_claims_missing"))
-                self.assertEqual(self.roles, ["extract"])
-                self.assertEqual(self.outputs[-1]["quality"]["statistic_claims"], [])
-                self.assertFalse((self.repo / ("memory/staging/" + result["run_id"] + ".md")).exists())
-                self.assertEqual({path: (self.repo / path).read_bytes() for path in formal}, formal)
+        for extract_ref, review_ref in (("knowledge-extract@10", "knowledge-review@8"),
+                                        ("knowledge-extract@11", "knowledge-review@9")):
+            for self.reuse in (True, False):
+                with self.subTest(extract=extract_ref, explicit_refs=self.reuse):
+                    self.roles.clear()
+                    calls = []
+
+                    def observed_model(role, payload):
+                        response = self.model(role, payload)
+                        calls.append((role, deepcopy(payload), deepcopy(response)))
+                        return response
+
+                    result = process_sources(self.repo, [self.saved["path"]], related_runs=[self.old["run_id"]],
+                        model_call=observed_model, skill_bundle=resolve_skill_refs(extract_ref, review_ref))
+                    self.assertEqual((result["status"], result["error"]), ("failed", "reuse_statistic_claims_missing"))
+                    self.assertEqual(self.roles, ["extract"])
+                    self.assertEqual(self.outputs[-1]["quality"]["statistic_claims"], [])
+                    failure = _load((self.repo / result["failure_path"]).read_bytes(), "failure")
+                    diagnostic = failure["extraction_diagnostic"]
+                    self.assertEqual(diagnostic["status"], "unvalidated_not_publishable")
+                    self.assertEqual(diagnostic["response"], calls[0][2])
+                    self.assertEqual(diagnostic["response"]["output"], self.outputs[-1])
+                    self.assertEqual(diagnostic["request_binding"], request_binding(*calls[0][:2]))
+                    self.assertEqual(diagnostic["validation_target"], "response.output")
+                    self.assertEqual(diagnostic["validation_error"]["code"], "reuse_statistic_claims_missing")
+                    self.assertEqual(diagnostic["validation_error"]["details"], {
+                        "field_path": "/quality/statistic_claims",
+                        "missing_claims": [{"record_id": record_id, "stat_id": stat_id}
+                                           for record_id, stat_id in missing]})
+                    self.assertFalse((self.repo / ("memory/staging/" + result["run_id"] + ".md")).exists())
+                    self.assertEqual({path: (self.repo / path).read_bytes() for path in formal}, formal)
 
     def test_metadata_only_change_cannot_hide_unchanged_body_statistical_obligations(self):
         self.reuse = False

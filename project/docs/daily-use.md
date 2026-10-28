@@ -27,6 +27,8 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 
 ## 查看提取失败诊断
 
+dev33补齐增量复用统计校验失败的同一诊断路径；`reuse_statistic_claims_missing`可在`validation_error.details.missing_claims`中定位实际缺失的记录／统计ID。原失败未保存返回时仍不能事后恢复，修复后也不重开已耗尽工作。
+
 诊断机制沿用既有私有失败记录，本批仅使用虚构资料核对工程行为。提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
 
 先检查`status`：`unvalidated_not_publishable`才表示本次五字段可见返回已完整留存，`not_saved_capacity`或`not_saved_engineering_root`表示未保存原始返回，不可用摘要还原或声称完整保存。没有返回的unknown也不会补出response。诊断没有自动重验或发布命令；原次数和上限继续生效，耗尽后不因已有诊断而新增调用。没有历史原始输出时仍不能定位具体旧句子，不为了补日志再跑模型。字段和边界见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。
