@@ -2,7 +2,9 @@
 
 [返回技术方案](../technical-plan.md) · [执行步骤与恢复](../implementation-details.md) · [数据规范](../data-conventions.md)
 
-当前dev34的新12/10普通质量链使用schema0.18，第三层负责精确旧统计继承、已知提取校验失败的绑定反馈、最终完成度结果约束；旧11/9及历史路径保持。完整规则见[增量修复合同](../data-conventions.md#incremental-repair-contract)，人工检查、准确CI与真实验证分别取证。
+当前dev35使用新`selected-input-scope-v2`分解审核布局，以完整表格来源为coverage单元并带齐说明／字典，global核完整来源范围和关系。新plan／proof及受限已完成stage复用sidecar为0.19，普通候选仍0.18；只有固定completed提取、Review从未启动及同work原Git／audit证明齐全时，下一attempt才零新extract复用并重验。旧v1请求字节、次数和unknown保持，旧writer遇0.19拒写；实现边界见[审核材料与受限恢复](../data-conventions.md#review-material-recovery)，本批工程、新CI与真实全链各自待取证。
+
+dev34的新12/10普通质量链使用schema0.18，第三层负责精确旧统计继承、已知提取校验失败的绑定反馈、最终完成度结果约束；旧11/9及历史路径保持。完整规则见[增量修复合同](../data-conventions.md#incremental-repair-contract)，人工检查、准确CI与真实验证分别取证。
 
 本层负责采集、编排、程序校验、证据读取和条件发布，模型理解与审核，程序控制正式写入。dev32批次在既有M1链路修复采集回执、手动答复续接、已解决事项历史幂等、持久discovery中断状态及旧引用长度边界，不新增加工阶段或schema。dev32时的默认Skill11/9及其有限重试合同保留；只dev，不更新master、不启动M2，工程及真实验证状态见[Roadmap](../roadmap.md)。目标runner、两次实际触发及目标环境持久状态恢复仍分别待验收；第二模型实际问答已移出M1门槛，当前由模型查找文件并使用现有CLI按明确范围核验、读取，不建设索引服务。
 

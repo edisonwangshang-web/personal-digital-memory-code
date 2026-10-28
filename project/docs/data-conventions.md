@@ -1,6 +1,24 @@
 # 数据规范
 
-当前增量修复为`0.2.0.dev34`、新Skill12/10及普通质量schema0.18；来源0.1和正式知识0.2保持。下文按dev标记保留旧合同，不将新字段回填到历史运行。
+当前开发为`0.2.0.dev35`；Skill12/10及普通质量候选0.18保持，新分解审核plan／proof和受限stage复用sidecar使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。下文按dev标记保留旧合同，不将新字段回填到历史运行。
+
+<a id="review-material-recovery"></a>
+
+## dev35：按完整来源审核与受限已完成提取复用
+
+新12/10分解计划固定`request_contract="selected-input-scope-v2"`，每个coverage包含一个完整表格来源的实际选定范围及全部非表格说明／字典；需要的答复片段仍完整随单元提供。无表格时按来源分组。各coverage的并集必须等于本次完整输入范围，不按任意字节切片或丢弃来源。`input_scope_inventory`及其SHA绑定每个选定来源版本、metadata是否提供、实际片段和行数；它说明读取边界，不能替代原文。object义务保持，global核完整最终正文／关系及全部前序已通过证书，`verified-quality-conclusions-v2`只承载程序已核结论与摘要，不伪称global重新阅读全部原文。
+
+已保存`selected-input-scope-v1`的11/9或12/10计划继续按原布局及原请求字节恢复，不因安装新版改写；新v2计划与节点证明使用0.19，普通12/10候选仍为0.18。容量仍逐实际请求核验，不能以分解代替完整审核。
+
+受限复用合同为`capacity-blocked-stage-extraction-v1`：只接单完整批final的原已固定候选，原提取在同audit池为真实completed，原work最后一行是`blocked_capacity`／`decomposed_input_limit`，Review从未启动，分解子单元从未预约或调用。原stage、started、engine、分解plan、来源、控制、Skill、业务上下文和原实际提取请求绑定均须可从Git重建并与原audit核对；规则及领域策略保持，受限工程更新不等于任意跨版本迁移。目标必须是同work下一attempt且不超过4，原计数前缀保持。unknown、缺raw、Review已启动、来源／控制／规则改变或原work耗尽均拒绝。
+
+| 证明位置／字段 | 实际作用 |
+| --- | --- |
+| `stage-extraction-reuse` sidecar，kind=`stage_extraction_reuse`、schema0.19 | 保存`run_id`和小型`witness`；不复制大payload或response，不声称服务端签名 |
+| `witness.snapshots`、`completed_extract`、`original_payload_sha256`、`original_request_binding`、`response_sha256` | 绑定原stage／started／engine／plan／队列／计数快照和原audit completed观察；从固定stage读取原可见返回 |
+| `witness.target`与候选`stage_reuse_ref={path,sha256}` | 绑定同work后继attempt／run／operation、目标版本与范围；引用参与候选和发布证明核验 |
+
+后继零新extract，重新按新工程程序校验并独立Review；新的真实Review正常计数。原rawresponse、消费、失败记录与计数保留，不将复用包装成新模型结果，也不重放未知调用。原source stage不能已使用本合同；目标预约后中断仅在相同见证、原run／operation仍无新调用或结果时幂等续接，不能另造后继。人工回归、准确CI和真实Review／发布／读取分别取证，本节本身不表示通过。
 
 <a id="incremental-repair-contract"></a>
 
@@ -270,7 +288,7 @@ summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一�
 
 每个分解请求的`candidate.quality`仅投影该单元对象、target和实际可见统计范围内的声明，并通过`quality_declaration_scope`保留范围与未投影的统计声明ID。声明中的来源引用只给来源版本与locator，重复`quote`不成为绕过原文范围的第二条正文通道；实际原文仍在该单元`sources`和固定候选引文中。global的声明仅作一致性输入，其依据是前序证书，不能据此声称重新读过原始资料。完整提取输出仍保存在候选中，投影缺项不等于原候选没有该项。
 
-global接收`certificate_contract="verified-quality-conclusions-v1"`的程序已核验证书投影：保留每项`check_id`、`scope_sha256`、`result`、`reason`以及总`verdict`／`reasons`，证据ID数组改为`evidence_ids_sha256`，并保留`complete_output_sha256`和`complete_checks_sha256`。完整模型返回仍持久保存在原节点result中，完整proof读回和汇合时逐项重验；投影不能用来省略必需检查或替换原始审核结果。global读取完整最终知识、关系与前序结论，不把证书描述为其亲自读过的原文。
+已存v1布局的global接收`certificate_contract="verified-quality-conclusions-v1"`的程序已核验证书投影；dev35新v2布局按[审核材料合同](#review-material-recovery)核v2证书，旧请求不改写。v1投影：保留每项`check_id`、`scope_sha256`、`result`、`reason`以及总`verdict`／`reasons`，证据ID数组改为`evidence_ids_sha256`，并保留`complete_output_sha256`和`complete_checks_sha256`。完整模型返回仍持久保存在原节点result中，完整proof读回和汇合时逐项重验；投影不能用来省略必需检查或替换原始审核结果。global读取完整最终知识、关系与前序结论，不把证书描述为其亲自读过的原文。
 
 上述共享描述和分工只去除请求中的重复材料；必要规则、完整语义原文、最终正文或必需证据仍超容量时阻塞，不抬高限制、不截断证据。工程测量与真实模型执行分别判定，证据留在相应工作区。
 
@@ -404,7 +422,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增0.18普通质量合同，旧11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
+Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增0.19分解审核／stage复用证明门禁，普通12/10继续0.18，旧11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 
@@ -940,7 +958,7 @@ Review 通过表示达到内容整理与发布要求，不等于独立事实核�
 
 ### dev11选定输入范围的版本化审核契约
 
-引入选定输入范围契约后，新分解计划固定`request_contract=selected-input-scope-v1`和`input_scope_inventory`，每个object／coverage／global请求均携带同一受绑定清单。清单记录选定来源/采集回执绑定、实际提供的metadata、fragment与全局行范围；本批未提供的选定来源明确为metadata=null、metadata_provided=false、空fragment和零提供行数。局部unit实际正文仍只在sources中提供，不把清单当作未读原文、健康事实、全库不存在或外部独立核验的证据。
+早期选定输入范围契约的已存计划固定`request_contract=selected-input-scope-v1`和`input_scope_inventory`；dev35新12/10计划按[审核材料合同](#review-material-recovery)使用v2，v1请求原字节保持。两者每个object／coverage／global请求均携带同一受绑定清单。清单记录选定来源/采集回执绑定、实际提供的metadata、fragment与全局行范围；本批未提供的选定来源明确为metadata=null、metadata_provided=false、空fragment和零提供行数。局部unit实际正文仍只在sources中提供，不把清单当作未读原文、健康事实、全库不存在或外部独立核验的证据。
 
 新plan_id及request hash覆盖该契约和清单；逻辑counter身份保持，换契约不能绕过旧unknown或四次上限。无契约字段的旧计划在current和historical读取时均按原request及原prompt摘要精确重建，不改旧verdict；旧writer拒绝新proof。extract v13收紧为本次提供/选定范围，review v10说明这三个范围的区别。schema0.8保持，旧数据不迁移；人工反例按公开验收定义检查，真实运行证据留私有位置。
 

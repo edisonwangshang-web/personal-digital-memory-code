@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev34`修复现有增量复用、程序校验反馈及最终完成度交接；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移格式。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev35`修复独立审核材料容量与受限已完成stage续接，dev34的增量复用、校验反馈和最终完成度保持；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移格式。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
 
 新默认为`knowledge-extract@12`／`knowledge-review@10`、普通质量链0.18，旧11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
 
@@ -14,6 +14,12 @@
 - [Roadmap](roadmap.md)管理阶段成果、执行顺序、进度与通过证据；本页不重复阶段表。
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发与云端持久恢复仍待验证。第二模型实际问答已移出M1门槛，当前由模型查找文件并通过现有CLI读取，暂不建设索引层。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
+
+## dev35：审核材料与已固定提取续接
+
+新分解plan使用`selected-input-scope-v2`：coverage按完整表格来源及完整说明／字典组织，global汇合全部来源范围、候选关系和已核证书；已存v1计划的布局与请求字节不变。新plan／proof为0.19，普通12/10候选仍0.18。
+
+持久编排只对同work最后一次因`decomposed_input_limit`阻塞、已有固定stage且原Review从未启动的completed提取，准备`capacity-blocked-stage-extraction-v1`见证，在下一attempt（最多4）复用原返回而不再extract。程序核原stage／plan／row／engine／实际请求绑定、相同原audit completed及当前范围；小sidecar为0.19，从原stage读raw，不复制大payload／response。后继重做程序校验和真正独立Review；unknown、旧耗尽、范围／规则变化及已启动Review不适用。没有新的命令阶段或通用跨版本迁移。字段和反例见[合同](data-conventions.md#review-material-recovery)、[验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。工程、新CI与真实发布读取分别待取证。
 
 ## dev34：现有增量链路的三处修复
 
@@ -196,7 +202,7 @@ extract@9的原始输出显式携带 `reuse_refs`。每项为 `{path, content_ve
 
 实际渲染按冻结角色选择v1／v2／v3；新11/9沿用`pdm-columnar-shared-json-v3`，依次还原列式、字段字典和共享值，并在程序内逐值核对。阶段内必要材料不被编码裁减，容量与摘要计入规则、共享表及说明的全部线上字节。旧角色请求按原字节；输出仍须实际业务字段，不拿共享引用代替原文或正文。
 
-global使用`verified-quality-conclusions-v1`证书投影，保留前序逐项结论、理由、范围和完整输出／检查摘要，重复证据ID数组以摘要绑定。原始完整Review输出仍在proof节点保存并于汇合时重验；global仍看完整最终知识与关系，证书不声称其读过未提供原文。任何必要单元仍超容量就保留阻塞，实际最终字节和检查结果统一见提测记录，不能以压缩后的请求结构代替真实模型质量验收。
+已存v1布局的global使用`verified-quality-conclusions-v1`证书投影；dev35新布局见[审核材料与受限恢复](data-conventions.md#review-material-recovery)，不改写旧证书。v1投影保留前序逐项结论、理由、范围和完整输出／检查摘要，重复证据ID数组以摘要绑定。原始完整Review输出仍在proof节点保存并于汇合时重验；global仍看完整最终知识与关系，证书不声称其读过未提供原文。任何必要单元仍超容量就保留阻塞，实际最终字节和检查结果统一见提测记录，不能以压缩后的请求结构代替真实模型质量验收。
 
 人工验收应检查：概览覆盖整个选定期间，说明实际记录覆盖和缺失；缺失不能写成现实事件没有发生，未完结日不能参与未经说明的全天比较。原文中的“尚未处理”等陈述须限定为写成当时；当前处理状态若需呈现，须有固定 Git／回执依据。预期值与退回反例放在人工验收样例，不写死到通用 Skill 或程序规则。
 

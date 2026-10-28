@@ -459,14 +459,16 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
     for old in previous.get("attempts", []) if previous else []:
         if old["run_id"] in retired:
             continue
-        if old["status"] not in {"reserved", "unknown", "partial", "needs_confirmation", "registration_required"}:
+        if (old["status"] not in {"reserved", "unknown", "partial", "needs_confirmation", "registration_required"}
+                and not (old["status"] == "failed" and old.get("stage_reuse") is not None)):
             continue
         marker = _run_path(old["run_id"], "pending-registration")
         if git.path(marker).is_file():
             from .pipeline import resume_pending_registration
             registrations[old["run_id"]] = resume_pending_registration(
                 repo, old["run_id"], allowed_source_paths=state["request"]["allowed_source_paths"])
-        elif old["status"] in {"reserved", "unknown", "partial"} and (strategy in {"auto", "decomposed-v1"} or old.get("timeout_retry_ref") is not None):
+        elif (old["status"] in {"reserved", "unknown", "partial"}
+              or old["status"] == "failed" and old.get("stage_reuse") is not None) and (strategy in {"auto", "decomposed-v1"} or old.get("timeout_retry_ref") is not None):
             from .pipeline import _stage_path, resume_decomposed_processing
             stage = _stage_path(old["run_id"])
             if (strategy in {"auto", "decomposed-v1"} and git.path(stage).is_file()
@@ -496,6 +498,18 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                         options["revision_from_run"] = old["revision_from_run"]
                     resumptions[old["run_id"]] = process_sources(repo, processing_paths, model_call=delegate, **options)
                     break
+            elif old.get("stage_reuse") is not None and not git.path(stage).is_file():
+                if (draft or assembly or merge_runs or continuation is not None or rebuild_context is not None
+                        or old.get("stage_reuse_sha256") != "sha256-" + _hash(old["stage_reuse"])):
+                    _fail("stage_reuse_attempt_mismatch")
+                delegate = (model_call.for_operation(old["operation_id"])
+                            if isinstance(model_call, BudgetedModelCall) else model_call)
+                delegate = _guarded(delegate, execution_guard, repo, state["queue_id"], old["run_id"])
+                resumptions[old["run_id"]] = process_sources(repo, processing_paths, model_call=delegate,
+                    related_runs=state["related_runs"], run_id=old["run_id"],
+                    batch_context=projection["batch_context"], source_views=projection["source_views"],
+                    review_strategy=strategy, skill_bundle=skill_bundle, stage_reuse=deepcopy(old["stage_reuse"]))
+                break
             elif assembly and not git.path(stage).is_file():
                 from .assembly_final import can_resume_unstaged_assembly, finalize_drafts
                 number = old.get("attempt")
@@ -521,6 +535,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             selected_schema = quality_schema_version(skill_bundle)
             if selected_schema != QUALITY_SCHEMA:
                 attempts["schema_version"] = selected_schema
+        stage_source_run = None
         for old in attempts["attempts"]:
             if old["run_id"] in retired:
                 continue
@@ -567,6 +582,19 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     continue
                 # A timeout, missing result or uncertain launch is never a free retry.
                 return {"status": "unknown", "run_id": old["run_id"], "next_action": "reconcile"}
+            if (old["status"] == "blocked_capacity" and old.get("error") == "decomposed_input_limit"
+                    and not draft and not assembly and not merge_runs and continuation is None
+                    and rebuild_context is None and execution_guard is None
+                    and isinstance(model_call, BudgetedModelCall)):
+                from .skill_support import incremental_repair_enabled
+                if incremental_repair_enabled(skill_bundle):
+                    previous_stage = "memory/staging/" + old["run_id"] + ".md"
+                    if git.path(previous_stage).is_file():
+                        previous_candidate = _load(_committed(git, previous_stage), "candidate")
+                        if (previous_candidate.get("batch_context", {}).get("plan_id") != plan["plan_id"]
+                                and previous_candidate.get("stage_reuse_ref") is None):
+                            stage_source_run = old["run_id"]
+                            continue
             if old["status"] in {"needs_confirmation", "registration_required", "blocked_capacity", "blocked_context", "attempt_limit"}:
                 return deepcopy(old)
         if len(attempts["attempts"]) >= 4:
@@ -577,7 +605,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
         delegate = model_call.for_operation(operation) if isinstance(model_call, BudgetedModelCall) else model_call
         reuse_extraction = None
         reused_feedback = None
-        if isinstance(model_call, BudgetedModelCall) and rebuild_context is None:
+        if isinstance(model_call, BudgetedModelCall) and rebuild_context is None and stage_source_run is None:
             for old in reversed(attempts["attempts"]):
                 if old["status"] != "failed" or old.get("error") not in SAFE_REVIEW_PRELAUNCH_ERRORS:
                     continue
@@ -585,7 +613,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                 if (previous is not None and "review" not in previous["calls"]
                         and git.path("memory/staging/" + old["run_id"] + ".md").is_file()):
                     candidate = _load(_committed(git, "memory/staging/" + old["run_id"] + ".md"), "candidate")
-                    if reusable(candidate):
+                    if reusable(candidate) and candidate.get("stage_reuse_ref") is None:
                         reuse_extraction = old["run_id"]
                         reused_feedback = deepcopy(candidate.get("extraction_feedback_ref"))
                         break
@@ -597,7 +625,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             except CaptureError as error:
                 return {"status": "blocked_context", "error": error.code,
                         "attempted_calls": 0, "model_calls": 0}
-        if feedback_policy and not assembly:
+        if feedback_policy and not assembly and stage_source_run is None:
             try:
                 feedback = _revision_feedback(git, attempts["attempts"], state, projection,
                                               processing_paths, draft=draft, merge_runs=merge_runs)
@@ -606,7 +634,7 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     raise
                 return {"status": "blocked_context", "error": error.code,
                         "attempted_calls": 0, "model_calls": 0}
-        if not assembly and reuse_extraction is None and attempts["attempts"]:
+        if not assembly and reuse_extraction is None and stage_source_run is None and attempts["attempts"]:
             from .extraction_feedback import enabled, prepare_feedback
             previous_failed = attempts["attempts"][-1]
             if enabled(skill_bundle) and previous_failed["status"] == "failed":
@@ -638,6 +666,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                            "continuation_context": continuation,
                            **({"skill_bundle": skill_bundle} if skill_bundle is not None else {}),
                            **({"review_strategy": strategy} if strategy != "legacy-v1" else {})}
+        if stage_source_run is not None:
+            process_options["stage_reuse"] = {"source_run_id": stage_source_run,
+                "work_id": work_key, "target_attempt": number}
         if next_timeout_ref is not None:
             current["timeout_retry_ref"] = deepcopy(next_timeout_ref)
             process_options["timeout_retry_ref"] = deepcopy(next_timeout_ref)
@@ -668,7 +699,14 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                         "error": error.code, "attempted_calls": 0, "model_calls": 0}
         else:
             from .pipeline import preflight_processing
-            checked = preflight_processing(repo, processing_paths, **process_options)
+            try:
+                checked = preflight_processing(repo, processing_paths, **process_options,
+                    **({"stage_reuse_audit": delegate} if stage_source_run is not None else {}))
+            except CaptureError as error:
+                if stage_source_run is None:
+                    raise
+                return {"status": "blocked_context", "error": error.code,
+                        "attempted_calls": 0, "model_calls": 0}
         if checked["status"] != "ready":
             if checked["status"] in {"unknown", "blocked_capacity"}:
                 return checked
@@ -679,6 +717,12 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
             return {**checked, "status": "blocked_context",
                     "error": checked.get("error", "queue_revision_existing_attempt"),
                     "attempted_calls": 0, "model_calls": 0}
+        if stage_source_run is not None:
+            witness = checked.get("stage_reuse")
+            if not isinstance(witness, dict):
+                _fail("stage_reuse_changed")
+            process_options["stage_reuse"] = deepcopy(witness)
+            current.update(stage_reuse=deepcopy(witness), stage_reuse_sha256="sha256-" + _hash(witness))
         with git.lock():
             head = git.check(head)
             stored = _read(git, path, "production_attempts")

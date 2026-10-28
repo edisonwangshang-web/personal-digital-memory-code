@@ -1,6 +1,8 @@
 # M0—M1 执行方案：第一版个人知识库
 
-当前dev34仅在既有阶段补精确旧统计继承、程序校验失败反馈和最终完成度门禁，使用新Skill12/10及普通质量schema0.18；旧11/9、来源0.1／正式0.2及历史记录保持。先工程人工回归、审查和准确CI，之后按实际可用方式验证获准真实新增资料，未取得证据前不标通过；旧耗尽工作不因升级自动续开。实施细节和检查统一见[增量修复合同](data-conventions.md#incremental-repair-contract)及[dev34场景](scenarios-and-acceptance.md#incremental-repair-acceptance)，不新增阶段或索引。
+当前dev35先完成[审核材料与受限恢复](data-conventions.md#review-material-recovery)：新完整来源coverage与global汇总，旧v1请求字节保持；已固定completed、Review从未启动且同work未耗尽的受限stage可在下一attempt零新extract重验后继续独立Review。新plan／proof／sidecar为0.19，普通候选0.18保持，工程、新CI及真实全链分别取证，不自动重开耗尽工作或更新master。
+
+dev34在既有阶段补精确旧统计继承、程序校验失败反馈和最终完成度门禁，使用新Skill12/10及普通质量schema0.18；旧11/9、来源0.1／正式0.2及历史记录保持。先工程人工回归、审查和准确CI，之后按实际可用方式验证获准真实新增资料，未取得证据前不标通过；旧耗尽工作不因升级自动续开。实施细节和检查统一见[增量修复合同](data-conventions.md#incremental-repair-contract)及[dev34场景](scenarios-and-acceptance.md#incremental-repair-acceptance)，不新增阶段或索引。
 
 本文为公开工程实施方案，真实资料和验收留私库。dev32批次在既有M1链路收尾采集、答复续接、解决幂等、调度状态及引用边界，沿用Skill11/9及截至0.17的格式，不迁移资料或新增加工阶段。工程测试使用虚构资料，0真实模型，仅dev，不更新master、不启动M2。准确CI、实际业务与目标runner分别核验，M1整体仍待验收，状态见[Roadmap](roadmap.md)。
 

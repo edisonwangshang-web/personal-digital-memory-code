@@ -1,5 +1,23 @@
 # 场景与验收
 
+<a id="review-material-recovery-acceptance"></a>
+
+## dev35：按来源完整审核与受限stage复用
+
+使用虚构来源和模拟模型先核以下行为；工程、准确CI及真实独立Review／发布／读取各自取证，不预填通过。
+
+| 输入或故障 | 必须观察到的结果 |
+| --- | --- |
+| 多个完整表格来源及说明／字典 | v2 coverage逐表带齐实际选定行及全部背景，范围并集等于完整输入；global见全部来源清单、完整候选关系与全部已核覆盖证书 |
+| 已存v1的11/9或12/10计划 | 原请求字节和单元身份保持；新版不静默套v2布局 |
+| 单coverage或global仍超容量／证书缺项 | 保留实际阻塞，不截断原文、不省略审核或部分发布 |
+| completed固定stage、Review从未启动、原阻塞为decomposed_input_limit | 原Git／audit证明齐全且同work未耗尽，下一attempt只复用原extract，重新程序校验与独立Review；原raw与消费保持 |
+| unknown、缺raw、已有审核节点预约／调用、来源／控制／规则或原请求改变 | 复用前拒绝，不重复extract或改写历史 |
+| 第4次已用完、见证／计数前缀篡改、目标重放或重复复用原stage | 明确阻断；重启不新增attempt或调用，原终态和完整证明保留 |
+| 0.19写门禁 | 新plan／proof与sidecar为0.19，普通候选仍0.18；旧writer拒写，不删证明或改header绕过 |
+
+字段及受限恢复条件见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。不新增模型阶段或接收方，两个master不动。
+
 <a id="incremental-repair-acceptance"></a>
 
 ## dev34：增量复用、校验反馈与完成度
