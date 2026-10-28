@@ -253,13 +253,15 @@ python -P -B -m pdm schedule resume --repo "$PDM_DATA_REPO" --id "$schedule_id" 
 
 暂停阻止程序的新正式发布，不等于关闭外部任务。恢复前核对在途执行、本地与远程发布及原调用记录。没有平台观测时保持 `trigger_unknown`；`incomplete`／`reconciliation_required` 先核已有结果。`abandon` 是受控终结入口，不撤销外部在途请求，不能把未知结果改成从未执行；完整条件按实现与数据契约核验。
 
-## 恢复与另一模型读取
+<a id="恢复与另一模型读取"></a>
+
+## 恢复与可选读取包
 
 遇 `transaction_recovery_required` 先核对 HEAD 和已有提交，再执行 `python -P -B -m pdm recover --repo "$PDM_DATA_REPO"`。冲突或结果不明时保持暂停，不整库 reset，不直接删除锁或 journal。资料恢复使用私库的完整 Git 历史；源码 ZIP 或代码包不能替代。
 
 `resume-unstarted-revision` 和 `revalidate-completed-extraction` 是历史 `0.9` 人工恢复入口。它们核对原预约／已完成返回和固定证明；当前不能用于新的 Skill 质量任务，该模式会要求 `skill_quality_recovery_attestation_required`。不要照抄旧命令绕过质量、原调用身份或未知结果检查。
 
-另一模型读取先准备同一固定证据与问题；问题 JSON 是字符串数组，不含答案和验收预期，输出使用仓库外尚不存在的新文件：
+需要可选导出或跨模型检查时，先准备同一固定证据与问题；问题 JSON 是字符串数组，不含答案和验收预期，输出使用仓库外尚不存在的新文件：
 
 ```bash
 python -P -B -m pdm reading-package prepare --repo "$PDM_DATA_REPO" --source "$source_path" --run "$run_id" \
@@ -268,7 +270,7 @@ python -P -B -m pdm reading-package verify "$reading_package_json" \
   --expected-sha256 "$package_sha256"
 ```
 
-准备和核验不调用另一模型。真正的跨模型验收还需指定模型实际读取同包同版本、独立回答并核对来源，结果保存在私有验证记录中。
+准备和核验不调用另一模型。选择跨模型检查时，还需获准模型实际读取同包同版本、独立回答并核对来源，结果保存在私有验证记录中。第二模型实际问答已移出M1门槛；后续私有知识库索引供Agent通过CLI按需读取，本轮不实现该服务。
 
 ## 本批工程收尾与尚需实际验收
 
@@ -279,6 +281,6 @@ python -P -B -m pdm reading-package verify "$reading_package_json" \
 | 真实代表性资料、增量和分类 | 用获准新增／变更／补录资料验证关联维护及三领域、跨类和未分类；已有工程能力不代表所有业务场景已验收 |
 | 真实纠正与确认 | 核对一次真实补充或纠正前后的知识和答案，再验证问题→用户答复→审核发布→解决；不编造用户错误或答复 |
 | 目标runner及每日运行 | 接入实际执行入口，核权限、持久状态和读写恢复，取得两个北京时间22:00真实触发、停启与续跑证据；这不是本地日程命令已经完成的部署 |
-| 第二模型读取 | 由获准另一模型实际读取同包同版本并独立回答；读取包生成、同服务独立Review或私库Git恢复均不能代替 |
+| 目标环境恢复与现有读取 | 验证runner持久状态恢复，以及现有读取的来源、版本和纠正／删除控制；第二模型实际问答为可选检查 |
 
 本批保持dev-only；稳定交付和生产环境核对另按[M1交付门槛](m1-delivery-readiness.md)执行，不启动M2或变更两个master。

@@ -414,13 +414,13 @@ Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VER
 
 `evidence`／`ask` 同样接受重复 `--source`，只读取明确选择的集合；提供 `--run` 时必须与该运行绑定的来源集合一致，顺序无关，核验全部来源、候选、Review、正式对象、清单和回执，再纳入清单内正式正文。多来源证据使用 `sources` 数组，每项含 `source`、`lines`、`knowledge_status`；单来源维持原形状。引用只能指向所选来源中实际取得的文本。仅链接状态不能伪装成正文引用。完整证据、问题 payload 和模型传输继续受 M0 的字节上限及只读核对约束。
 
-本节的旧0.3流程仍为 create-only；同一 run 重复发布只核对与补回执，新的 run 不具备跨运行语义去重。全库最新判断、控制、统一 pending 与编排不能从该旧格式推定，须按相应后继契约处理。隔离测试不替代真实多来源与第二模型验收。
+本节的旧0.3流程仍为 create-only；同一 run 重复发布只核对与补回执，新的 run 不具备跨运行语义去重。全库最新判断、控制、统一 pending 与编排不能从该旧格式推定，须按相应后继契约处理。隔离测试不替代真实多来源业务验收；跨模型读取按现行Roadmap仅为可选验证。
 
 <a id="m1-incremental-contract"></a>
 
 ## M1 增量与控制契约（`0.2.0.dev2`／schema `0.4`）
 
-以下是本批实现所依照的字段与状态，不能据此预先认定真实多来源、每日 runner 或第二模型验收通过。`0.4` 用于新增量运行、控制、统一待确认、调度与限定读取包，正式记录／主题仍为 `0.2`；不重写既有 `0.1`／`0.2`／`0.3` 资料。
+以下是本批实现所依照的字段与状态，不能据此预先认定真实多来源或每日 runner 验收通过，也不表示可选跨模型读取已经完成。`0.4` 用于新增量运行、控制、统一待确认、调度与限定读取包，正式记录／主题仍为 `0.2`；不重写既有 `0.1`／`0.2`／`0.3` 资料。
 
 ### 增量候选、旧对象和防重复标记
 
@@ -615,7 +615,7 @@ build_current_evidence、ask_current、build_domain_catalog及prepare_reading_pa
 
 片段source.body为空，content_scope="fragment"；实际provided文本只在evidence.sources[].lines，使用原文全局行号。entry.source_view严格含kind:"fragment"、source_line_count、fragments（每项fragment_id／locator），不重复正文；result.batch_context固定原context。coverage新增provided_source_ranges、fragment_incomplete_source_paths、fragment_missing_ranges；缺view的整path列unread，partial影响current_complete，partial pending整事项不发送问题正文。正式知识引文缺实际provided范围支持时排除并列excluded_documents，ask按实际line集合校验，未提供的原文不能经scope或摘要补进模型。
 
-片段或expanded>8读取包为schema0.6，scope为source_paths、run_ids、batch_context；context带可重验source_ranges、plan_id、batch_id、parent_batch_ids，不能把包含预算未提供文本的完整source_views放scope。expanded但非fragment的batch_context为null。旧<=8且无片段读取包0.4沿原scope（仅source_paths／run_ids）与验证形状。仍须可信外部expected SHA；包验证不代替来源真实性核验或第二模型实际执行。
+片段或expanded>8读取包为schema0.6，scope为source_paths、run_ids、batch_context；context带可重验source_ranges、plan_id、batch_id、parent_batch_ids，不能把包含预算未提供文本的完整source_views放scope。expanded但非fragment的batch_context为null。旧<=8且无片段读取包0.4沿原scope（仅source_paths／run_ids）与验证形状。仍须可信外部expected SHA；包验证不代替来源真实性核验或任何模型的实际执行；跨模型实际问答不作为M1门槛。后续索引只从私有知识文件派生，Agent通过CLI读取仍需保留现有来源范围、版本、删除与纠正控制，具体索引接口另行实现。
 
 ### 分批计划、片段投影与合并（schema `0.6`）
 

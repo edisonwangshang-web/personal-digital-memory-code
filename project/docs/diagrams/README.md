@@ -10,7 +10,7 @@
 
 dev26另有容量回退的原样最终候选`0.14`：没有新增extract调用，最终联合仍须真正独立分解Review。此路径及单次验证内的不可变Git读取复用未画入旧图，准确适用边界以[数据规范](../data-conventions.md#verbatim-draft-finalization)及现行技术正文为准。
 
-人工触发后的受控加工、程序校验、独立 Review 与完整 proof 发布已有工程实现。Review 可为容量内的一次独立审核，或 object／coverage／global 组成的完整证明；发布控制须实际核齐全部必需 proof。恢复箭头不表示可以重发 `unknown` 调用，已完成阶段须核验后复用。M1 整体、目标定时 runner、两轮真实触发、云端持久恢复和第二模型读取仍待验收；图不证明定时任务已启用，状态见 [Roadmap](../roadmap.md)。
+人工触发后的受控加工、程序校验、独立 Review 与完整 proof 发布已有工程实现。Review 可为容量内的一次独立审核，或 object／coverage／global 组成的完整证明；发布控制须实际核齐全部必需 proof。恢复箭头不表示可以重发 `unknown` 调用，已完成阶段须核验后复用。M1 整体、目标定时 runner、两轮真实触发和云端持久恢复仍待验收；第二模型实际问答为可选检查。图不证明定时任务已启用，状态见 [Roadmap](../roadmap.md)。
 
 | 图 | 阅读目的 | 文档入口 |
 | --- | --- | --- |

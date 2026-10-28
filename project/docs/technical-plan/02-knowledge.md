@@ -8,7 +8,7 @@
 
 人工触发后的受控分类加工、独立审核、完整 proof 发布及限定读取已有工程实现；current 已支持按正式 record／topic 路径选择，主题自动带上精确版本的 record 依赖，`compact_sources` 可去掉重复原文副本。程序先核对发布、来源、控制和版本，再把必要证据交给模型；选择齐全与是否读遍全部资料分别报告。读取不改变原文、正式知识或来源权限，命令见[日常使用](../daily-use.md#selected-knowledge-reading)。
 
-来源／采集 schema `0.1`、正式知识 `0.2` 保持，新11/9普通质量链使用 `0.15`，旧10/8继续 `0.12`，旧9/7为 `0.11`、更早为 `0.10`，已有assembly `0.14`按原证明核验；旧Skill、请求、知识和运行不自动迁移或重加工。M1 整体、目标定时runner、两轮真实触发、云端持久恢复和第二模型独立读取仍未验收，实际状态见[Roadmap](../roadmap.md)。工程检查、人工全链与真实业务分别记录。
+来源／采集 schema `0.1`、正式知识 `0.2` 保持，新11/9普通质量链使用 `0.15`，旧10/8继续 `0.12`，旧9/7为 `0.11`、更早为 `0.10`，已有assembly `0.14`按原证明核验；旧Skill、请求、知识和运行不自动迁移或重加工。M1 整体、目标定时runner、两轮真实触发和云端持久恢复仍未验收。2026-10-28起第二模型实际问答不再是M1门槛；后续Agent通过CLI调用私有知识库索引，复用现有按记录／主题读取和证据核验，本轮不开发索引服务。实际状态见[Roadmap](../roadmap.md)，工程检查、人工全链与真实业务分别记录。
 
 用户明确要求清理后重建时，第三层先固定来源、正式目标和清理回执；本层只接收该批原文及当前质量材料，首次不提供旧 related、revision、merge 和复用输入；若新候选退回，只接同回执／同范围的本轮反馈返工。分类仍按同一三领域规则执行，本文不为某一种资料新增加工角色。新数字及正文仍由模型声明并经完整独立 Review；没有把旧统计声明补进本次输出的例外。当前只支持完整来源能放入一批的重建，容量不足时停止。具体控制与历史边界见[显式重建规范](../data-conventions.md#explicit-knowledge-rebuild)。
 
@@ -303,6 +303,6 @@ dev22 的10/8已完成返工提取使用单独的[恢复证明契约](../data-co
 | 分批与恢复 | 最终正文及跨批关系完整受审，publisher 实际消费 proof；成功阶段零调用复用，root提取有限timeout例外按第三层合同、其他未知停止，retry 跨日不清 |
 | 表格与不可比范围 | 期间覆盖与可用观测水平并重，统计可复算，未知单位、缺失、部分日和不同口径不混算；不按知识条数验收 |
 
-具体字段见[质量契约](../data-conventions.md#skill-quality-contract)，执行见[实现明细](../implementation-details.md#skill-quality-execution)，反例和场景见[Skill 质量验收](../scenarios-and-acceptance.md#skill-quality-acceptance)。公开场景使用明确人工资料和模板；真实资料结果保存在私有工作区。工程回归、真实模型质量、真实业务、定时环境及第二模型分别验收，进度见 [Roadmap](../roadmap.md#m1-skill-quality) 与 [M0—M1 执行方案](../m0-m1-execution-plan.md)。
+具体字段见[质量契约](../data-conventions.md#skill-quality-contract)，执行见[实现明细](../implementation-details.md#skill-quality-execution)，反例和场景见[Skill 质量验收](../scenarios-and-acceptance.md#skill-quality-acceptance)。公开场景使用明确人工资料和模板；真实资料结果保存在私有工作区。工程回归、真实模型质量、真实业务及定时环境分别验收；第二模型读取保留为可选检查，进度见 [Roadmap](../roadmap.md#m1-skill-quality) 与 [M0—M1 执行方案](../m0-m1-execution-plan.md)。
 
 候选不完整返回第三层保留原因，无有效 Review 不默认通过；来源、候选、旧知识、规则或控制变化后重审受影响部分。Review 表示当前范围符合整理要求，不等于外部事实核验或用户采纳。收藏不等于认同，决定不等于行动；原文内指令仅作资料内容，不改变权限。
