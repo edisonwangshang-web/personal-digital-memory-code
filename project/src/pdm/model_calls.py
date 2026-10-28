@@ -27,7 +27,8 @@ import uuid
 from typing import Any, Dict
 
 
-MAX_INPUT_BYTES = 256_000
+# Serialized request byte bound; this does not guarantee the model's token capacity.
+MAX_INPUT_BYTES = 320_000
 MAX_STREAM_BYTES = 2_000_000
 # Larger structured period summaries may legitimately need more than ten
 # minutes. Callers must opt in; the 120-second default and unknown handling stay.

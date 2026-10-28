@@ -8,6 +8,8 @@
 
 仅对原已固定completed提取、原Review从未启动、decomposed_input_limit阻塞且同work未耗尽的情形，新增0.19小sidecar绑定原stage／plan／row、原实际请求及Git／audit观察；同work下一attempt零新extract复用原raw，再重验和独立Review。不复制大payload／response、不重放unknown、不重置次数、不提供通用跨版本迁移。新工程回归、准确CI和真实Review／发布／读取仍待取证，不新增阶段、模型接收方或索引，两个master不更新。
 
+dev35后续：完整返工的现有共享编码已启用，本次仅将应用完整请求门槛从256000调为320000字节；原文planning／便携读取包各256000、来源／核心1MiB、历史4MiB及事务8MiB保持。Skill、schema及旧请求字节不变，旧known-completed证明仍核原256000合同。另修已采用stage的后继被退回后继续正常返工、不重复采用旧源，原次数保持。字节不等于token，本轮新CI、真实服务接收及业务结果分别待取证；下述历史版本的256000事实不改写。
+
 ## 历史：0.2.0.dev34
 
 在原阶段内补三处增量交接：显式精确复用时继承仍适用的已审统计关联；程序校验失败带当前稿与准确反馈继续既有提取；Review10最终候选的deferred覆盖与全局检查不能passed。新不可变Skill12/10、普通质量schema0.18，原始返回与物化输出／继承证明分别绑定，变化项仍重新加工和独立审核。来源0.1、正式知识0.2保持，旧11/9及更早不迁移。

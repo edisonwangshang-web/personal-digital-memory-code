@@ -6,6 +6,8 @@
 
 当前开发版`0.2.0.dev35`针对整体coverage请求超容量，采用完整表格来源＋完整说明／字典的v2审核布局，global汇总全部范围和关系。新plan／proof及受限stage复用sidecar为0.19，普通12/10候选仍0.18，旧v1计划及请求字节保持。只有原提取completed且固定、Review从未启动、decomposed_input_limit阻塞与同work未耗尽都可核验时，才在下一attempt以原Git／audit观察零新extract复用，再重新程序校验和独立Review。不是通用跨版本迁移；旧失败、unknown、消费及四次上限不变。当前工程、新CI与真实Review／发布／读取待取证，不标M1完成；两个master不动。见[合同](data-conventions.md#review-material-recovery)及[验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
 
+dev35后续只将应用完整请求门槛调为320000字节，原文planning／便携读取包各256000及存储、Skill、schema、旧请求字节不变；字节不等于token，服务接收仍需真实证据。已采用stage的后继被退回后沿正常反馈返工，不重复采用旧源；新CI和业务结果分别取证，见[容量规范](data-conventions.md#model-request-capacity)。
+
 dev34批次引入不可变Skill12/10、普通质量schema0.18，只修精确旧统计继承、程序校验失败反馈、最终内容完成度三处。原提取／校验／独立Review／发布阶段、三领域共用规则、来源0.1／正式0.2保持；旧11/9及历史请求不迁移。先人工回归、独立审查与准确CI，后续真实新增验证另取证，当时不预填通过；后续审核容量问题按dev35处理。原失败、unknown和耗尽状态保留，不借升级或改队列重开；无新模型阶段或索引，不启动M2、两个master不动。合同与实现见[增量修复](data-conventions.md#incremental-repair-contract)、[执行步骤](implementation-details.md)。
 
 上一诊断补丁为`0.2.0.dev33`，仅补增量复用统计校验失败的私有诊断：保留可见原返回、请求绑定及精确缺失项，完整声明与发布要求保持。真实增量本轮仍未通过提取校验，未进入独立审核或发布；原工作已耗尽时不得借升级代码、改队列或改账本续开。旧返回未保存的事实保持，不声称事后恢复。该诊断批次只dev工程回归，准确CI与私人业务证据分开记录，未新增真实模型调用。

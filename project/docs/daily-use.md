@@ -126,7 +126,7 @@ python -P -B -m pdm production status --repo "$PDM_DATA_REPO" --id "$queue_id"
 
 旧队列无该marker时不原地升级；若当前工程需要新的目标计划，仍承接原source／fragment、控制和rebuild工作身份及次数，不重清知识或更换账本。仍在途、非timeout unknown、`timeout_cleanup_unknown`、预算／权限、Review调用的超时（含分解审核）或该超时run已有候选均不进入该自动路径。worker本地串行不能证明服务端原请求已取消，原消费与历史保留；迟到原run不能再次发布或成为当前正式结果。完整条件见[有限超时合同](data-conventions.md#bounded-timeout-retry)。
 
-多来源重复 `--source`；需要旧知识时，准备阶段通过 `--allowed-source` 和 `--allowed-run` 明确全部允许的依赖。程序保存分批计划、各批候选与审核、最终依赖组证明和多主题原子发布结果。普通完整 Review 请求超过 256000 字节时，`auto` 按需转为 object／coverage／global 分解审核；完整必要语义仍超容量时保持 `blocked_capacity`，不能截断材料后宣称完成。
+多来源重复 `--source`；需要旧知识时，准备阶段通过 `--allowed-source` 和 `--allowed-run` 明确全部允许的依赖。程序保存分批计划、各批候选与审核、最终依赖组证明和多主题原子发布结果。普通完整 Review 请求超过 320000 字节时，`auto` 按需转为 object／coverage／global 分解审核；完整必要语义仍超容量时保持 `blocked_capacity`，不能截断材料后宣称完成。原文planning与便携读取包仍各256000，旧请求／证明不改写；字节数不等于服务token数，详见[容量规范](data-conventions.md#model-request-capacity)。
 
 普通多批的完整原文合并超容量时，程序可自动把已核完整草稿原样组成0.14最终候选，再真正独立分解审核；不增加extract调用或新的CLI参数。当前只接无旧关联、答复或重建上下文的普通草稿；对象、统计口径冲突或必要审核仍超容量时保留具体阻塞。若该原样最终候选审核要求实质修订且仍不能承载，后续`assembly_revision_required`表示需要处理，不能反复运行同一联合期待自动修好。完整边界见[数据规范](data-conventions.md#verbatim-draft-finalization)。
 

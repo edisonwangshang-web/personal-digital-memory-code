@@ -8,6 +8,8 @@
 
 当前批次为`0.2.0.dev35`：真实复验暴露整体coverage请求超容量，改为按完整表格来源覆盖并附完整说明／字典，再由global核全部范围、候选和关系；已存`selected-input-scope-v1`请求保持原字节。新12/10计划使用`selected-input-scope-v2`，新plan／proof及受限已完成stage复用sidecar为0.19，普通候选仍0.18。后者只在Review从未启动、原阻塞为`decomposed_input_limit`、同work下一attempt仍不超过4且原Git／audit证明齐全时免去新extract，随后重新程序校验和完整独立Review。新工程回归、准确CI及真实Review／发布／读取尚待取证；不预填通过、不更新master。规则见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。
 
+dev35后续按完整返工实测调整应用完整请求门槛为320000字节，保留现有无损共享；原文planning与便携读取包仍各256000，存储、Skill、schema及旧请求字节不变。字节不等于token，真实服务接收和本轮准确CI仍待验证；已采用stage的后继被退回后继续正常返工，不重复采用原源，原次数保持。限额见[模型请求与资料容量](data-conventions.md#model-request-capacity)。
+
 dev34批次在原阶段内修复三处增量交接，使用新不可变`knowledge-extract@12`／`knowledge-review@10`和普通质量schema0.18。先取得受影响人工回归、独立审查和准确提交CI，再按实际授权及可用执行方式核真实新增资料；当时真实复验尚待执行，后续暴露的审核容量问题按dev35处理，不预填通过。旧11/9及更早的规则、请求和证据保持，旧失败、unknown和耗尽次数不重置。
 
 | dev34修复 | 应验证的行为 |

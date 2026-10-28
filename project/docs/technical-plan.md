@@ -4,6 +4,8 @@
 
 当前`0.2.0.dev35`修复整体审核材料超容量：新分解计划按完整表格来源覆盖，附完整说明／字典，global汇总全部来源范围和关系；旧v1请求字节保持。受限已完成stage仅在原Review未启动、同work未耗尽及Git／audit完整核验后零新extract续接，再重做程序校验和独立Review；不是通用跨版本迁移。新plan／proof及sidecar为0.19，普通12/10候选仍0.18，工程与真实结果分别取证，详见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。
 
+dev35后续仅把应用完整请求门槛调为320000字节，原文planning／便携读取包仍各256000；现有共享编码、来源／候选存储、Skill和schema保持。完整字节并非token数，真实服务接收另验，见[容量规范](data-conventions.md#model-request-capacity)。已采用stage的后继被退回后沿正常反馈返工，不反复采用原源。
+
 dev34在现有提取、校验、独立Review与发布中补齐[增量修复合同](data-conventions.md#incremental-repair-contract)：精确继承未变旧统计、校验失败定点反馈、最终内容完成度检查。新任务为Skill12/10、普通质量schema0.18；旧11/9和历史请求保留，来源与正式知识格式不变。工程回归、准确CI及真实新增验证分别取证，本批不创建新阶段或索引、不更新master。下述dev32接口范围及历史恢复条件继续按各自合同理解。
 
 本文说明系统组成、运行位置、模块交接和设计取舍。dev32批次在既有M1架构内修复采集回执、手动答复续接、已解决事项历史核验、调度中断状态和旧读取引用边界。不启动M2，不新增加工阶段；沿用Skill11/9及现有schema0.1—0.17，不迁移私人资料或重做已完成加工。本批只在 `dev` 开发验证，不合入或推送 `master`。工程检查与准确CI、真实业务及目标云端runner分别取证；2026-10-28起第二模型实际问答不再是M1门槛，阶段状态见[Roadmap](roadmap.md)。

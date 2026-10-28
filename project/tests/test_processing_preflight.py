@@ -1,9 +1,10 @@
 """Full processing admission must be read-only and precede call reservations."""
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from git_fixtures import configure_test_repository
 from quality_fixtures import add_quality, passed_review
@@ -12,7 +13,8 @@ from pdm.budget import BudgetLedger, BudgetedModelCall
 from pdm.capture import capture
 from pdm.contracts import CaptureError
 from pdm.pipeline import PipelineGit, _load, preflight_processing, process_sources
-from pdm.model_calls import request_binding
+from pdm import model_calls
+from pdm.model_calls import ModelCallError, request_binding
 from pdm.skill_support import resolve_skill_refs
 
 
@@ -76,6 +78,71 @@ class ProcessingPreflightTests(unittest.TestCase):
         self.assertEqual(candidate['extraction_request_binding']['bytes'], checked['request_bytes'])
         self.assertEqual(candidate['extraction_request_binding'], request_binding('extract', self.requests[0]))
         self.assertEqual(self.roles, ['extract', 'review'])
+
+    def sized_extraction_request(self, size):
+        padding = 64
+        for _ in range(4):
+            self.path = capture(self.repo, {'source_key': 'artificial:large-preflight',
+                'source_type': 'note', 'acquisition_status': 'full_text',
+                'body': 'Artificial selected learning source.\n' + 'x' * padding + '\n'})['path']
+            captured = []
+
+            def observe(role, payload):
+                if role == 'extract':
+                    captured.append(copy.deepcopy(payload))
+                return request_binding(role, payload)
+
+            before = self.snapshot()
+            with patch('pdm.pipeline._model_request_binding', side_effect=observe):
+                checked = preflight_processing(self.repo, [self.path], related_runs=[], skill_bundle=self.bundle)
+            self.assertEqual(self.snapshot(), before)
+            difference = size - checked['request_bytes']
+            if difference == 0:
+                self.assertEqual(request_binding('extract', captured[-1])['bytes'], size)
+                return checked, captured[-1]
+            padding += difference
+            self.assertGreaterEqual(padding, 0)
+        self.fail('artificial complete extraction request did not reach the exact byte boundary')
+
+    def test_larger_complete_preflight_request_reaches_native_boundary_with_the_same_bytes(self):
+        checked, payload = self.sized_extraction_request(320_000)
+        self.assertEqual(checked['status'], 'ready', checked)
+        self.assertGreater(checked['request_bytes'], 256_000)
+        self.assertEqual(self.ledger.snapshot()['started_calls'], 0)
+        response = self.transport('extract', payload)
+        events = [{'type': 'item.completed', 'item': {'type': 'agent_message',
+                    'text': json.dumps(response['output'], ensure_ascii=False)}}, {'type': 'turn.completed'}]
+        with patch.object(model_calls.shutil, 'which', return_value='/synthetic/codex'), \
+                patch.object(model_calls.subprocess, 'Popen', return_value=Mock()) as launch, \
+                patch.object(model_calls, '_events', return_value=events) as stream:
+            result = model_calls.call_model('extract', payload, ledger=self.ledger,
+                                            operation_id='artificial:complete-native-boundary')
+        launch.assert_called_once()
+        self.assertEqual(stream.call_args.args[1], model_calls.render_model_request('extract', payload))
+        self.assertEqual(len(stream.call_args.args[1]), checked['request_bytes'])
+        self.assertEqual(request_binding('extract', payload)['sha256'], checked['request_sha256'])
+        self.assertEqual(result['output'], response['output'])
+        self.assertEqual(self.ledger.snapshot()['started_calls'], 1)
+
+    def test_complete_request_one_byte_over_bound_is_refused_before_run_or_native_audit(self):
+        checked, payload = self.sized_extraction_request(320_001)
+        self.assertEqual(checked['status'], 'blocked_capacity', checked)
+        before = self.snapshot()
+        with self.assertRaises(CaptureError) as raised:
+            process_sources(self.repo, [self.path], related_runs=[], skill_bundle=self.bundle,
+                            model_call=self.adapter)
+        self.assertEqual(raised.exception.code, 'input_limit')
+        with patch.object(model_calls.shutil, 'which', return_value='/synthetic/codex'), \
+                patch.object(model_calls.subprocess, 'Popen') as launch:
+            with self.assertRaises(ModelCallError) as native:
+                model_calls.call_model('extract', payload, ledger=self.ledger,
+                                        operation_id='artificial:oversized-native-boundary')
+        self.assertEqual(native.exception.code, 'input_limit')
+        launch.assert_not_called()
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.roles, [])
+        self.assertEqual(self.ledger.snapshot()['started_calls'], 0)
+        self.assertIsNone(self.ledger.operation('artificial:oversized-native-boundary'))
 
     def test_over_limit_preflight_and_direct_processing_never_reserve_or_write(self):
         before = self.snapshot()

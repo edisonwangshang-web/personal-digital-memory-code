@@ -15,6 +15,8 @@
 
 人工触发后可由受控编排串联采集、production、独立审核、发布和读取；单独 `capture` 只保存，不请求模型。M1 整体尚未验收：目标 GPT 每日北京时间 22:00 任务尚未创建／启用，目标 runner、两轮真实触发与云端持久恢复仍待验证。第二模型实际问答已移出M1门槛，当前由模型查找文件并通过现有CLI读取，暂不建设索引层。采集、加工、定时编排、复用和恢复代码统一由公库维护并加载，`--repo` 指向仅存资料的私库；公开工程检查绑定公库准确 HEAD，不代替真实资料验收。双仓入口只读核对同名分支、准确公开 CI、工程完整性和私库无活动工程，不同步代码或迁移资料，见[双仓使用说明](dual-repository.md)。
 
+dev35后续完整请求门槛为320000字节，原文planning与便携读取包仍各256000，存储限额、Skill／schema及旧请求字节保持；字节不等于token，真实服务接收待验。已采用stage的后继被Review退回后，优先按该后继的真实意见正常返工，不重复采用旧源。详见[容量规范](data-conventions.md#model-request-capacity)。
+
 ## dev35：审核材料与已固定提取续接
 
 新分解plan使用`selected-input-scope-v2`：coverage按完整表格来源及完整说明／字典组织，global汇合全部来源范围、候选关系和已核证书；已存v1计划的布局与请求字节不变。新plan／proof为0.19，普通12/10候选仍0.18。
@@ -118,14 +120,14 @@ dev30以虚构返回核缺声明、不合规声明和有效输入，并检查私
 3. 核原 pool／授权／operation、completed invocation与payload、账本完整字节、四份缓存独立摘要、原 source／related／controls／Skill／规则和失败历史。冻结后出现 Git、账本或缓存变化时停止。
 4. 预约前先核已经确定的当前核心与历史材料存储下界；这不预测未知模型输出，实际落盘仍完整核验。使用当前 validator 校验原始结构化返回及全部质量义务，分别记录原提取版本与当前校验版本。只为合格候选承载完整历史，不更改原 JSON；完整包／当前核心分别核[4 MiB／1 MiB](data-conventions.md#candidate-storage-limits)，其余限额保持。
 5. 将 schema0.12 stage 与 schema0.13恢复门禁放在同一原子事务。原失败、预约和计数不改；不能先落新候选再补兼容门禁。
-6. 在原调用身份下执行真正独立 Review。旧无marker恢复请求继续去掉candidate内四键重复历史／程序provenance、保留根处完整语义反馈的原视图；新生成并带`current-draft-v1`的恢复候选按当前稿合同取用。当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；实际请求仍核256000字节，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
+6. 在原调用身份下执行真正独立 Review。旧无marker恢复请求继续去掉candidate内四键重复历史／程序provenance、保留根处完整语义反馈的原视图；新生成并带`current-draft-v1`的恢复候选按当前稿合同取用。当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；原known-completed提取证明仍核冻结的256000字节合同；后继新Review按现行320000字节门槛，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
 7. 按目标 plan 发布完整合格 group，再由新10/8生产队列核 marker、完整证明、相同 plan／bundle与已固定候选，CAS持久采用发布。重复采用不调用模型、不写提交，也不把旧失败counter改成passed。尚无真实group则不采用。
 8. 私库推送、远程完整恢复与模型读取各核实际提交和证据；本节流程存在不等于已取得真实通过结果。
 
 ## dev21 受影响环节
 
 1. 提取前从同版本旧受审链重算统计义务索引，放入本次完整请求。模型显式提交依据，程序在Review前拒遗漏；对复用及全文同字正文执行同一检查。
-2. `preflight_processing` 复用实际payload构造，在新attempt及调用预约前计量全部规则、事实、关联和反馈。预检的control快照早于run预约，最终调用按预约后的快照记录实际binding并再次核容量。超限不启动模型，不以截断或提高256000上限放行。
+2. `preflight_processing` 复用实际payload构造，在新attempt及调用预约前计量全部规则、事实、关联和反馈。预检的control快照早于run预约，最终调用按预约后的快照记录实际binding并再次核容量。dev21当时超限不启动模型，不以截断或提高原256000上限放行；当前应用门槛见[dev35容量规范](data-conventions.md#model-request-capacity)。
 3. 新10/8请求用版本化质量视图处理仅程序使用的逐行SHA；从同包精确行重建，持久完整context保留，旧请求按原渲染器回放。
 4. final被实际Review退回后，队列显式传 `revision_from_run`，保留完整反馈并绑定新plan和新证明。预约前检查原指针／unknown，预约后CAS及返回run身份双核；普通重试不代替返工。dev26对10/8补草稿／答复续接，旧不支持的phase仍明确阻断，完整边界见页首说明。
 5. 模型出错仅从结构化code／HTTP status白名单分类，不记录错误原文；已有unknown不因诊断升级追认或清除。
@@ -208,7 +210,7 @@ extract@9的原始输出显式携带 `reuse_refs`。每项为 `{path, content_ve
 
 新提取的生成 Schema 按实际 `targets` 数量固定 `coverage_disposition` 的 `minItems`／`maxItems`，包括空清单和超过 256 项的情况；不额外增加来源上限。后置去重、正文实质、数字／来源／时间和独立审核继续执行；数组长度齐全不等于语义完成。有界标识枚举减少长 ID 抄写错误，模型返回后仍完整核验，不自动修正输出。
 
-当前 v3 传输按列名与全部行值表达相同字段对象数组，先还原列式结构，再还原字段字典与共享值；不改变原 JSON、来源身份、引用、规则或业务 schema。旧 v2／v1 请求按其引用精确重建真实字节。保留键转义，限制深度、节点和展开大小；完整请求超过 256000 字节时停止。新分解计划在首个 Review 前预检全部静态单元，global 在真实前序证书完成后核实际容量。
+当前 v3 传输按列名与全部行值表达相同字段对象数组，先还原列式结构，再还原字段字典与共享值；不改变原 JSON、来源身份、引用、规则或业务 schema。旧 v2／v1 请求按其引用精确重建真实字节。保留键转义，限制深度、节点和展开大小；完整请求超过 320000 字节时停止；原文planning／读取包仍各256000，见[容量规范](data-conventions.md#model-request-capacity)。新分解计划在首个 Review 前预检全部静态单元，global 在真实前序证书完成后核实际容量。
 
 ### 自动领域策略
 
@@ -275,7 +277,7 @@ Review 检查语义是否忠实、限定条件是否保留、时间和对象关�
 ### 2.7 人工触发、分解审核与显式返工
 
 1. 明确收集范围并通过 capture 保存原文后，编排调用 `production prepare`／`run`，自动提取分类、独立审核与发布。是否允许使用旧候选／正式知识须在计划中明确，不能隐式带入。
-2. 新队列默认 `review_strategy=auto`。固定 candidate 后，计算普通 Review 完整请求的实际 256000 字节边界；容量内走单次审核，超限或显式 `decomposed-v1` 时构造 object → coverage → global 计划。各节点保留完整目标正文与必要原文前提，topic 带精确 record 成员版本，global 带完整最终正文、关系与前序证书。
+2. 新队列默认 `review_strategy=auto`。固定 candidate 后，计算普通 Review 完整请求的实际 320000 字节边界；容量内走单次审核，超限或显式 `decomposed-v1` 时构造 object → coverage → global 计划。各节点保留完整目标正文与必要原文前提，topic 带精确 record 成员版本，global 带完整最终正文、关系与前序证书。
 3. 审核前保存 reservation，调用后保存实际 result；已完成节点核验后零调用复用，安全未启动失败最多 4 次总 attempt，unknown 先对账。重开同 queue 只续缺失阶段；必要语义单元超容量保留 `blocked_capacity`，不截正文、旧关系或跳过全局审核。
 4. `verify_decomposed_review` 重建每个请求与 proof 闭包，全部必需节点 passed 才进入发布门禁。依赖组一次写正式 record／topic；随后检查当前目录、引用、只读问答、读取包、重复 worker 零调用及 Git 恢复。本地发布与远程确认分别记录。
 

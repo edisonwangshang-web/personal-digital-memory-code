@@ -240,6 +240,38 @@ class ModelCallTests(unittest.TestCase):
             self.assertEqual('input_limit', error.exception.code)
             start.assert_not_called()
 
+    def test_complete_native_request_accepts_new_boundary_and_rejects_one_byte_over_before_start(self):
+        def payload_of_size(size):
+            payload = {'fixture': ''}
+            overhead = len(model_calls.render_model_request('answer', payload))
+            payload['fixture'] = 'x' * (size - overhead)
+            self.assertEqual(len(model_calls.render_model_request('answer', payload)), size)
+            return payload
+
+        # These fixed behavioral boundaries distinguish the model transport
+        # allowance from the independently bounded 256 kB batch/package APIs.
+        for size in (256_001, 320_000):
+            with self.subTest(size=size), self.mocked_process() as mocked, \
+                    patch.object(model_calls, '_events', wraps=model_calls._events) as events:
+                payload = payload_of_size(size)
+                result = model_calls.call_model('answer', payload, ledger=self.ledger,
+                                                operation_id='native-size-' + str(size))
+                self.assertEqual(result['output'], ANSWER)
+                mocked.popen.assert_called_once()
+                self.assertEqual(events.call_args.args[1], model_calls.render_model_request('answer', payload))
+                self.assertEqual(self.ledger.operation('native-size-' + str(size))['calls']['answer']['status'],
+                                 'completed')
+        before = self.ledger.path.read_bytes()
+        with self.mocked_process() as mocked:
+            with self.assertRaises(ModelCallError) as raised:
+                model_calls.call_model('answer', payload_of_size(320_001), ledger=self.ledger,
+                                        operation_id='native-size-over')
+            self.assertEqual(raised.exception.code, 'input_limit')
+            mocked.popen.assert_not_called()
+            mocked.factory.assert_not_called()
+        self.assertEqual(self.ledger.path.read_bytes(), before)
+        self.assertIsNone(self.ledger.operation('native-size-over'))
+
     def test_invalid_payload_is_rejected_without_leaking_value(self):
         with self.cli():
             for payload in ({'value': float('nan')}, {'value': object()}, {'value': '\ud800'}):

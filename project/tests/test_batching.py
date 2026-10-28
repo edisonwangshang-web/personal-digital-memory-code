@@ -47,6 +47,14 @@ class BatchingTests(unittest.TestCase):
             self.assertLessEqual(len({fragments[key]["path"] for key in batch["fragment_ids"]}), 8)
         self.assertEqual(self.readonly(), before)
 
+    def test_source_batch_budget_stays_at_256kb_independently_of_model_transport(self):
+        path = self.source("independent-budget", "Artificial independently bounded batch source.\n")
+        before = self.readonly()
+        plan = plan_batches(self.repo, [path], max_input_bytes=256_000)
+        self.assertEqual(plan["status"], "ready")
+        self.assert_error("invalid_batch_budget", lambda: plan_batches(self.repo, [path], max_input_bytes=256_001))
+        self.assertEqual(self.readonly(), before)
+
     def test_csv_units_repeat_headers_and_global_lines_without_duplicate_evidence(self):
         path, plan = self.table_plan()
         self.assertEqual(plan["status"], "ready")

@@ -11,7 +11,7 @@ from pdm.capture import capture
 from pdm.contracts import CaptureError
 from pdm.extraction_feedback import (_model_view, authority_refs, load_feedback,
                                      prepare_feedback)
-from pdm.model_calls import ModelCallError
+from pdm.model_calls import MAX_INPUT_BYTES, ModelCallError
 from pdm.pipeline import _committed, _load, _read_reviewed, _run_path
 from pdm.production import prepare_production, run_production
 from pdm.skill_support import resolve_skill_refs
@@ -212,7 +212,7 @@ class ExtractionValidationFeedbackTests(unittest.TestCase):
         self.first_failure()
         before = deepcopy(self.attempts()), self.ledger.path.read_bytes(), self.number
         with patch("pdm.pipeline.preflight_processing", return_value={"status": "blocked_capacity",
-                   "request_bytes": 256001, "model_calls": 0, "attempted_calls": 0}) as checked:
+                   "request_bytes": MAX_INPUT_BYTES + 1, "model_calls": 0, "attempted_calls": 0}) as checked:
             result = run_production(self.repo, "feedback", model_call=self.adapter, max_steps=1)
         self.assertEqual(result["status"], "blocked_capacity", result)
         self.assertIn("extraction_feedback_ref", checked.call_args.kwargs)

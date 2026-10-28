@@ -13,6 +13,7 @@ from pdm.capture import capture
 from pdm.contracts import CaptureError, parse_markdown
 from pdm.evidence import build_current_evidence
 from pdm.context import plan_answered_pending
+from pdm.model_calls import MAX_INPUT_BYTES
 from pdm.pending import answer_pending, read_registry
 from pdm.pipeline import _committed, _hash, _load, _read_reviewed, publish, verify_publication
 from pdm.portable import prepare_reading_package, verify_reading_package
@@ -140,7 +141,7 @@ class AssemblyProductionTests(unittest.TestCase):
         self.prepare()
         run_production(self.repo, "assembly", model_call=self.adapter, max_steps=2)
         before = self.ledger.path.read_bytes(), self.number, deepcopy(self.attempts())
-        with patch("pdm.decomposed_review._input_bytes", return_value=256001):
+        with patch("pdm.decomposed_review._input_bytes", return_value=MAX_INPUT_BYTES + 1):
             result = run_production(self.repo, "assembly", model_call=self.adapter)
         self.assertEqual(result["status"], "blocked_capacity", result)
         self.assertEqual(result["last_result"]["error"], "decomposed_input_limit")

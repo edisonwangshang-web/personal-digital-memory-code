@@ -30,7 +30,7 @@ dev26容量回退使用独立0.14原样最终候选，不改变普通10/8合同�
 
 质量验收纳入M1-01，并覆盖M1-02更新和M1-03同一加工链。普通返工及分解恢复按绑定支持0.10／0.11／0.12；历史0.9 operator入口`resume-unstarted-revision`和`revalidate-completed-extraction`缺新Skill证明，对新质量链须以`skill_quality_recovery_attestation_required`在模型前拒绝，不能降级。
 
-可先人工触发capture→提取分类→独立Review→proof消费发布→目录／只读问答→恢复。同一有效已完成阶段核验复用，只对失败或规则改变影响的环节返工；unknown先对账。新queue默认auto，容量内单次Review，超限或显式decomposed-v1使用object／coverage／global完整证明；必要语义闭包仍超256000字节则blocked_capacity。人工成功不证明云任务已部署，也不完成M1。
+可先人工触发capture→提取分类→独立Review→proof消费发布→目录／只读问答→恢复。同一有效已完成阶段核验复用，只对失败或规则改变影响的环节返工；unknown先对账。新queue默认auto，容量内单次Review，超限或显式decomposed-v1使用object／coverage／global完整证明；必要语义闭包仍超320000字节完整请求门槛则blocked_capacity；原文planning和读取包仍各256000，字节不等于token，真实服务接收另验。人工成功不证明云任务已部署，也不完成M1。
 
 ## 1. 本轮要交付什么
 

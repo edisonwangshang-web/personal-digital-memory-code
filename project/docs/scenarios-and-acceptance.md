@@ -16,6 +16,8 @@
 | 第4次已用完、见证／计数前缀篡改、目标重放或重复复用原stage | 明确阻断；重启不新增attempt或调用，原终态和完整证明保留 |
 | 0.19写门禁 | 新plan／proof与sidecar为0.19，普通候选仍0.18；旧writer拒写，不删证明或改header绕过 |
 
+dev35后续增加两项人工检查：完整线上请求超过旧256000但不超过320000时通过应用字节预检，超过320000仍在调用前阻断；原文planning和便携读取包超过各自256000仍拒绝，来源／存储限额、旧请求字节及旧known-completed证明不变。另核已采用stage的后继被真实Review退回后正常返工，不重复采用旧源、不重置次数。人工通过不证明真实服务token窗口或业务通过，见[容量规范](data-conventions.md#model-request-capacity)。
+
 字段及受限恢复条件见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。不新增模型阶段或接收方，两个master不动。
 
 <a id="incremental-repair-acceptance"></a>
@@ -212,7 +214,7 @@
 | unknown／非completed／Review已启动、换pool／auth／operation或规则变化 | 不恢复、不新extract，不重放未知；专用证明不能降级成旧0.9入口或普通新任务 |
 | 新plan准备与validation_head | 先固定新plan，再生成证明；HEAD、账本或缓存变化后旧证明不能用；原stage与guard必须同一提交，缺guard／伪造摘要／不同父边拒绝 |
 | 完整候选含合法历史超过1 MiB | 只限固定10/8、schema0.12及正确stage路径；当前核心≤1 MiB、总包≤4 MiB可接受，其他文件仍≤1 MiB；把正文搬进历史／错角色／错run／总量或核心超限均拒绝 |
-| 存储下界与完整Review视图 | 已知下界超限时不预约／不调用；实际输出仍再核。恢复Review只去重复程序provenance，完整反馈、对象、统计、目标和检查项不减，全部请求≤256000字节或按原分解规则阻断／推进 |
+| 存储下界与完整Review视图 | 已知下界超限时不预约／不调用；实际输出仍再核。恢复Review只去重复程序provenance，完整反馈、对象、统计、目标和检查项不减，原known-completed提取证明仍按256000合同；后继新Review按现行320000字节门槛及分解规则阻断／推进 |
 | 新stage0.12与恢复guard0.13 | 原子事务恢复后两者均完整；实际旧writer遇不支持的0.13先拒写，不能仅mock版本或删除guard放行 |
 | operator真实完整group由新10/8队列采用 | exact plan／Skill／source／proof核验后持久published；已有final_run不得换人，原失败queue及counter不改；重复采用零提交／零模型／零账本写 |
 | 错plan、错bundle、错候选与历史9/7采用 | 新合同拒写错误绑定；旧9/7仍仅返回effective published，其raw队列状态不被追改 |
@@ -284,7 +286,7 @@
 
 | 场景 | 必须实际观察的结果 |
 | --- | --- |
-| 新旧策略 | 新queue默认auto，旧无strategy queue幂等读回不换契约；小包仍1extract＋1Review，强制decomposed-v1及实际超256000字节Review走分解，不抬容量门槛 |
+| 新旧策略 | 新queue默认auto，旧无strategy queue幂等读回不换契约；小包仍1extract＋1Review，强制decomposed-v1及实际超320000字节Review走分解；planning／读取包仍各256000，不借完整请求门槛扩大资料或读取范围 |
 | 完整object／Wiki | 每份最终body完整进入object审核；Wiki与其全部record及精确版本同审；遗漏成员、错version或后改正文不能借原证书发布 |
 | 覆盖与整体 | coverage涵盖全部原始batch／draft范围与最终集合，global实际读完整最终正文、关系图和前序证书；缺、删、交换节点或拼draft实际拒绝发布 |
 | 恢复与未知 | 中断后重开已完成unit零调用，固定候选不重提取；安全未外发失败总尝试不超过4，跨queue／日期不清零；已started未知不重发，未完成proof不发布 |

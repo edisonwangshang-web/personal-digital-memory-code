@@ -159,6 +159,18 @@ class ReadingPackageTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "reading_package_limit")
         self.assertFalse(self.output.exists())
 
+    def test_reading_package_file_cap_stays_at_256kb_independently_of_model_transport(self):
+        self.prepare()
+        original = self.output.read_bytes()
+        # Start with a genuine artificial package and append JSON whitespace.
+        # The byte guard must reject it before canonical/schema verification.
+        self.output.write_bytes(original + b' ' * (256_001 - len(original)))
+        before = self.git("rev-parse", "HEAD"), self.git("status", "--porcelain")
+        with self.assertRaises(CaptureError) as raised:
+            verify_reading_package(self.output)
+        self.assertEqual(raised.exception.code, "reading_package_limit")
+        self.assertEqual((self.git("rev-parse", "HEAD"), self.git("status", "--porcelain")), before)
+
     def test_internally_rehashed_scope_mismatch_and_malformed_documents_are_rejected(self):
         self.prepare()
         original = self.output.read_bytes()

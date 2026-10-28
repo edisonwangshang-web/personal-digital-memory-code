@@ -10,6 +10,8 @@ dev32批次收尾M1已有链路的采集、答复续接、事项解决、调度�
 
 dev35先核完整来源coverage、全局范围／关系汇总及已存v1请求字节兼容；新plan／proof与受限stage复用sidecar使用0.19，普通12/10候选保持0.18。受限复用须证明原completed、Review从未启动、decomposed_input_limit、同work下一attempt不超过4及原Git／audit一致，零新extract但重做程序校验和独立Review。unknown、耗尽或范围变化仍阻断；工程、新CI与真实全链结果尚待取证，不预填通过。合同／反例见[数据规范](data-conventions.md#review-material-recovery)、[场景验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
 
+dev35后续还须核完整请求320000与原文planning／读取包各256000的独立边界，旧请求／证明及存储限额保持；已采用stage的后继被退回后正常返工，不重复采用旧源。应用字节预检不代替服务token窗口或真实接收验证，准确新CI另取证，见[容量规范](data-conventions.md#model-request-capacity)。
+
 dev34增量修复继续核下列人工行为；旧dev32接口检查继续保留。新12/10和schema0.18不自动升级历史任务，真实复验与准确CI分别取得证据。
 
 | 增量修复 | 必须观察到的结果 |

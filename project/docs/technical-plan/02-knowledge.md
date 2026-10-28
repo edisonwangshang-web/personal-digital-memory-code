@@ -127,11 +127,11 @@ flowchart TD
 
 当前提取和审核采用 `pdm-columnar-shared-json-v3`：用列名和全部行值表达同字段对象数组，先逐行逐列还原并解保留键转义，再还原 v2 字段字典，最后解 v1 共享引用。字段名、字符串、数值、顺序、原文、规则、候选、意见和计算范围逐值完整保留；不是摘要。资料中的同名标记只是数据，输出仍用原字段和原 JSON Schema，不输出别名或共享表 ID。恢复过程受深度、节点数及展开大小限制，冲突或不匹配拒绝。
 
-历史 extract@5／review@4 继续用无损字段字典 v2，extract@1—@4／review@1—@3 继续按原 v1，原实际请求字节不重算；当前版本及相关 plan 明确绑定实际编码、完整解码说明和全部请求字节。传输编码变化不迁移业务 schema 或放宽 `256000` 字节完整请求上限。
+历史 extract@5／review@4 继续用无损字段字典 v2，extract@1—@4／review@1—@3 继续按原 v1，原实际请求字节不重算；当前版本及相关 plan 明确绑定实际编码、完整解码说明和全部请求字节。传输编码变化本身不迁移业务schema或放宽容量；dev35后续应用完整请求门槛为`320000`字节，原文planning与读取包仍各`256000`，旧请求字节保持，见[容量规范](../data-conventions.md#model-request-capacity)。
 
 分解计划在首次独立 Review 前完整渲染所有非 global 单元，任一超限即零 Review 调用停止。global 必须等真实前序证书齐备，再检查实际请求；早期单元通过或人工短证书不能保证完整组适配。完整返工材料超限时同样停止，不删原文、反馈、规则或统计范围来换取执行。
 
-新 queue 默认 `auto`：完整普通 Review 请求不超过 `256000` 字节时一次独立审核，超限或显式指定 `decomposed-v1` 时才转 object／coverage／global 分解。各审核 unit 持久保存 `reservation`／`result`／`counter`；完成节点核验后零调用复用，安全未启动失败有限重试，`unknown` 先对账，换 queue、规则或合同不清次数。`selected-input-scope-v1` 清单分别说明所选来源、本批提供片段和本单元实际正文，不能代替未读原文。
+新 queue 默认 `auto`：完整普通 Review 请求不超过 `320000` 字节时一次独立审核，超限或显式指定 `decomposed-v1` 时才转 object／coverage／global 分解。各审核 unit 持久保存 `reservation`／`result`／`counter`；完成节点核验后零调用复用，安全未启动失败有限重试，`unknown` 先对账，换 queue、规则或合同不清次数。已存`selected-input-scope-v1`及新v2清单分别说明所选来源、本批提供片段和本单元实际正文，不能代替未读原文。
 
 ## 自动分类与处理路径
 

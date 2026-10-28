@@ -2,6 +2,16 @@
 
 当前开发为`0.2.0.dev35`；Skill12/10及普通质量候选0.18保持，新分解审核plan／proof和受限stage复用sidecar使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。下文按dev标记保留旧合同，不将新字段回填到历史运行。
 
+<a id="model-request-capacity"></a>
+
+## dev35后续：完整模型请求与资料容量分别控制
+
+完整返工输入实测超过旧应用门槛，现有线上编码已充分共享；本次只将`model_calls.MAX_INPUT_BYTES`从256000调整为320000字节，按规则、原文、当前稿、实际反馈及编码说明构成的完整线上请求核验。超限仍在调用前阻塞，不截断材料或改变请求内容。字节数不等于token数；现有服务目录与运行观察支持这项工程调整，但不代替真实服务接收和业务验收。
+
+`batching.MAX_BYTES`的原文planning及`portable.MAX_PACKAGE_BYTES`的读取包仍各为256000字节；来源与候选当前核心仍各1MiB，历史完整包4MiB、事务8MiB。证据／问题payload的独立192000字节限制保持。source0.1、formal0.2、quality0.18、review_material0.19、Skill12/10及旧请求字节不变；旧known-completed提取证明继续核其原256000字节请求合同，不以新门槛回填旧事实。
+
+已采用stage的后继得到真实`needs_revision`后，编排优先沿该后继的正常反馈返工，不再次选择旧源stage重复采用；采用链接仍须核精确见证和同work下一attempt，原计数不重置。本修正不新增阶段、模型、接收方、索引或恢复合同，准确CI和真实结果分别取证。
+
 <a id="review-material-recovery"></a>
 
 ## dev35：按完整来源审核与受限已完成提取复用
@@ -212,7 +222,7 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 仅固定10/8的schema0.12或固定11/9的schema0.15、且路径／run一致的candidate，可使用最多 **4 MiB** 的完整存储包；剔除`revision_context`、`revision_revalidation`、`revision_resume`三类明确历史字段后的当前核心仍须不超过 **1 MiB**。该例外只承载可核验历史，不扩大正文或赋予发布权限；完整绑定及历史证明照常核验。
 
-其他受管Git文件仍最多1 MiB，来源输入最多1 MiB，完整模型请求仍最多256000字节，单次多文件事务仍最多8 MiB。不能把大正文移进历史字段、改路径／kind／Skill或只改版本号来获得例外；总量、核心大小和实际读写均检查，超限保留原记录并停止。
+该历史版本的其他受管Git文件最多1 MiB、来源输入1 MiB、完整模型请求256000字节、事务8 MiB；当前完整请求门槛按[dev35容量规范](#model-request-capacity)为320000，其余限额不变。不能把大正文移进历史字段、改路径／kind／Skill或只改版本号来获得例外；总量、核心大小和实际读写均检查，超限保留原记录并停止。
 
 ## dev21：质量完整性与反馈接续（schema `0.12`）
 
@@ -322,7 +332,7 @@ extract v11仅增加两条通用约束：事件时区只依原文明示，缺失
 
 `prepare_production(..., review_strategy=None)`为新queue保存review_strategy=auto；既有queue缺省沿用原request及legacy-v1，不因升级静默换策略。CLI `production prepare --review-strategy auto|decomposed-v1|legacy-v1`显式选择；strategy参与request、processing_key、candidate binding和原提取复用条件。底层`process_sources(..., review_strategy="legacy-v1")`继续旧缺省，仅batch支持auto／decomposed-v1。
 
-auto先以实际review.md正文、真实JSON序列化及连接文本计算完整Review请求字节，限MAX_INPUT_BYTES=256000；容量内继续一次独立Review，超限才走分解。decomposed-v1 强制分解；legacy-v1沿原单次Review。没有把限制调大、截原文／候选或用少量字节估算代替传输边界。
+dev11当时auto先以实际review.md正文、真实JSON序列化及连接文本计算完整Review请求字节，限MAX_INPUT_BYTES=256000（现行完整请求门槛见[dev35容量规范](#model-request-capacity)）；容量内继续一次独立Review，超限才走分解。decomposed-v1 强制分解；legacy-v1沿原单次Review。没有把限制调大、截原文／候选或用少量字节估算代替传输边界。
 
 新production_queue／production_attempts写0.8，兼容读旧0.6／0.7；新策略auto或decomposed-v1的普通加工链（candidate、review、manifest、publication_receipt及按实际产生的run pending／failure）为0.8。旧legacy无context batch链0.6、带context链0.7保持；来源0.1、正式0.2、registry0.4／0.7、pending_registration marker0.7、所有group wrapper0.6及旧日程事件保留各版本。扩大格式支持不等于重跑或迁移真实旧知识。
 
@@ -336,7 +346,7 @@ auto先以实际review.md正文、真实JSON序列化及连接文本计算完整
 | coverage | 每个原draft语义范围及其prior candidate与完整最终对象集合；没有draft边界的未覆盖原批次作为整体义务，不按字节硬拆后冒称无遗漏 |
 | global | 完整最终对象正文、精确Wiki成员关系图、前序审核证书及原始fragment IDs；检查整体一致性，continuation原问题与必要回复继续保留 |
 
-所有单元均独立调用Review，invocation_id不能等同提取或其他已用审核调用；每个请求按真实prompt＋JSON再次检查256000字节。必要语义单元、coverage或global本身仍超容量时blocked_capacity，保留原始计划与已完成证据，不声称任意大组都可分解，不允许只靠摘要证明最终正文。
+所有单元均独立调用Review，invocation_id不能等同提取或其他已用审核调用；dev11当时每个请求按真实prompt＋JSON再次检查256000字节；现行门槛按[dev35容量规范](#model-request-capacity)。必要语义单元、coverage或global本身仍超容量时blocked_capacity，保留原始计划与已完成证据，不声称任意大组都可分解，不允许只靠摘要证明最终正文。
 
 ### journal、有限重试及真实发布门禁
 
@@ -953,7 +963,7 @@ Review 通过表示达到内容整理与发布要求，不等于独立事实核�
 
 读取范围显式指定一份来源和可选发布run；给定run时必须完整复验来源／采集回执、候选、独立Review、正式对象、清单及回执绑定，再只读取清单中的记录和主题正文。模型输入包含原文、原文行号及对应正式元数据／正文，不能扫描全库或加入其他run。原始引用仅采用来源ID／版本／行号，派生知识不成为新的独立证据。
 
-证据与完整问题payload各受192000字节上限，不截断；传输另受规则在内的256000字节上限。调用前后核对HEAD、控制、工作区与正式字节，拒绝未提交篡改及版本变化。只读回答不写memory；返回耗时／可取得用量、选中来源及正式对象版本、证据和输入payload的SHA256与字节数，实际模型未知保留unknown。真实问答和通过结论仅存私有验收记录，不回写成用户来源。
+证据与完整问题payload各受192000字节上限，不截断；传输另受规则在内的320000字节应用完整请求上限；这不扩大证据、问题payload或读取包限额。调用前后核对HEAD、控制、工作区与正式字节，拒绝未提交篡改及版本变化。只读回答不写memory；返回耗时／可取得用量、选中来源及正式对象版本、证据和输入payload的SHA256与字节数，实际模型未知保留unknown。真实问答和通过结论仅存私有验收记录，不回写成用户来源。
 
 
 ### dev11选定输入范围的版本化审核契约

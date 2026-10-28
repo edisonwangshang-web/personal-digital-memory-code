@@ -12,7 +12,7 @@ from pdm.batching import project_batch_sources
 from pdm.budget import BudgetedModelCall
 from pdm.capture import capture
 from pdm.contracts import CaptureError
-from pdm.model_calls import ModelCallError
+from pdm.model_calls import MAX_INPUT_BYTES, ModelCallError
 from pdm.pipeline import _read_reviewed
 from pdm.production import (_revision_feedback, _save, _verify_queue_publication, prepare_production,
                             run_production)
@@ -189,7 +189,7 @@ class RebuildProductionTests(unittest.TestCase):
         self.prepare_queue("capacity", context)
         before = deepcopy(self.attempts()), self.ledger.path.read_bytes(), self.number
         with patch("pdm.pipeline.preflight_processing", return_value={"status":"blocked_capacity",
-                   "request_bytes":256001, "model_calls":0, "attempted_calls":0}) as checked:
+                   "request_bytes":MAX_INPUT_BYTES + 1, "model_calls":0, "attempted_calls":0}) as checked:
             result = run_production(self.repo, "capacity", model_call=self.adapter, max_steps=1)
         self.assertEqual(result["status"], "blocked_capacity", result)
         self.assertEqual(checked.call_args.kwargs["rebuild_context"], context)
