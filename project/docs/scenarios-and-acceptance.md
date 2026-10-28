@@ -14,6 +14,7 @@
 | 原返回缺失、unknown、反馈篡改或范围变化 | 在调用前明确停止，不换账本、operation或queue造出可重试身份；历史原失败保留 |
 | 最终新内容标deferred | Review10覆盖及对应global不得passed；可整理但没做needs_revision，真实缺料needs_confirmation；不能只整理说明页就完成批次 |
 | 草稿、已完成内容与次数 | draft_only仍可保留局部未完成项，summarized须有实际正文；首次加最多3次总4次，重启／换版本不重置 |
+| 校验反馈与超时衔接 | 带反馈的第2／3次提取超时后，下一次及零启动恢复仍带同一失败稿并重核原completed账本；丢弃／替换引用均拒绝。三次已确认失败后第四次超时正确耗尽，原unknown与次数保留 |
 
 字段与材料边界见[增量修复合同](data-conventions.md#incremental-repair-contract)。本表通过只证明对应工程行为；没有真实新增／变化／补录的发布和读取证据时，不把M1该出口标为完成。
 

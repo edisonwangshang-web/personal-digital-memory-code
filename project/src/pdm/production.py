@@ -357,6 +357,22 @@ def _revision_feedback(git, previous, state, projection, processing_paths, *, dr
             "target_plan_id": projection["batch_context"]["plan_id"]}
 
 
+def _timeout_feedback(git, ref, attempts, model_call):
+    """Keep a timed-out extraction's fixed draft, with its original live audit."""
+    from .unknown_retry import validate_ref
+    inherited = validate_ref(git, ref, model_call=model_call)["original"].get("extraction_feedback_ref")
+    if inherited is None:
+        return None
+    rows = [row for row in attempts if row.get("run_id") == inherited.get("source_run_id")]
+    if len(rows) != 1:
+        _fail("extraction_feedback_changed")
+    from .extraction_feedback import prepare_feedback
+    actual = prepare_feedback(git, rows[0], model_call)
+    if actual != inherited:
+        _fail("extraction_feedback_changed")
+    return actual
+
+
 def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(), execution_guard=None, assembly=False):
     from .budget import BudgetedModelCall
     from .model_calls import MAX_INPUT_BYTES, PROMPTS
@@ -473,6 +489,9 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                                "source_views": projection["source_views"], "review_strategy": strategy,
                                "skill_bundle": skill_bundle, "rebuild_context": rebuild_context,
                                "timeout_retry_ref": old["timeout_retry_ref"]}
+                    inherited = _timeout_feedback(git, old["timeout_retry_ref"], previous["attempts"], delegate)
+                    if inherited is not None:
+                        options["extraction_feedback_ref"] = inherited
                     if old.get("revision_from_run") is not None:
                         options["revision_from_run"] = old["revision_from_run"]
                     resumptions[old["run_id"]] = process_sources(repo, processing_paths, model_call=delegate, **options)
@@ -572,6 +591,12 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                         break
         feedback = None
         validation_feedback = reused_feedback
+        if next_timeout_ref is not None:
+            try:
+                validation_feedback = _timeout_feedback(git, next_timeout_ref, attempts["attempts"], delegate)
+            except CaptureError as error:
+                return {"status": "blocked_context", "error": error.code,
+                        "attempted_calls": 0, "model_calls": 0}
         if feedback_policy and not assembly:
             try:
                 feedback = _revision_feedback(git, attempts["attempts"], state, projection,

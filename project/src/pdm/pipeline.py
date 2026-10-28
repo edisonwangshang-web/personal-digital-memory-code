@@ -1680,6 +1680,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                    "batch_context": batch_context, "source_views": source_views,
                                    "skill_bundle": skill_bundle, "review_strategy": review_strategy,
                                    "rebuild_context": rebuild_context, "revision_from_run": revision_from_run,
+                                   **({"extraction_feedback_ref": extraction_feedback_ref}
+                                      if extraction_feedback_ref is not None else {}),
                                    "versions": execution_versions(git)})
             if not _preflight_only:
                 timeout_resume = unstarted_resume(git, timeout_retry_ref, run_id, model_call)
@@ -2311,6 +2313,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
             _error("invalid_batch_context")
         if "extraction_reused_from" in candidate:
             reused = candidate["extraction_reused_from"]
+            if _hash(_committed(git, _stage_path(reused.get("run_id")))) != reused.get("stage_sha256"):
+                _error("extraction_not_reusable")
             response, expected = _reused_extraction(git, reused.get("run_id"), _source_fields(sources), candidate["versions"],
                 candidate["controls_digest"], candidate["source_views"], material, candidate.get("continuation_context"), strategy, candidate.get("revision_context"),
                 candidate.get("skill_bundle"), candidate.get("quality_context"), historical=historical,

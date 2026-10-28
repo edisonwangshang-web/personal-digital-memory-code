@@ -131,7 +131,8 @@ def _bound_key(git, old, started, engine, row):
     return _processing_key(_source_fields(sources), engine["versions"], plan["snapshot"]["controls_digest"],
         context, material, review_strategy=strategy, revision_context=revision,
         skill_bundle=old["request"].get("skill_bundle"), rebuild_context=old["request"].get("rebuild_context"),
-        timeout_retry_ref=started.get("timeout_retry_ref"))
+        timeout_retry_ref=started.get("timeout_retry_ref"),
+        extraction_feedback_ref=row.get("extraction_feedback_ref"))
 
 
 def _old_plan(git, target, started, engine, row):
@@ -486,6 +487,7 @@ def validate_execution(git, ref, run_id, *, source_paths, plan_id, model_call=No
             or target["plan"]["source_paths"] != source_paths):
         _fail("timeout_retry_successor_changed")
     expected_revision = value["original"].get("revision_from_run")
+    expected_feedback = value["original"].get("extraction_feedback_ref")
     if execution_options is not None:
         from .batching import _context, _views
         from .pipeline import load_source
@@ -499,6 +501,8 @@ def validate_execution(git, ref, run_id, *, source_paths, plan_id, model_call=No
             "review_strategy": target["request"].get("review_strategy", "legacy-v1"),
             "rebuild_context": target["request"].get("rebuild_context"), "revision_from_run": expected_revision,
             "versions": plan["snapshot"]["versions"]}
+        if expected_feedback is not None:
+            expected_options["extraction_feedback_ref"] = expected_feedback
         if execution_options != expected_options:
             _fail("timeout_retry_scope_changed")
     current = _read(git, "memory/runs/processes/queues/" + value["target"]["queue_id"] + "/state.md", "production_queue")
@@ -515,6 +519,8 @@ def validate_execution(git, ref, run_id, *, source_paths, plan_id, model_call=No
             _fail("timeout_retry_successor_changed")
         if row.get("revision_from_run") != expected_revision:
             _fail("timeout_retry_revision_changed")
+        if row.get("extraction_feedback_ref") != expected_feedback:
+            _fail("timeout_retry_feedback_changed")
         if expected_revision is not None:
             for key in ("revision_context_sha256", "revision_candidate_binding", "revision_source_plan_id"):
                 if row.get(key) != value["original"].get(key):
@@ -573,7 +579,9 @@ def verify_candidate(git, candidate):
             "skill_bundle": candidate.get("skill_bundle"), "review_strategy": candidate.get("review_strategy", "legacy-v1"),
             "rebuild_context": candidate.get("rebuild_context"),
             "revision_from_run": candidate.get("revision_context", {}).get("source_run_id"),
-            "versions": candidate["versions"]})
+            "versions": candidate["versions"],
+            **({"extraction_feedback_ref": candidate["extraction_feedback_ref"]}
+               if candidate.get("extraction_feedback_ref") is not None else {})})
     from .production import ATTEMPTS, _read
     target = _load(_read_snapshot(git, value["target"]["queue_ref"]), "production_queue")
     row = _read(git, ATTEMPTS + value["work_id"] + ".md", "production_attempts")["attempts"][value["target"]["successor"]["attempt"] - 1]

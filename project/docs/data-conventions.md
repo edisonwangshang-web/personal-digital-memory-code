@@ -14,6 +14,8 @@
 
 可用于后继提取的失败诊断另带`validation_context`，固定`extraction-validation-feedback-v1`、原`run_id/processing_key`、完整任务范围摘要、版本、请求绑定及原audit池／operation／completed提取观察。后继attempt及候选保存`extraction_feedback_ref`，指向原`failure/started/engine`的路径、Git提交和摘要；这些证明进入现有恢复链。模型只收到`extraction_feedback`中的当前失败稿、错误相关质量声明和准确`validation_error`。独立Review不重复接收这份失败历史，仍审当前物化后的完整候选与必要证据。历史证明重读无需库外账本，实时选择反馈仍须核对原持久账本的completed调用。
 
+若带校验反馈的后继提取又发生符合原有限timeout合同的超时，原反馈引用也参与原计划处理身份的重建；后继及零启动预约恢复须保留同一引用，并重新核对原失败调用仍为completed。不能在超时续跑时丢弃或更换草稿，原timeout调用仍保留unknown和已用次数。第三次已确认失败后第四次超时也须正确进入耗尽终态，不生成第五次。
+
 Review10对最终候选中deferred的覆盖检查及相应全局完成度检查，不允许结果为passed；已有资料未整理须needs_revision，真实缺少必要事实须needs_confirmation。分批draft_only仍可保留局部未完成项，但不能据此发布最终知识。summarized须有实际正文与依据，程序核可判定结构，语义理由由独立Review判断。不把旧11/9请求改成新合同。
 
 本文是公开工程的数据契约；所有memory、控制、账本和运行路径均指独立私有工作区。dev32批次修复M1既有接口，不增加schema或迁移数据；沿用Skill11/9、普通quality0.15、assembly0.14及既有0.16／0.17证明，来源0.1／正式0.2保持。工程检查、准确CI与真实验收分别记录；本批dev-only，不更新master、不启动M2、不重做已完成的真实资料。
