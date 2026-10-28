@@ -14,7 +14,7 @@ from pdm.contracts import CaptureError, parse_markdown
 from pdm.evidence import build_current_evidence
 from pdm.context import plan_answered_pending
 from pdm.pending import answer_pending, read_registry
-from pdm.pipeline import _committed, _load, _read_reviewed, publish, verify_publication
+from pdm.pipeline import _committed, _hash, _load, _read_reviewed, publish, verify_publication
 from pdm.portable import prepare_reading_package, verify_reading_package
 from pdm.production import prepare_production, run_production
 from pdm.budget import BudgetedModelCall
@@ -60,8 +60,29 @@ class AssemblyProductionTests(unittest.TestCase):
         self.assertEqual(parse_markdown((self.repo / f"memory/staging/{result['final_run']}.md").read_bytes())[0]["schema_version"], "0.14")
         final_requests = [payload for role, payload in self.payloads if "review_scope" in payload]
         self.assertEqual([payload["review_scope"]["kind"] for payload in final_requests], ["object"] * 4 + ["coverage"] * 2 + ["global"])
-        self.assertTrue(all(certificate["output"]["repair_scope"] == {"kind": "none", "missing_bindings": []}
-                            for certificate in final_requests[-1]["review_certificates"]))
+        certificates = final_requests[-1]["review_certificates"]
+        preceding_nodes = review["decomposed_proof"]["nodes"][:-1]
+        self.assertEqual(len(certificates), len(preceding_nodes))
+        self.assertEqual(len(certificates), 6)
+        git = PipelineGit(self.repo)
+        for certificate, node in zip(certificates, preceding_nodes):
+            raw = _committed(git, node["path"], node["commit_sha"])
+            complete = _load(raw, "decomposed_review_result")
+            self.assertEqual(certificate["certificate_contract"], "verified-quality-conclusions-v2")
+            self.assertEqual(certificate["scope"]["unit_id"], node["unit_id"])
+            self.assertEqual(certificate["request_sha256"], complete["request_sha256"])
+            self.assertEqual(certificate["result_sha256"], node["sha256"])
+            self.assertEqual(_hash(raw), node["sha256"])
+            self.assertEqual(certificate["complete_output_sha256"], _hash(complete["output"]))
+            self.assertEqual(certificate["complete_output_sha256"], complete["call"]["output_sha256"])
+            self.assertEqual(certificate["complete_checks_sha256"], _hash(complete["output"]["checks"]))
+            self.assertEqual(certificate["output"], {
+                "verdict": "passed", "reasons": complete["output"]["reasons"]})
+            self.assertEqual(certificate["checked_obligations"], {
+                "count": len(complete["output"]["checks"]),
+                "results": {"passed": len(complete["output"]["checks"])}})
+            self.assertEqual(complete["output"]["repair_scope"], {"kind": "none", "missing_bindings": []})
+            self.assertTrue(all(check["result"] == "passed" for check in complete["output"]["checks"]))
         self.assertEqual(review["output"]["verdict"], "passed")
         proof = verify_publication(self.repo, result["publication"]["run_id"], source_paths=paths)
         self.assertEqual(len(proof["files"]), 4)
