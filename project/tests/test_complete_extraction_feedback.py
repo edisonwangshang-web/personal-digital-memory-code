@@ -126,6 +126,9 @@ class CompletedFeedbackTransferTests(unittest.TestCase):
         return third
 
     def prepare_new(self):
+        rule = self.code / "project/skills/shared/artificial-new-installed-rule.md"
+        rule.write_text("Artificial newly installed immutable policy; old role snapshots remain unchanged.\n")
+        PipelineGit(self.code).run("add", "--", str(rule.relative_to(self.code)))
         advance_engine(self.code)
         result = prepare_production(self.repo, "new-feedback", self.paths, skill_bundle=resolve_skill_refs(*NEW))
         self.assertEqual("ready", result["status"])
@@ -160,6 +163,9 @@ class CompletedFeedbackTransferTests(unittest.TestCase):
         self.assertEqual(feedback["validation_error"], diagnostic["validation_error"])
         self.assertEqual(feedback["source_run_id"], third["active_run_id"])
         candidate, _, _ = _read_reviewed(git, fourth["final_run"])
+        self.assertNotEqual(candidate["versions"]["rules_version"],
+                            diagnostic["validation_context"]["versions"]["rules_version"])
+        self.assertEqual(payload["rules_version"], candidate["versions"]["rules_version"])
         self.assertEqual(candidate["revision_context"]["source_run_id"], attempts[1]["run_id"])
         self.assertEqual(candidate["extraction_feedback_ref"]["source_run_id"], attempts[2]["run_id"])
         self.assertEqual(_committed(git, old_pointer), frozen_pointer)
@@ -200,8 +206,10 @@ class CompletedFeedbackTransferTests(unittest.TestCase):
         versions = deepcopy(context["versions"])
         versions["program_commit"] = "f" * 40
         versions["program_sha256"] = "sha256-" + "f" * 64
+        versions["rules_version"] = "sha256-" + "b" * 64
         target = deepcopy(original)
         target["skill_bundle"] = resolve_skill_refs(*NEW)
+        target["rules_version"] = versions["rules_version"]
         target["batch_context"]["plan_id"] = "plan-" + "f" * 64
         target["batch_context"]["batch_id"] = "batch-" + "f" * 64
         target["controls"]["head"] = "f" * 40
@@ -242,6 +250,10 @@ class CompletedFeedbackTransferTests(unittest.TestCase):
                 _completed_predecessor_payload(git, ref, target, versions, changed)
         changed_versions = deepcopy(versions)
         changed_versions["domain_policy_sha256"] = "sha256-" + "f" * 64
+        with self.assertRaises(CaptureError):
+            load_feedback(git, ref, target, changed_versions)
+        changed_versions = deepcopy(versions)
+        changed_versions["rules_version"] = "sha256-" + "f" * 64
         with self.assertRaises(CaptureError):
             load_feedback(git, ref, target, changed_versions)
         self.assertEqual(before, (git.head(), self.number, self.ledger.path.read_bytes()))

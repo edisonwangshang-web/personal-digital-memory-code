@@ -656,7 +656,7 @@ verified_history只证明登记的历史发布和答复关联链，不独立证�
 
 ### 回答内联引用编号（answer v6）
 
-加工 `execution_versions.rules_version`的基础提示词摘要只汇总extract.md与review.md；领域策略和显式Skill绑定按各自契约共同固定。answer.md不在该加工摘要中，回答规则自身字节及读取包的answer_rules_sha256分别绑定；程序代码改变则program_sha256改变。这些摘要各有范围，不能将回答规则变化说成加工规则已升级或旧知识已重新加工。代码包Manifest的同名rules_version另汇总包内规则文件，不与加工摘要混用。
+加工 `execution_versions.rules_version` 汇总 extract.md、review.md、领域策略摘要和目录中全部固定 Skill 文件；增加新 Skill 版本也会改变该规则树摘要。实际选用的两个角色仍由显式 Skill bundle 另行固定。answer.md不在该加工摘要中，回答规则自身字节及读取包的answer_rules_sha256分别绑定；程序代码改变则program_sha256改变。这些摘要各有范围，不能将回答规则变化说成加工规则已升级或旧知识已重新加工。代码包Manifest的同名rules_version另汇总包内规则文件，不与加工摘要混用。
 
 answer v6保持原JSON结构，三个ask入口共同检查JSON结构、answer正文编号及来源坐标；编号失败为 `invalid_inline_citation`，原结构错误仍为invalid_answer，来源版本／locator错误仍为invalid_citation。`[n]`对应citations数组从1开始的第n项，不是来源行号。相邻 `[1][2]`、组 `[1,2]`、升序范围 `[1-3]`及混组可用；组分隔符支持逗号、中文逗号、顿号、分号和中文分号，Unicode数字及全角方括号规范化后同检。
 

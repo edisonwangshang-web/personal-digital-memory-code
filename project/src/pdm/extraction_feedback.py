@@ -243,8 +243,8 @@ def _completed_predecessor_payload(git, ref, payload, versions, context):
                 or payload.get("skill_bundle") != resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")
                 or set(versions) != set(context["versions"])
                 or any(versions[key] != context["versions"][key] for key in versions
-                       if key not in {"program_commit", "program_sha256"})
-                or payload.get("rules_version") != context["versions"]["rules_version"]
+                       if key not in {"program_commit", "program_sha256", "rules_version"})
+                or payload.get("rules_version") != versions["rules_version"]
                 or payload.get("processing_mode") != "incremental"
                 or payload.get("output_contract") != "batch-v1"
                 or payload.get("quality_context", {}).get("policy_version") != "source-quality-v2"):
@@ -277,6 +277,11 @@ def _completed_predecessor_payload(git, ref, payload, versions, context):
         original = deepcopy(payload)
         original.pop("extraction_feedback", None)
         original["skill_bundle"] = old_bundle
+        # rules_version fingerprints the complete installed rules tree, so
+        # registering the pinned successor changes it without editing 14/12.
+        # Recover the original tree digest only for the old audited request;
+        # the current payload remains bound to its own execution versions.
+        original["rules_version"] = context["versions"]["rules_version"]
         original["batch_context"] = deepcopy(old_batch)
         # Processing replaces the pre-reservation control HEAD immediately
         # before launch. The actual audited request uses the atomic started /
