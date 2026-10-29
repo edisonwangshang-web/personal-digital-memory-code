@@ -8,6 +8,8 @@
 
 当前批次为`0.2.0.dev38`，仅修完整任务加工、普通统计声明、返工目标反馈及过去来源事件的时间限定。新默认`knowledge-extract@15`／`knowledge-review@13`，普通质量schema0.22；source-quality-v2、来源0.1、正式0.2及plan／proof／stage复用sidecar0.19保持。完整请求448000、planning／读取包各256000不变。本批人工检查、准确提交CI与获准真实复验分别取证，不预填通过，不更新master、不重开耗尽工作。合同见[dev38修复](data-conventions.md#complete-task-statistic-input)，检查见[dev38场景](scenarios-and-acceptance.md#complete-task-statistic-acceptance)。
 
+发布包逐个核验各代Skill的固定manifest与依赖，允许历史v1／v2质量policy共存；当前默认提取／审核配对仍须共享同一policy，旧新依赖缺失或篡改继续拒绝。
+
 | dev38修复 | 应验证的行为 |
 | --- | --- |
 | 完整任务质量 | 组织实际可用内容，不以统计声明成本或工作量代替事实缺口；保持来源范围、分类及真实不确定性 |

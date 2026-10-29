@@ -13,7 +13,7 @@ import warnings
 import zipfile
 
 from git_fixtures import configure_test_repository
-from pdm.release import MANIFEST_NAME, ReleaseError, build_release, verify_release
+from pdm.release import MANIFEST_NAME, ReleaseError, _check_skill_assets, build_release, verify_release
 
 
 class ReleaseTests(unittest.TestCase):
@@ -168,6 +168,94 @@ class ReleaseTests(unittest.TestCase):
                     self.build("missing-" + name.replace("/", "-") + ".zip",
                                ref=self.save("missing registered Skill " + name))
                 self.write(path, (project / "skills" / name).read_text())
+
+    def quality_asset_files(self):
+        project = Path(__file__).resolve().parents[1]
+        files = {"project/src/pdm/skill_support.py": (project / "src/pdm/skill_support.py").read_bytes()}
+        files.update({"project/skills/" + path.relative_to(project / "skills").as_posix(): path.read_bytes()
+                      for path in (project / "skills").rglob("*") if path.is_file()})
+        files.update({"project/prompts/" + role + ".md": (project / "prompts" / (role + ".md")).read_bytes()
+                      for role in ("extract", "review")})
+        return files
+
+    def rebound_policy_manifest(self, files, change, ref="knowledge-extract@15"):
+        """Isolate policy checks after an explicitly changed fixture registry pin."""
+        files = dict(files)
+        role, version = ref.split("@")
+        name = "project/skills/" + role + "/" + version + "/manifest.json"
+        original = files[name]
+        manifest = json.loads(original)
+        change(manifest)
+        replacement = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
+        registry = "project/src/pdm/skill_support.py"
+        old_pin = ("sha256-" + hashlib.sha256(original).hexdigest()).encode()
+        new_pin = ("sha256-" + hashlib.sha256(replacement).hexdigest()).encode()
+        self.assertEqual(files[registry].count(old_pin), 1)
+        files[registry] = files[registry].replace(old_pin, new_pin)
+        files[name] = replacement
+        return files
+
+    def test_historical_v1_and_current_v2_policies_coexist_in_registered_assets(self):
+        files = self.quality_asset_files()
+        self.assertIn("project/skills/shared/knowledge-quality-v1.md", files)
+        self.assertIn("project/skills/shared/knowledge-quality-v2.md", files)
+        _check_skill_assets(files)
+
+    def test_every_historical_and_current_policy_remains_required_and_byte_bound(self):
+        files = self.quality_asset_files()
+        for version in ("v1", "v2"):
+            path = "project/skills/shared/knowledge-quality-" + version + ".md"
+            for action in ("missing", "changed"):
+                with self.subTest(version=version, action=action):
+                    altered = dict(files)
+                    if action == "missing":
+                        altered.pop(path)
+                    else:
+                        altered[path] += b"\nChanged artificial policy.\n"
+                    with self.assertRaises(ReleaseError):
+                        _check_skill_assets(altered)
+
+    def test_default_roles_cannot_mix_historical_and_current_policies(self):
+        files = self.quality_asset_files()
+        registry = "project/src/pdm/skill_support.py"
+        for role, current, previous in (("EXTRACT", "15", "14"), ("REVIEW", "13", "12")):
+            with self.subTest(role=role):
+                altered = dict(files)
+                needle = f'DEFAULT_{role}_SKILL_REF = "knowledge-{role.lower()}@{current}"'.encode()
+                replacement = f'DEFAULT_{role}_SKILL_REF = "knowledge-{role.lower()}@{previous}"'.encode()
+                self.assertEqual(altered[registry].count(needle), 1)
+                altered[registry] = altered[registry].replace(needle, replacement)
+                with self.assertRaises(ReleaseError):
+                    _check_skill_assets(altered)
+
+    def test_new_default_pair_cannot_both_rebind_to_the_wrong_historical_policy(self):
+        files = self.quality_asset_files()
+        legacy = json.loads(files["project/skills/knowledge-extract/14/manifest.json"])["shared_policy"]
+        def use_legacy_policy(manifest):
+            manifest["shared_policy"] = dict(legacy)
+            for dependency in manifest["dependencies"]:
+                if dependency["kind"] == "policy":
+                    dependency.update(path=legacy["path"], sha256=legacy["sha256"])
+        for ref in ("knowledge-extract@15", "knowledge-review@13"):
+            files = self.rebound_policy_manifest(files, use_legacy_policy, ref)
+        with self.assertRaises(ReleaseError):
+            _check_skill_assets(files)
+
+    def test_policy_descriptor_and_unique_declared_dependency_are_required(self):
+        files = self.quality_asset_files()
+        def wrong_id(manifest):
+            manifest["shared_policy"]["id"] = "knowledge-quality-v1"
+        def extra_field(manifest):
+            manifest["shared_policy"]["extra"] = "not allowed"
+        def mismatched_dependency(manifest):
+            legacy = next(json.loads(files[path])["shared_policy"] for path in files
+                          if path == "project/skills/knowledge-extract/14/manifest.json")
+            manifest["shared_policy"] = legacy
+        def no_policy_dependency(manifest):
+            next(item for item in manifest["dependencies"] if item["kind"] == "policy")["kind"] = "reference"
+        for change in (wrong_id, extra_field, mismatched_dependency, no_policy_dependency):
+            with self.subTest(change=change.__name__), self.assertRaises(ReleaseError):
+                _check_skill_assets(self.rebound_policy_manifest(files, change))
 
     def test_declared_capabilities_come_from_fixed_snapshot_and_are_canonical(self):
         config = (self.repo / "pyproject.toml").read_text()

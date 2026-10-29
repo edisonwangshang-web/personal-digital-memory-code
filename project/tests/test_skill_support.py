@@ -73,7 +73,7 @@ class SkillSupportTests(unittest.TestCase):
 
     def test_missing_file_or_dependency_never_falls_back(self):
         options = self.install()
-        path = options["skills_root"] / "shared/knowledge-quality-v1.md"
+        path = options["skills_root"] / self.bundle["shared_policy"]["path"]
         path.unlink()
         with self.assertRaisesRegex(SkillError, "^skill_file_unavailable$"):
             resolve_skill_refs(**options)
@@ -81,6 +81,14 @@ class SkillSupportTests(unittest.TestCase):
         bundle["skills"]["review"]["files"].pop()
         with self.assertRaisesRegex(SkillError, "^incomplete_skill_dependencies$"):
             validate_skill_bundle(rebind(bundle))
+
+    def test_explicit_historical_pair_keeps_its_original_policy_dependency(self):
+        options = self.install()
+        old = resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")
+        (options["skills_root"] / old["shared_policy"]["path"]).unlink()
+        with self.assertRaisesRegex(SkillError, "^skill_file_unavailable$"):
+            resolve_skill_refs("knowledge-extract@14", "knowledge-review@12", **options)
+        self.assertEqual(self.bundle, resolve_skill_refs(**options))
 
     def test_changed_same_revision_rules_are_rejected_even_with_new_outer_digest(self):
         bundle = copy.deepcopy(self.bundle)
@@ -244,7 +252,7 @@ class SkillSupportTests(unittest.TestCase):
 
     def test_symlink_dependency_is_rejected_before_read(self):
         options = self.install()
-        path = options["skills_root"] / "shared/knowledge-quality-v1.md"
+        path = options["skills_root"] / self.bundle["shared_policy"]["path"]
         external = self.root / "outside.md"
         path.replace(external)
         path.symlink_to(external)

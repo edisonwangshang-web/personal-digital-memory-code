@@ -221,7 +221,7 @@ def _check_skill_assets(files: dict[str, bytes]) -> None:
         pins = constants["_MANIFEST_HASHES"]
         if not isinstance(pins, dict) or not pins:
             raise ValueError("invalid Skill registry")
-        policies = []
+        policies = {}
         def descriptor(value, root):
             path, digest = value["path"], value["sha256"]
             if not _safe_path(path) or digest != "sha256-" + _sha256(files[root + "/" + path]):
@@ -255,11 +255,20 @@ def _check_skill_assets(files: dict[str, bytes]) -> None:
                 descriptor(item, _SKILL_ROOT)
             descriptor(manifest["base_prompt"], "project")
             policy = manifest["shared_policy"]
-            if sum(item == dict(path=policy["path"], sha256=policy["sha256"], kind="policy")
-                   for item in manifest["dependencies"]) != 1:
+            expected_policy = ("knowledge-quality-v2" if ref in {
+                "knowledge-extract@15", "knowledge-review@13"} else "knowledge-quality-v1")
+            if (not isinstance(policy, dict) or set(policy) != {"id", "path", "sha256"}
+                    or policy["id"] != expected_policy
+                    or policy["path"] != "shared/" + policy["id"] + ".md"):
+                raise ValueError("invalid common Skill policy")
+            descriptor(policy, _SKILL_ROOT)
+            if (sum(item.get("kind") == "policy" for item in manifest["dependencies"]) != 1
+                    or sum(item == dict(path=policy["path"], sha256=policy["sha256"], kind="policy")
+                           for item in manifest["dependencies"]) != 1):
                 raise ValueError("missing common Skill policy")
-            policies.append(policy)
-        if any(policy != policies[0] for policy in policies[1:]):
+            policies[ref] = policy
+        if (policies[constants["DEFAULT_EXTRACT_SKILL_REF"]]
+                != policies[constants["DEFAULT_REVIEW_SKILL_REF"]]):
             raise ValueError("inconsistent common Skill policy")
     except (KeyError, TypeError, ValueError, SyntaxError, UnicodeError) as exc:
         raise ReleaseError("Code artifact does not contain the pinned Skills and all required dependencies") from exc
