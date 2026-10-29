@@ -228,7 +228,8 @@ def _context(context, provided, *, restoring, unit_scope, current):
                 for profile in context["sources"]):
             _fail()
     if complete and not scoped:
-        if prepare_quality(_selected_sources(context, provided)) != context:
+        if prepare_quality(_selected_sources(context, provided),
+                           policy_version=context["policy_version"]) != context:
             _fail()
     if not restoring:
         for profile in context["sources"]:

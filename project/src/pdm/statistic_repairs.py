@@ -159,6 +159,17 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
              if reviewed_evidence else validate_review_repair_scope(output))
     if scope["kind"] != "statistic_bindings":
         return None
+    old_context = candidate.get("quality_context")
+    skills = candidate.get("skill_bundle", {}).get("skills", {})
+    if (isinstance(old_context, dict) and isinstance(current_quality_context, dict)
+            and tuple(skills.get(role, {}).get("ref") for role in ("extract", "review"))
+                == ("knowledge-extract@13", "knowledge-review@11")
+            and old_context.get("policy_version") == "source-quality-v1"
+            and current_quality_context.get("policy_version") == "source-quality-v2"):
+        # A newly parsed sample needs a full content revision. Never freeze
+        # declarations computed under the predecessor's date interpretation.
+        # The caller independently verifies the old draft and its real Review.
+        return None
     checks, reviewed_scope = _review_checks(candidate, record)
     if checks is None:
         return None
@@ -178,7 +189,8 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
             or revision_context.get("controls_digest") != candidate.get("controls_digest")
             or controls_digest is not None and controls_digest != revision_context.get("controls_digest")):
         _fail("statistic_repair_context_changed")
-    if sources is not None and prepare_quality(sources, source_views) != current_quality_context:
+    if sources is not None and prepare_quality(sources, source_views,
+            policy_version=current_quality_context["policy_version"]) != current_quality_context:
         _fail("statistic_repair_context_changed")
     original = candidate.get("extraction_output")
     frozen = candidate.get("objects")
@@ -250,7 +262,8 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
 
 
 def _source_lines(sources, source_views, context):
-    if prepare_quality(sources, source_views) != context:
+    if prepare_quality(sources, source_views,
+                       policy_version=context["policy_version"]) != context:
         _fail("statistic_repair_context_changed")
     views = {} if source_views is None else {_identity(view): view for view in source_views}
     return {_identity(source): _selected_lines(source, views.get(_identity(source)))[0] for source in sources}

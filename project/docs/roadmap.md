@@ -6,7 +6,16 @@
 
 ## 当前阶段
 
-当前批次为`0.2.0.dev36`，只在现有提取、校验、独立Review与返工中修三处交接。新默认`knowledge-extract@13`／`knowledge-review@11`，普通质量schema0.20；来源0.1、正式0.2及分解plan／proof／受限stage复用sidecar0.19保持。本地人工回归已取证，准确提交CI仍待最终提交后核对；真实业务另验，不更新master、不重开耗尽工作。具体合同见[返工完整性与统计修补](data-conventions.md#revision-completeness-repair)，检查见[dev36场景](scenarios-and-acceptance.md#revision-completeness-acceptance)。
+当前批次为`0.2.0.dev37`，仅修已复现的CSV日期识别、完整返工容量、未完成内容审核顺序与范围说明。新默认`knowledge-extract@14`／`knowledge-review@12`，普通质量schema0.21；来源0.1、正式0.2及分解plan／proof／受限stage复用sidecar0.19保持。本批人工检查、准确提交CI与获准真实复验分别取证，当前不预填通过，不更新master、不重开耗尽工作。具体合同见[dev37修复](data-conventions.md#csv-revision-input-repair)，检查见[dev37场景](scenarios-and-acceptance.md#csv-revision-input-acceptance)。
+
+| dev37修复 | 应验证的行为 |
+| --- | --- |
+| CSV日期识别 | 新policy在解析前去绝对开头BOM，quoted header正确还原；日期、重复及非法行规则生效，原文与旧v1证明保持 |
+| 完整返工材料 | 沿原无损编码，完整请求门槛384000；planning／读取包仍256000，不删必要来源、当前稿或实际意见 |
+| 未完成内容与范围 | 最终稿deferred先核coverage；区分当前输入与历史资料，可用内容不因工作量而全部暂缓，真实缺料仍待确认 |
+| 同工作续接 | 旧13/11按原policy核验，新14/12重新计算；旧统计不跨policy继承，次数、unknown与失败历史保持 |
+
+上一批dev36准确提交`5d557e8148a84f5e72c0c7c6423ab31c381f81ce`的[CI40848773015](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40848773015)八任务已通过，仅证明该固定工程快照。下表保留其修复范围。
 
 | dev36修复 | 应验证的行为 |
 | --- | --- |
@@ -16,7 +25,7 @@
 
 健康、事业、学习及未分类共用本批规则，不增加模型角色或阶段。首次加最多3次重试、总4次的计数、unknown和失败历史保持；人工样例或CI不代替真实新增／变更／补录验收。
 
-本地新增34项纯人工测试通过：Skill注册6项、返工coverage优先9项、统计修补就绪条件11项、审核统计正文锚6项及完整生产流程2项。后两项在真实临时Git仓库使用mock模型，分别核纯统计补丁和混合问题分流，稳定源重跑2项用时28.793秒，当前／历史发布和限定读取均通过。原计数上限与unknown保护另有2项稳定源回归通过（7.817秒）；旧资产摘要及旧请求渲染保持。该结果不包含真实资料或真实模型调用，私库及两个master未改；不能当作最终准确CI或真实业务验收通过。
+dev36本地新增34项纯人工测试通过：Skill注册6项、返工coverage优先9项、统计修补就绪条件11项、审核统计正文锚6项及完整生产流程2项。后两项在真实临时Git仓库使用mock模型，分别核纯统计补丁和混合问题分流，稳定源重跑2项用时28.793秒，当前／历史发布和限定读取均通过。原计数上限与unknown保护另有2项稳定源回归通过（7.817秒）；旧资产摘要及旧请求渲染保持。该人工结果不包含真实资料或真实模型调用；其准确CI已另核通过，不能据此认定真实业务验收通过。
 
 dev35批次修复整体coverage请求超容量，改为按完整表格来源覆盖并附完整说明／字典，再由global核全部范围、候选和关系；已存`selected-input-scope-v1`请求保持原字节。新12/10计划使用`selected-input-scope-v2`，新plan／proof及受限已完成stage复用sidecar为0.19，普通候选为0.18。后者只在Review从未启动、原阻塞为`decomposed_input_limit`、同work下一attempt仍不超过4且原Git／audit证明齐全时免去新extract，随后重新程序校验和完整独立Review。其工程与真实结果分别取证，不据此宣布M1通过。规则见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。
 
@@ -53,7 +62,7 @@ dev32批次按现有M1目标收尾已复现的接口问题，不启动M2，不�
 - **当前Agent读取：** 已有按记录／主题限定读取及固定包导出核验；当前由模型查找文件，使用现有CLI和证据核验；索引暂不建设。第二模型实际读取为可选验证，不阻塞M1。
 - **稳定交付：** 本批保持dev-only；后续master交付另核准确合并树、实际CI和prod环境，不自动提升dev个人资料。
 
-新任务使用13/11及普通quality0.20，分解审核plan／proof及stage复用证明继续使用0.19；旧12/10的0.18、11/9的0.15、assembly0.14、有限提取超时门禁0.16、空知识新轮回执0.17按原证明核验，来源0.1及正式知识0.2不迁移，旧Skill及提示词保持。超时自动重试仍只接[有限timeout合同](data-conventions.md#bounded-timeout-retry)适用的手工单完整批root提取，不能扩称所有定时／审核超时均自动重跑。同一工作首次加最多3次重试，总4次；原unknown、耗尽终态和计数完整保留。
+新任务使用14/12及普通quality0.21，分解审核plan／proof及stage复用证明继续使用0.19；旧13/11的0.20、12/10的0.18、11/9的0.15、assembly0.14、有限提取超时门禁0.16、空知识新轮回执0.17按原证明核验，来源0.1及正式知识0.2不迁移，旧Skill及提示词保持。超时自动重试仍只接[有限timeout合同](data-conventions.md#bounded-timeout-retry)适用的手工单完整批root提取，不能扩称所有定时／审核超时均自动重跑。同一工作首次加最多3次重试，总4次；原unknown、耗尽终态和计数完整保留。
 
 上一版准确工程快照[`bcb87153536a6e8b342a690acac60d3d4771f45e`](https://github.com/edisonwangshang-web/personal-digital-memory-code/commit/bcb87153536a6e8b342a690acac60d3d4771f45e)的[CI40482747387](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40482747387)八任务成功，两Python各1331项、0跳过；它仅证明该固定提交，不证明本批或M1整体完成。历史能力与边界见[版本记录](version-history.md)、[数据规范](data-conventions.md)及[M1交付核对](m1-delivery-readiness.md)。
 
@@ -108,7 +117,7 @@ M1 聚焦可日常维护的知识库。用户明确提交文章、对话、个�
 | M1-Q04 独立质量审核 | 对照原文、清单、统计、时间和候选逐项审核，完整证明绑定精确版本后由发布者消费 | 已实现；修订后重新审核，旧证明不放行新内容 |
 | M1-Q05 回归与业务验证 | 用人工反例检查加载、版本、分批、恢复、误算、漏项、误类和时态，再做限定真实业务验证 | 工程回归与真实业务证据分开；具体实跑记录保留私库 |
 
-当前默认13/11继续使用共享质量和语境规范，普通质量候选为`0.20`，v2分解plan／proof及受限stage复用证明继续为`0.19`。旧12/10的`0.18`、11/9的`0.15`、10/8的`0.12`、9/7的`0.11`、更早`0.10`及assembly`0.14`按原证明核验；来源`0.1`、正式对象`0.2`、group`0.6`保持，不自动迁移旧资料。11/9合同的dev27固定工程证据见上文；本批返工完整性、统计修补与准确提交CI另核，真实质量仍须独立验收。
+当前默认14/12继续使用共享质量和语境规范，普通质量候选为`0.21`，v2分解plan／proof及受限stage复用证明继续为`0.19`。旧13/11的`0.20`、12/10的`0.18`、11/9的`0.15`、10/8的`0.12`、9/7的`0.11`、更早`0.10`及assembly`0.14`按原证明核验；来源`0.1`、正式对象`0.2`、group`0.6`保持，不自动迁移旧资料。11/9合同的dev27固定工程证据见上文；本批返工完整性、统计修补与准确提交CI另核，真实质量仍须独立验收。
 
 普通质量返工和分解恢复沿原规则继续；两个历史 `0.9` 人工 operator 入口不接收新质量链，缺少适用证明时停止。完整技术职责、字段与用例分别见[技术方案](technical-plan.md)、[数据规范](data-conventions.md)与[场景验收](scenarios-and-acceptance.md)。
 

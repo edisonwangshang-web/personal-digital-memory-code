@@ -372,7 +372,8 @@ def _reuse_refs_enabled(skill_bundle):
             (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
             (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
             (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
-            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11"))))
+            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
+            (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12"))))
 
 
 def _feedback_quality_enabled(skill_bundle):
@@ -382,7 +383,8 @@ def _feedback_quality_enabled(skill_bundle):
             (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
             (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
             (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
-            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11"))))
+            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
+            (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12"))))
 
 
 def _processing_header(skill_bundle, fallback):
@@ -1402,7 +1404,8 @@ def _validate_candidate_quality(git, candidate, sources):
         return
     from .knowledge_quality import prepare_quality, validate_quality_output
     _validated_skill_bundle(candidate["skill_bundle"])
-    context = prepare_quality(sources, source_views=candidate.get("source_views"))
+    context = prepare_quality(sources, source_views=candidate.get("source_views"),
+                              skill_bundle=candidate["skill_bundle"])
     if candidate["quality_context"] != context:
         _error("quality_context_mismatch")
     output = candidate["extraction_output"]
@@ -1847,7 +1850,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if skill_bundle is not None:
             from .knowledge_quality import prepare_quality
             quality = {"quality_contract": "skill-quality-v1", "skill_bundle": copy.deepcopy(skill_bundle),
-                       "quality_context": prepare_quality(sources, source_views=source_views)}
+                       "quality_context": prepare_quality(sources, source_views=source_views,
+                                                          skill_bundle=skill_bundle)}
             payload.update(copy.deepcopy(quality))
             context_fields.update(quality)
         if incremental:

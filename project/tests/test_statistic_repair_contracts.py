@@ -39,9 +39,9 @@ class StatisticRepairContractTests(unittest.TestCase):
     def test_new_default_pair_and_schema_are_explicit_without_mixed_role_downgrade(self):
         bundle = resolve_skill_refs()
         self.assertEqual((bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]),
-                         ("knowledge-extract@13", "knowledge-review@11"))
+                         ("knowledge-extract@14", "knowledge-review@12"))
         self.assertTrue(statistic_repair_enabled(bundle))
-        self.assertEqual(quality_schema_version(bundle), "0.20")
+        self.assertEqual(quality_schema_version(bundle), "0.21")
         incremental = resolve_skill_refs("knowledge-extract@12", "knowledge-review@10")
         self.assertEqual(quality_schema_version(incremental), "0.18")
         previous = resolve_skill_refs("knowledge-extract@11", "knowledge-review@9")

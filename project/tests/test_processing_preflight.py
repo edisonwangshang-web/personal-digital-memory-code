@@ -105,7 +105,7 @@ class ProcessingPreflightTests(unittest.TestCase):
         self.fail('artificial complete extraction request did not reach the exact byte boundary')
 
     def test_larger_complete_preflight_request_reaches_native_boundary_with_the_same_bytes(self):
-        checked, payload = self.sized_extraction_request(320_000)
+        checked, payload = self.sized_extraction_request(323_370)
         self.assertEqual(checked['status'], 'ready', checked)
         self.assertGreater(checked['request_bytes'], 256_000)
         self.assertEqual(self.ledger.snapshot()['started_calls'], 0)
@@ -125,7 +125,7 @@ class ProcessingPreflightTests(unittest.TestCase):
         self.assertEqual(self.ledger.snapshot()['started_calls'], 1)
 
     def test_complete_request_one_byte_over_bound_is_refused_before_run_or_native_audit(self):
-        checked, payload = self.sized_extraction_request(320_001)
+        checked, payload = self.sized_extraction_request(384_001)
         self.assertEqual(checked['status'], 'blocked_capacity', checked)
         before = self.snapshot()
         with self.assertRaises(CaptureError) as raised:

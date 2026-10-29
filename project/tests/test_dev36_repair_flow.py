@@ -11,6 +11,7 @@ from pdm.evidence import build_current_evidence
 from pdm.knowledge_quality import resolve_statistic
 from pdm.pipeline import _hash, _read_reviewed, verify_publication
 from pdm.production import prepare_production, run_production
+from pdm.skill_support import resolve_skill_refs
 from pdm.transaction import PipelineGit
 from quality_fixtures import add_quality, passed_review
 
@@ -31,7 +32,8 @@ class Dev36RepairFlowTests(unittest.TestCase):
 
     def prepare(self, *, mixed=False):
         self.mode = "mixed" if mixed else "statistic"
-        result = prepare_production(self.repo, "repair", self.paths, use_default_skills=True,
+        result = prepare_production(self.repo, "repair", self.paths,
+            skill_bundle=resolve_skill_refs("knowledge-extract@13", "knowledge-review@11"),
             **({"review_strategy": "decomposed-v1"} if mixed else {}))
         self.assertEqual("ready", result["status"])
         return result

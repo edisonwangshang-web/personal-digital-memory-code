@@ -28,7 +28,7 @@ from typing import Any, Dict
 
 
 # Serialized request byte bound; this does not guarantee the model's token capacity.
-MAX_INPUT_BYTES = 320_000
+MAX_INPUT_BYTES = 384_000
 MAX_STREAM_BYTES = 2_000_000
 # Larger structured period summaries may legitimately need more than ten
 # minutes. Callers must opt in; the 120-second default and unknown handling stay.
@@ -127,15 +127,15 @@ def output_schema(role, payload):
         return _statistic_repair_output_schema(payload)
     result = (_object(dict(base["properties"], quality=QUALITY_SCHEMA)) if role == "extract"
               else _object(dict(base["properties"], checks=_array(QUALITY_REVIEW_CHECK_SCHEMA))))
-    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-review@9", "knowledge-review@10", "knowledge-review@11"}:
+    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-review@9", "knowledge-review@10", "knowledge-review@11", "knowledge-review@12"}:
         result["properties"]["repair_scope"] = repair_scope_schema(evidence_required=statistic_evidence_enabled(payload["skill_bundle"]))
         result["required"].append("repair_scope")
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13", "knowledge-extract@14"}:
         result["properties"]["reuse_refs"] = _array(_object({"path": _STRING, "content_version": _STRING}))
         result["required"].append("reuse_refs")
         if payload.get("output_contract") != "batch-v1":
             result["properties"]["wiki"] = {"anyOf": [result["properties"]["wiki"], {"type": "null"}]}
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13", "knowledge-extract@14"}:
         context = payload.get("quality_context")
         targets = context.get("targets") if isinstance(context, dict) else None
         if not isinstance(targets, list):
@@ -151,7 +151,7 @@ def output_schema(role, payload):
         return result
     if payload["skill_bundle"]["skills"][role]["ref"] in {
             "knowledge-extract@5", "knowledge-review@4", "knowledge-extract@6", "knowledge-review@5",
-            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10", "knowledge-review@11"}:
+            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10", "knowledge-review@11", "knowledge-review@12"}:
         return _reference_schema(result, role, payload)
     return result
 
@@ -256,8 +256,8 @@ def render_model_request(role, payload):
             wire_instructions = KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
             encoder = encode_shared_json_v2
         elif bundle["skills"][role]["ref"] in {
-                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13",
-                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10", "knowledge-review@11"}:
+                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13", "knowledge-extract@14",
+                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10", "knowledge-review@11", "knowledge-review@12"}:
             from .skill_wire_v2 import WIRE_INSTRUCTIONS as KEY_INSTRUCTIONS
             from .skill_wire_v3 import WIRE_INSTRUCTIONS as TABLE_INSTRUCTIONS, encode_shared_json_v3
             wire_instructions = TABLE_INSTRUCTIONS + "\n\n" + KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
@@ -276,7 +276,8 @@ def render_model_request(role, payload):
         })
         if (bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]) in {
                 ("knowledge-extract@10", "knowledge-review@8"), ("knowledge-extract@11", "knowledge-review@9"),
-                ("knowledge-extract@12", "knowledge-review@10"), ("knowledge-extract@13", "knowledge-review@11")}:
+                ("knowledge-extract@12", "knowledge-review@10"), ("knowledge-extract@13", "knowledge-review@11"),
+                ("knowledge-extract@14", "knowledge-review@12")}:
             from .quality_projection import PROJECTION_INSTRUCTIONS, project_quality_payload
             instructions += "\n\n" + PROJECTION_INSTRUCTIONS
             material = project_quality_payload(material)

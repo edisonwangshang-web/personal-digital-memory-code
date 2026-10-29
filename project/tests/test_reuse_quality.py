@@ -81,7 +81,7 @@ class ReuseQualityTests(unittest.TestCase):
             if payload.get("output_contract") == "batch-v1":
                 output["wikis"] = [{**output.pop("wiki"), "record_ids": [self.record_id]}]
             if payload.get("skill_bundle", {}).get("skills", {}).get("extract", {}).get("ref") in {
-                    "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13"}:
+                    "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13", "knowledge-extract@14"}:
                 output["reuse_refs"] = []
             if self.reuse:
                 documents = [doc for item in payload["related"] for doc in item["documents"]]

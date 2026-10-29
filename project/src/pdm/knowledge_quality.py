@@ -19,6 +19,7 @@ from .contracts import CaptureError, canonical
 
 QUALITY_CONTRACT = "skill-quality-v1"
 QUALITY_POLICY_VERSION = "source-quality-v1"
+CSV_BOM_POLICY_VERSION = "source-quality-v2"
 STATISTICS_POLICY_VERSION = "descriptive-v1"
 
 
@@ -280,12 +281,19 @@ def _source_scope_id(profile):
                                    ("source_id", "source_version", "provided_locators", "fragments", "line_sha256")})[:32]
 
 
-def _csv_rows(lines):
+def _csv_rows(lines, *, normalize_bom=False):
     """Return physically located CSV rows, or a reason for semantic review."""
     ordered = sorted(lines)
     if not ordered or ordered[0] != 1:
         return None, "header_not_provided"
     text = "\n".join(lines[number] for number in ordered) + "\n"
+    if normalize_bom:
+        # A UTF-8 signature preceding a quoted first field must be removed
+        # before CSV tokenization.  Removing it from parsed header strings is
+        # too late: the quote has already been treated as a literal character.
+        # This is a parsing view only; physical source text and line hashes
+        # remain byte-exact for citations and historical proofs.
+        text = text.removeprefix("\ufeff")
     first = lines[1].lstrip("\ufeff")
     delimiter = next((candidate for candidate in (",", "\t", ";") if candidate in first), None)
     if delimiter is None:
@@ -484,8 +492,18 @@ def _table_material(profile, rows):
     return table, targets, statistics
 
 
-def prepare_quality(sources, source_views=None):
+def prepare_quality(sources, source_views=None, *, skill_bundle=None, policy_version=None):
     """Inventory only actual input lines; never combine independent table counts."""
+    from .skill_support import csv_bom_normalization_enabled
+    selected_policy = (CSV_BOM_POLICY_VERSION if csv_bom_normalization_enabled(skill_bundle)
+                       else QUALITY_POLICY_VERSION)
+    if policy_version is not None:
+        if (policy_version not in {QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION}
+                or skill_bundle is not None and policy_version != selected_policy):
+            _error("invalid_quality_context", "质量契约或规则版本不匹配")
+        # Stateless reading/materialization reconstructs a context by its
+        # already-bound policy; new candidates instead select it via Skill.
+        selected_policy = policy_version
     sources = _list(sources, "invalid_quality_scope")
     identities = [_identity(source) for source in sources]
     if len(set(identities)) != len(identities):
@@ -497,7 +515,7 @@ def prepare_quality(sources, source_views=None):
         if len(set(keys)) != len(keys) or set(keys) != set(identities):
             _error("invalid_quality_scope", "实际片段必须精确对应所选来源")
         views = dict(zip(keys, selected))
-    result = {"contract": QUALITY_CONTRACT, "policy_version": QUALITY_POLICY_VERSION,
+    result = {"contract": QUALITY_CONTRACT, "policy_version": selected_policy,
               "statistics_policy": STATISTICS_POLICY_VERSION, "sources": [], "targets": [],
               "statistics": [], "system_facts": [],
               "statistic_definitions": {
@@ -531,7 +549,7 @@ def prepare_quality(sources, source_views=None):
             "tables": [], "format": "text",
         }
         profile["evidence_id"] = _source_scope_id(profile)
-        rows, reason = _csv_rows(lines)
+        rows, reason = _csv_rows(lines, normalize_bom=selected_policy == CSV_BOM_POLICY_VERSION)
         if rows is not None:
             profile["format"] = "csv"
             with localcontext() as decimal_context:
@@ -558,7 +576,8 @@ def prepare_quality(sources, source_views=None):
 
 
 def _validate_context(context):
-    if not isinstance(context, dict) or context.get("contract") != QUALITY_CONTRACT or context.get("policy_version") != QUALITY_POLICY_VERSION:
+    if (not isinstance(context, dict) or context.get("contract") != QUALITY_CONTRACT
+            or context.get("policy_version") not in {QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION}):
         _error("invalid_quality_context", "质量契约或规则版本不匹配")
     for field in ("sources", "targets", "statistics", "system_facts"):
         _list(context.get(field), "invalid_quality_context")
@@ -994,7 +1013,8 @@ def build_review_checks(candidate, context, scope=None):
     roles = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     review = roles.get("review") if isinstance(roles, dict) else None
     context_readability = isinstance(review, dict) and review.get("ref") in {"knowledge-review@6", "knowledge-review@7"}
-    completion_policy = isinstance(review, dict) and review.get("ref") in {"knowledge-review@10", "knowledge-review@11"}
+    completion_policy = isinstance(review, dict) and review.get("ref") in {
+        "knowledge-review@10", "knowledge-review@11", "knowledge-review@12"}
     from .skill_support import revision_coverage_enabled, statistic_evidence_enabled
     revision_policy = revision_coverage_enabled(bundle)
     statistic_policy = statistic_evidence_enabled(bundle)

@@ -191,7 +191,7 @@ def _material(git, run_id, paths, runs, payload, response, *, historical=False, 
     sources = _load_sources(git.repo, paths, allow_versions=True, purpose="history", max_sources=256)
     related = _related_context(git, runs, sources, at_commit=head, max_runs=256)
     views = payload["sources"] if "batch_context" in payload else None
-    context = prepare_quality(sources, source_views=views)
+    context = prepare_quality(sources, source_views=views, skill_bundle=bundle)
     expected = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                 "related": related, "controls": control_guard(git, head), "rules_version": versions["rules_version"],
                 "domain_policy": domain_policy(), "revision_context": revision_model_context(full),

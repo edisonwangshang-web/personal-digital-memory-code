@@ -1,12 +1,36 @@
 # 数据规范
 
-当前开发为`0.2.0.dev36`；新默认Skill13/11及普通质量候选0.20，分解审核plan／proof和受限stage复用sidecar继续使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。旧12/10的0.18及更早合同保持；下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+当前开发为`0.2.0.dev37`；新默认Skill14/12及普通质量候选0.21，分解审核plan／proof和受限stage复用sidecar继续使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。旧13/11的0.20、12/10的0.18及更早合同保持；下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+
+<a id="csv-revision-input-repair"></a>
+
+## dev37：CSV日期、完整返工与覆盖审核
+
+新14/12使用普通质量0.21，仍沿用提取、程序校验、独立Review及条件发布，不新增模型阶段。
+
+### CSV解析policy
+
+`prepare_quality(sources, source_views=None, *, skill_bundle=None, policy_version=None)`按冻结bundle选择policy。新14/12为`source-quality-v2`：只在CSV解析文本进入reader前移除绝对开头的一个BOM，让带引号的日期表头由CSV规则正确解码。之后继续原有日期、重复日期、非法日期、部分日及样本排除规则，不任意剥除合法表头引号。原来源字节、行摘要、source_version、物理行坐标及引用quote保持，解析视图不是新原文。
+
+未显式指定policy时，无bundle和旧13/11及更早合同继续`source-quality-v1`。固定context重建时显式使用其中的policy_version；未知policy、bundle与policy冲突均拒绝。新v2可能改变目标、日期范围和统计身份，不能用新parser重算旧v1证明或手改历史context。
+
+### 可用内容、范围与审核顺序
+
+提取Skill要求实际组织已提供且可读取的内容，不能仅整理说明／字典后把表格目标全部留待以后，也不能把资料量或格式处理当成事实缺口。无法确认的含义、冲突或时间仍准确保留。每篇记录分别说明自身来源期间、历史处理范围和当前选定输入；历史“本次”不能无条件变成当前状态，精确复用不能豁免必要的范围修订。
+
+新最终候选存在deferred时，在既有分解Review先审核相应完整来源coverage，再核其他对象／覆盖和最后global。已完成目标的回退核对继续；不能只检查旧记录正确便放过未加工的新内容。独立审核区分可整理但未完成的needs_revision与真实缺料的needs_confirmation，不靠理由关键词替代语义判断；draft_only保持局部边界。
+
+### 同工作续接与容量
+
+旧13/11拒收候选及实际Review仍按其v1和原请求核验，新14/12候选按v2重算当前要求；旧policy统计不能作为新policy的有效声明直接继承。续接继续绑定同一来源、控制、批次、实际反馈与工作身份，保留旧稿、失败和unknown，不因换默认Skill而刷新首次加最多三次、总四次的上限。需要重新完整独立审核，旧proof不能放行新正文。
+
+现行完整模型请求上限为384000字节，沿用原紧凑JSON与无损共享编码，不增加新编码或省略材料；原文planning与读取包仍各256000。原文、当前稿、实际未解决反馈、规则及编码说明全部计入；超限在调用前停止。旧渲染字节和历史证明不改写，应用字节门槛不等于模型token窗口或真实接收保证。检查见[dev37验收](scenarios-and-acceptance.md#csv-revision-input-acceptance)。
 
 <a id="revision-completeness-repair"></a>
 
 ## dev36：返工完整性、统计口径与修补分流
 
-本节仅由新13/11启用，沿用提取、程序校验、独立Review及条件发布，不增加阶段。前稿内容只是未发布草稿，不因曾标记summarized就成为已确认事实。
+本节由13/11引入，14/12继续沿用；提取、程序校验、独立Review及条件发布不增加阶段。前稿内容只是未发布草稿，不因曾标记summarized就成为已确认事实。
 
 ### 内容回退与审核顺序
 
@@ -26,13 +50,15 @@
 
 局部object Review仅能证明该对象的问题范围，不能证明整组只缺统计。新v2最终候选仍有已知deferred内容或内容回退时，不启用冻结整稿的纯统计模式，保留原反馈并走既有内容／覆盖审核或待确认路径。完整稿确实只缺统计关联时继续定点补丁；不要求所有后续审核先完成才能修复早停对象，也不将局部draft_only草稿误判为完整最终稿。
 
-普通新质量链为0.20，plan／proof／stage复用sidecar结构继续0.19。旧请求、来源0.1、正式0.2和历史证明保持；来源、规则、控制或正文改变仍按原门禁处理。同一工作首次加最多三次重试共四次，耗尽和unknown不因本节重开。检查见[dev36验收](scenarios-and-acceptance.md#revision-completeness-acceptance)。
+dev36普通质量链为0.20，后续14/12为0.21；plan／proof／stage复用sidecar结构继续0.19。旧请求、来源0.1、正式0.2和历史证明保持；来源、规则、控制或正文改变仍按原门禁处理。同一工作首次加最多三次重试共四次，耗尽和unknown不因本节重开。检查见[dev36验收](scenarios-and-acceptance.md#revision-completeness-acceptance)。
 
 <a id="model-request-capacity"></a>
 
-## dev35后续：完整模型请求与资料容量分别控制
+## 完整模型请求与资料容量分别控制
 
-完整返工输入实测超过旧应用门槛，现有线上编码已充分共享；本次只将`model_calls.MAX_INPUT_BYTES`从256000调整为320000字节，按规则、原文、当前稿、实际反馈及编码说明构成的完整线上请求核验。超限仍在调用前阻塞，不截断材料或改变请求内容。字节数不等于token数；现有服务目录与运行观察支持这项工程调整，但不代替真实服务接收和业务验收。
+当前dev37的完整模型请求门槛为384000字节，保留必要原文、当前稿、真实反馈和现有编码；planning／读取包各256000及其他存储限额保持。应用字节预检、真实服务接收与业务通过分别取证。
+
+以下保留dev35后续的历史调整：完整返工输入实测超过旧应用门槛，现有线上编码已充分共享；当时只将`model_calls.MAX_INPUT_BYTES`从256000调整为320000字节，按规则、原文、当前稿、实际反馈及编码说明构成的完整线上请求核验。超限仍在调用前阻塞，不截断材料或改变请求内容。字节数不等于token数；现有服务目录与运行观察支持这项工程调整，但不代替真实服务接收和业务验收。
 
 `batching.MAX_BYTES`的原文planning及`portable.MAX_PACKAGE_BYTES`的读取包仍各为256000字节；来源与候选当前核心仍各1MiB，历史完整包4MiB、事务8MiB。证据／问题payload的独立192000字节限制保持。source0.1、formal0.2、quality0.18、review_material0.19、Skill12/10及旧请求字节不变；旧known-completed提取证明继续核其原256000字节请求合同，不以新门槛回填旧事实。
 
@@ -163,7 +189,7 @@ production将本次worker参数传到各实际调用，不向已有queue或账�
 
 原样最终候选真实Review退回后保留原意见。若需实质跨批修订而现有请求仍不能承载，后续返回`blocked_context`／`assembly_revision_required`及零新调用，不重复原样再审或刷新次数。正常可承载final、10/8草稿及答复续接仍按下文有限反馈返工。该安全回退不代表已经实现任意大规模跨批语义修订。
 
-来源及采集`0.1`、正式对象`0.2`保持；新13/11普通质量链为`0.20`，旧12/10为`0.18`、11/9为`0.15`、10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
+来源及采集`0.1`、正式对象`0.2`保持；新14/12普通质量链为`0.21`，旧13/11为`0.20`、12/10为`0.18`、11/9为`0.15`、10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。11/9继续引用`knowledge-context-v1`核来源、时间、范围和已提供关系，旧审核只证明其原版本。
 
@@ -248,7 +274,7 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 仅固定10/8的schema0.12或固定11/9的schema0.15、且路径／run一致的candidate，可使用最多 **4 MiB** 的完整存储包；剔除`revision_context`、`revision_revalidation`、`revision_resume`三类明确历史字段后的当前核心仍须不超过 **1 MiB**。该例外只承载可核验历史，不扩大正文或赋予发布权限；完整绑定及历史证明照常核验。
 
-该历史版本的其他受管Git文件最多1 MiB、来源输入1 MiB、完整模型请求256000字节、事务8 MiB；当前完整请求门槛按[dev35容量规范](#model-request-capacity)为320000，其余限额不变。不能把大正文移进历史字段、改路径／kind／Skill或只改版本号来获得例外；总量、核心大小和实际读写均检查，超限保留原记录并停止。
+该历史版本的其他受管Git文件最多1 MiB、来源输入1 MiB、完整模型请求256000字节、事务8 MiB；当前完整请求门槛按[容量规范](#model-request-capacity)为384000，其余限额不变。不能把大正文移进历史字段、改路径／kind／Skill或只改版本号来获得例外；总量、核心大小和实际读写均检查，超限保留原记录并停止。
 
 ## dev21：质量完整性与反馈接续（schema `0.12`）
 
@@ -276,13 +302,13 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 <a id="skill-quality-contract"></a>
 
-## M1 Skill 引用与知识质量契约（13/11为 `0.20`，旧12/10为 `0.18`）
+## M1 Skill 引用与知识质量契约（14/12为 `0.21`，旧13/11为 `0.20`）
 
-显式bundle启用`quality_contract="skill-quality-v1"`，新13/11使用0.20、旧12/10使用0.18、11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。新返工检查和v2正文锚见[dev36合同](#revision-completeness-repair)。
+显式bundle启用`quality_contract="skill-quality-v1"`，新14/12使用0.21、旧13/11使用0.20、12/10使用0.18、11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。新返工检查和v2正文锚见[dev36合同](#revision-completeness-repair)。
 
 ### Skill 引用、展开与运行绑定
 
-CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@13／review@11，历史extract@1—@12与review@1—@10原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
+CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@14／review@12，历史extract@1—@13与review@1—@11原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
 
 `skill_bundle` 顶层为 `schema_version="skill-bundle-v1"`、`quality_contract`、`skills`、`shared_policy` 和 `sha256`。`skills.extract`／`skills.review` 各保存 `ref`、`role`、`version`、`manifest`、`files`、`base_prompt`；每个内容快照包含 `path`、`content`、`sha256`、`bytes`。manifest 和完整依赖按注册摘要核验，bundle摘要覆盖除其自身 `sha256` 外的规范JSON；角色和共享规范必须一致。设计阶段的 `skill_binding` 在实际格式中由完整bundle与请求绑定共同承担，不另存同名字段。
 
@@ -296,7 +322,7 @@ extract@7 起的动态输出 Schema 按当前 targets 实际数量约束 `covera
 
 summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一记录提供多段不同精确正文，必须覆盖全部 ID，额外 ID 或重复 `(record_id,text)` 拒绝。`source_time` 接受明确 ISO 日期和中文年月日；中文月日只在实际来源引文中可唯一确定同一完整日期时成立，状态句也须有对应日期限定。无日期依据、年份歧义及冒充当前系统状态仍拒绝，不从当前时间或采集时间补年份。质量声明修复可构成实质返工，但须绑定真实拒收候选与实际审核，不能手改模型输出。
 
-`quality_context` 由 `prepare_quality(sources, source_views=None)` 确定性生成，顶层包含 `contract`、`policy_version="source-quality-v1"`、`statistics_policy="descriptive-v1"`、`sources`、`targets`、`statistics`、`statistic_definitions`、`system_facts` 和 `scope_note`。候选读回时按固定原文及实际片段重算，不能把模型自报清单当程序事实。共享范围描述避免逐条重复同一元数据，实际请求容量仍以展开后的完整字节判断。
+`quality_context` 由 `prepare_quality(sources, source_views=None, *, skill_bundle=None, policy_version=None)` 确定性生成，顶层包含 `contract`、按冻结合同选择的 `policy_version`（旧`source-quality-v1`／新`source-quality-v2`）、`statistics_policy="descriptive-v1"`、`sources`、`targets`、`statistics`、`statistic_definitions`、`system_facts` 和 `scope_note`。候选读回时按固定原文及实际片段重算，不能把模型自报清单当程序事实。共享范围描述避免逐条重复同一元数据，实际请求容量仍以展开后的完整字节判断。
 
 | 材料 | 至少保存什么 | 约束 |
 | --- | --- | --- |
@@ -458,7 +484,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增13/11普通质量0.20门禁，分解审核／stage复用证明继续0.19，旧12/10继续0.18、11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
+Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增14/12普通质量0.21门禁，分解审核／stage复用证明继续0.19，旧13/11继续0.20、12/10继续0.18、11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 
@@ -989,7 +1015,7 @@ Review 通过表示达到内容整理与发布要求，不等于独立事实核�
 
 读取范围显式指定一份来源和可选发布run；给定run时必须完整复验来源／采集回执、候选、独立Review、正式对象、清单及回执绑定，再只读取清单中的记录和主题正文。模型输入包含原文、原文行号及对应正式元数据／正文，不能扫描全库或加入其他run。原始引用仅采用来源ID／版本／行号，派生知识不成为新的独立证据。
 
-证据与完整问题payload各受192000字节上限，不截断；传输另受规则在内的320000字节应用完整请求上限；这不扩大证据、问题payload或读取包限额。调用前后核对HEAD、控制、工作区与正式字节，拒绝未提交篡改及版本变化。只读回答不写memory；返回耗时／可取得用量、选中来源及正式对象版本、证据和输入payload的SHA256与字节数，实际模型未知保留unknown。真实问答和通过结论仅存私有验收记录，不回写成用户来源。
+证据与完整问题payload各受192000字节上限，不截断；传输另受规则在内的384000字节应用完整请求上限；这不扩大证据、问题payload或读取包限额。调用前后核对HEAD、控制、工作区与正式字节，拒绝未提交篡改及版本变化。只读回答不写memory；返回耗时／可取得用量、选中来源及正式对象版本、证据和输入payload的SHA256与字节数，实际模型未知保留unknown。真实问答和通过结论仅存私有验收记录，不回写成用户来源。
 
 
 ### dev11选定输入范围的版本化审核契约

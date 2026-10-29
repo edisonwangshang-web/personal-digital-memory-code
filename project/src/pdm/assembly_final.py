@@ -150,7 +150,7 @@ def _material(git, plan, draft_runs, run_id, base_head, created_at, *, historica
     output = {"objects": list(raw_objects.values()), "wikis": list(raw_wikis.values())}
     fields = {}
     if bundle is not None:
-        qcontext = prepare_quality(sources, source_views=views)
+        qcontext = prepare_quality(sources, source_views=views, skill_bundle=bundle)
         output.update(quality=quality, reuse_refs=[])
         try:
             validate_quality_output(output, qcontext)

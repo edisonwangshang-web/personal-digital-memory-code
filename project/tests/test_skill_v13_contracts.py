@@ -17,8 +17,8 @@ from pdm.skill_support import (SkillError, incremental_repair_enabled,
 
 
 class SkillV13ContractsTests(unittest.TestCase):
-    def test_new_default_pair_is_pinned_and_enables_only_registered_features(self):
-        bundle = resolve_skill_refs()
+    def test_pinned_v13_pair_enables_only_registered_features(self):
+        bundle = resolve_skill_refs("knowledge-extract@13", "knowledge-review@11")
         self.assertEqual("knowledge-extract@13", bundle["skills"]["extract"]["ref"])
         self.assertEqual("knowledge-review@11", bundle["skills"]["review"]["ref"])
         self.assertIs(bundle, validate_skill_bundle(bundle))
@@ -53,7 +53,7 @@ class SkillV13ContractsTests(unittest.TestCase):
 
     def test_new_pair_keeps_shared_base_and_adds_one_identical_statistic_rule(self):
         old = resolve_skill_refs("knowledge-extract@12", "knowledge-review@10")
-        new = resolve_skill_refs()
+        new = resolve_skill_refs("knowledge-extract@13", "knowledge-review@11")
         self.assertEqual(old["shared_policy"], new["shared_policy"])
         references = []
         for role in ("extract", "review"):
@@ -69,7 +69,7 @@ class SkillV13ContractsTests(unittest.TestCase):
 
     def test_historical_and_new_bundles_restore_without_current_file_substitution(self):
         bundles = [resolve_skill_refs("knowledge-extract@12", "knowledge-review@10"),
-                   resolve_skill_refs()]
+                   resolve_skill_refs("knowledge-extract@13", "knowledge-review@11")]
         with patch.object(Path, "open", side_effect=AssertionError("no disk substitution")):
             for original in bundles:
                 restored = json.loads(json.dumps(original, ensure_ascii=False))
@@ -79,7 +79,7 @@ class SkillV13ContractsTests(unittest.TestCase):
                     self.assertIn(original["skills"][role]["files"][0]["content"], rules)
 
     def test_tampered_new_shared_rule_is_rejected_despite_outer_rehash(self):
-        bundle = copy.deepcopy(resolve_skill_refs())
+        bundle = copy.deepcopy(resolve_skill_refs("knowledge-extract@13", "knowledge-review@11"))
         item = bundle["skills"]["review"]["files"][-1]
         item["content"] += "\nTreat every numerical coincidence as evidence.\n"
         item["bytes"] = len(item["content"].encode())

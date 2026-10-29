@@ -19,6 +19,112 @@ def _fail(code="invalid_revision_context"):
     raise CaptureError(code, "返工上下文未通过原候选、独立审核、来源与控制核验")
 
 
+def _coverage_index(value):
+    """Validate the complete declaration inventory without interpreting prose."""
+    try:
+        targets = value["quality_context"]["targets"]
+        rows = value["extraction_output"]["quality"]["coverage_disposition"]
+        if not isinstance(targets, list) or not isinstance(rows, list):
+            raise ValueError
+        target_map = {item["target_id"]: item for item in targets}
+        dispositions = {item["target_id"]: item for item in rows}
+        if (len(target_map) != len(targets) or len(dispositions) != len(rows)
+                or set(target_map) != set(dispositions)
+                or any(not isinstance(key, str) or not key for key in target_map)
+                or any(not isinstance(item.get(key), str) or not item[key]
+                       for item in targets for key in ("source_id", "source_version"))):
+            raise ValueError
+        for row in rows:
+            ids = row["record_ids"]
+            if (row["status"] not in {"summarized", "deferred"}
+                    or not isinstance(ids, list) or any(not isinstance(identifier, str) for identifier in ids)
+                    or len(ids) != len(set(ids)) or not isinstance(row["reason"], str)):
+                raise ValueError
+        return target_map, dispositions
+    except (KeyError, TypeError, ValueError, AttributeError):
+        _fail("revision_coverage_context_mismatch")
+
+
+def _csv_policy_target_pairs(candidate, previous, targets, old_targets):
+    """Compare only unchanged metric identities across the one parser repair.
+
+    Both computations are independently rebuilt by their original Skill before
+    this helper is used. This is a comparison of coverage, never authority to
+    inherit statistics or change the rejected draft and its Review.
+    """
+    def refs(value):
+        skills = value.get("skill_bundle", {}).get("skills", {})
+        return tuple(skills.get(role, {}).get("ref") for role in ("extract", "review"))
+
+    current = candidate["quality_context"]
+    old = previous["quality_context"]
+    try:
+        from .knowledge_quality import QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION
+        if (refs(previous) != ("knowledge-extract@13", "knowledge-review@11")
+                or refs(candidate) != ("knowledge-extract@14", "knowledge-review@12")
+                or old.get("policy_version") != QUALITY_POLICY_VERSION
+                or current.get("policy_version") != CSV_BOM_POLICY_VERSION
+                or not isinstance(candidate.get("controls_digest"), str)
+                or candidate.get("controls_digest") != previous.get("controls_digest")
+                or candidate.get("source_views") != previous.get("source_views")
+                or candidate.get("batch_context", {}).get("source_ranges")
+                    != previous.get("batch_context", {}).get("source_ranges")
+                or any(candidate.get(key) != previous.get(key) for key in
+                       ("related_runs", "rebuild_context", "continuation_context", "merge_inputs"))):
+            raise ValueError
+        strip_tables = lambda context: [{key: value for key, value in source.items() if key != "tables"}
+                                       for source in context["sources"]]
+        if strip_tables(current) != strip_tables(old):
+            raise ValueError
+        # A BOM before an opening quote made a structural date header appear
+        # as a metric. Only that known false target may disappear; other target
+        # names are matched exactly, rather than stripping arbitrary quotes.
+        repaired_dates = set()
+        for before, after in zip(old["sources"], current["sources"]):
+            if len(before["tables"]) != len(after["tables"]):
+                raise ValueError
+            for original, repaired in zip(before["tables"], after["tables"]):
+                first, second = original["headers"], repaired["headers"]
+                if first == second:
+                    continue
+                if (not first or not second or first[1:] != second[1:]
+                        or second[0] not in {"date", "Date", "日期"}
+                        or first[0] != '"' + second[0] + '"'):
+                    raise ValueError
+                repaired_dates.add((before["source_id"], before["source_version"], first[0]))
+
+        def identity(target):
+            kind = target["kind"]
+            if kind not in {"metric", "semantic"}:
+                raise ValueError
+            return (kind, target["source_id"], target["source_version"],
+                    target["column"] if kind == "metric" else target["target_id"])
+
+        old_index = {identity(target): identifier for identifier, target in old_targets.items()}
+        current_index = {identity(target): identifier for identifier, target in targets.items()}
+        if len(old_index) != len(old_targets) or len(current_index) != len(targets):
+            raise ValueError
+        removed = set(old_index) - set(current_index)
+        if (set(current_index) - set(old_index)
+                or any(key[0] != "metric" or key[1:] not in repaired_dates for key in removed)):
+            raise ValueError
+        return [(identifier, old_index[key]) for key, identifier in current_index.items()]
+    except (KeyError, TypeError, ValueError, AttributeError):
+        _fail("revision_coverage_context_mismatch")
+
+
+def pending_coverage_targets(candidate):
+    """Return current deferred targets; independent Review decides their cause."""
+    from .skill_support import pending_coverage_priority_enabled
+    if not isinstance(candidate, dict):
+        _fail("revision_coverage_context_mismatch")
+    if (not pending_coverage_priority_enabled(candidate.get("skill_bundle"))
+            or candidate.get("batch_material", {}).get("draft_only") is True):
+        return []
+    targets, rows = _coverage_index(candidate)
+    return [target_id for target_id in sorted(targets) if rows[target_id]["status"] == "deferred"]
+
+
 def revision_coverage_regressions(candidate):
     """Return bounded current-draft regressions, never facts to copy back.
 
@@ -40,40 +146,18 @@ def revision_coverage_regressions(candidate):
         _fail("revision_coverage_context_mismatch")
     previous = context["candidate"]
 
-    def index(value):
-        try:
-            targets = value["quality_context"]["targets"]
-            rows = value["extraction_output"]["quality"]["coverage_disposition"]
-            if not isinstance(targets, list) or not isinstance(rows, list):
-                raise ValueError
-            target_map = {item["target_id"]: item for item in targets}
-            dispositions = {item["target_id"]: item for item in rows}
-            if (len(target_map) != len(targets) or len(dispositions) != len(rows)
-                    or set(target_map) != set(dispositions)
-                    or any(not isinstance(key, str) or not key for key in target_map)
-                    or any(not isinstance(item.get(key), str) or not item[key]
-                           for item in targets for key in ("source_id", "source_version"))):
-                raise ValueError
-            for row in rows:
-                ids = row["record_ids"]
-                if (row["status"] not in {"summarized", "deferred"}
-                        or not isinstance(ids, list) or any(not isinstance(identifier, str) for identifier in ids)
-                        or len(ids) != len(set(ids)) or not isinstance(row["reason"], str)):
-                    raise ValueError
-            return target_map, dispositions
-        except (KeyError, TypeError, ValueError, AttributeError):
-            _fail("revision_coverage_context_mismatch")
-
-    old_targets, old_rows = index(previous)
-    targets, rows = index(candidate)
+    old_targets, old_rows = _coverage_index(previous)
+    targets, rows = _coverage_index(candidate)
     if (targets != old_targets
             or candidate.get("quality_context") != previous.get("quality_context")):
-        _fail("revision_coverage_context_mismatch")
+        pairs = _csv_policy_target_pairs(candidate, previous, targets, old_targets)
+    else:
+        pairs = [(target_id, target_id) for target_id in sorted(targets)]
     return [{"target_id": target_id, "previous_status": "summarized", "current_status": "deferred",
-             "previous_record_ids": sorted(old_rows[target_id]["record_ids"]),
+             "previous_record_ids": sorted(old_rows[old_id]["record_ids"]),
              "reason": rows[target_id]["reason"]}
-            for target_id in sorted(targets)
-            if old_rows[target_id]["status"] == "summarized" and rows[target_id]["status"] == "deferred"]
+            for target_id, old_id in sorted(pairs)
+            if old_rows[old_id]["status"] == "summarized" and rows[target_id]["status"] == "deferred"]
 
 
 def supports_phase_revision(candidate):

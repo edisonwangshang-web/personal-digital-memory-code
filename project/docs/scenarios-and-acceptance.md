@@ -1,5 +1,22 @@
 # 场景与验收
 
+<a id="csv-revision-input-acceptance"></a>
+
+## dev37：CSV日期、完整返工与未完成内容
+
+使用虚构资料和模拟模型检查健康、事业、学习共通路径；本批人工结果、准确CI和获准真实复验分别记录，不预填通过。
+
+| 输入或故障 | 必须观察到的结果 |
+| --- | --- |
+| BOM加带引号的日期表头 | 新v2识别日期列，不产生伪日期指标；原文／物理行／quote保持，旧v1画像与绑定按原样重建 |
+| BOM／无BOM、正常／重复／非法日期、部分日 | 按原统计政策使用实际有效样本；合法表头引号由CSV parser处理，不任意剥引号或修改来源 |
+| 新完整请求介于旧320000和384000之间／超过384000 | 前者通过应用容量预检，后者预约前阻塞；完整原文、当前稿、实际反馈与规则不减，planning／读取包各256000保持 |
+| 最终稿原文可读但新目标均deferred | 相应coverage先于无关object审核，不能只补说明／字典就宣布内容完成；真实缺料仍可needs_confirmation，局部draft边界保持 |
+| 历史记录写“本次”，当前输入范围已变化 | 提取与Review准确限定原来源／历史期间／本次输入；精确复用不豁免语义修订，不猜全库资料范围 |
+| 旧13/11拒收稿续接新14/12 | 旧证明按v1核，当前清单按v2重建，旧统计不跨policy继承；同work与原次数保持，缺真实反馈或范围／控制不符拒绝 |
+
+字段见[dev37合同](data-conventions.md#csv-revision-input-repair)。工程通过、真实内容完成、发布与模型读取各自取证，任何一项不得替代M1全体验收。
+
 <a id="revision-completeness-acceptance"></a>
 
 ## dev36：返工覆盖、统计锚与修补分流
@@ -21,7 +38,7 @@
 
 字段见[返工完整性与统计修补](data-conventions.md#revision-completeness-repair)。这些反例通过不代表真实资料已加工、已发布或M1整体验收通过。
 
-本轮本地新增34项纯人工测试通过（Skill6、coverage优先9、统计就绪11、审核正文锚6、完整流程2）。完整流程在临时真实Git仓库以mock模型核纯统计补丁及混合分流，稳定源重跑2项28.793秒，当前／历史发布核验与限定读取通过；原counter／unknown保护的2项稳定源回归另通过（7.817秒）。旧资产hash和冻结请求渲染保持。准确CI仍待最终提交后核对；未调用真实资料或模型、未改变私库和两个master，不据此重开原耗尽工作。
+dev36本地新增34项纯人工测试通过（Skill6、coverage优先9、统计就绪11、审核正文锚6、完整流程2）。完整流程在临时真实Git仓库以mock模型核纯统计补丁及混合分流，稳定源重跑2项28.793秒，当前／历史发布核验与限定读取通过；原counter／unknown保护的2项稳定源回归另通过（7.817秒）。旧资产hash和冻结请求渲染保持。dev36准确提交5d557e8的CI40848773015八任务已另核通过；上述人工检查不含真实调用，不据此重开原耗尽工作。
 
 <a id="review-material-recovery-acceptance"></a>
 
@@ -237,7 +254,7 @@ dev35后续增加两项人工检查：完整线上请求超过旧256000但不超
 | unknown／非completed／Review已启动、换pool／auth／operation或规则变化 | 不恢复、不新extract，不重放未知；专用证明不能降级成旧0.9入口或普通新任务 |
 | 新plan准备与validation_head | 先固定新plan，再生成证明；HEAD、账本或缓存变化后旧证明不能用；原stage与guard必须同一提交，缺guard／伪造摘要／不同父边拒绝 |
 | 完整候选含合法历史超过1 MiB | 只限固定10/8、schema0.12及正确stage路径；当前核心≤1 MiB、总包≤4 MiB可接受，其他文件仍≤1 MiB；把正文搬进历史／错角色／错run／总量或核心超限均拒绝 |
-| 存储下界与完整Review视图 | 已知下界超限时不预约／不调用；实际输出仍再核。恢复Review只去重复程序provenance，完整反馈、对象、统计、目标和检查项不减，原known-completed提取证明仍按256000合同；后继新Review按现行320000字节门槛及分解规则阻断／推进 |
+| 存储下界与完整Review视图 | 已知下界超限时不预约／不调用；实际输出仍再核。恢复Review只去重复程序provenance，完整反馈、对象、统计、目标和检查项不减，原known-completed提取证明仍按256000合同；后继新Review按现行384000字节门槛及分解规则阻断／推进 |
 | 新stage0.12与恢复guard0.13 | 原子事务恢复后两者均完整；实际旧writer遇不支持的0.13先拒写，不能仅mock版本或删除guard放行 |
 | operator真实完整group由新10/8队列采用 | exact plan／Skill／source／proof核验后持久published；已有final_run不得换人，原失败queue及counter不改；重复采用零提交／零模型／零账本写 |
 | 错plan、错bundle、错候选与历史9/7采用 | 新合同拒写错误绑定；旧9/7仍仅返回effective published，其raw队列状态不被追改 |
@@ -309,7 +326,7 @@ dev35后续增加两项人工检查：完整线上请求超过旧256000但不超
 
 | 场景 | 必须实际观察的结果 |
 | --- | --- |
-| 新旧策略 | 新queue默认auto，旧无strategy queue幂等读回不换契约；小包仍1extract＋1Review，强制decomposed-v1及实际超320000字节Review走分解；planning／读取包仍各256000，不借完整请求门槛扩大资料或读取范围 |
+| 新旧策略 | 新queue默认auto，旧无strategy queue幂等读回不换契约；小包仍1extract＋1Review，强制decomposed-v1及实际超384000字节Review走分解；planning／读取包仍各256000，不借完整请求门槛扩大资料或读取范围 |
 | 完整object／Wiki | 每份最终body完整进入object审核；Wiki与其全部record及精确版本同审；遗漏成员、错version或后改正文不能借原证书发布 |
 | 覆盖与整体 | coverage涵盖全部原始batch／draft范围与最终集合，global实际读完整最终正文、关系图和前序证书；缺、删、交换节点或拼draft实际拒绝发布 |
 | 恢复与未知 | 中断后重开已完成unit零调用，固定候选不重提取；安全未外发失败总尝试不超过4，跨queue／日期不清零；已started未知不重发，未完成proof不发布 |

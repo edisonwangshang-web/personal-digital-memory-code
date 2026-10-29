@@ -2,9 +2,18 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev36`在原链路补返工内容回退、统计关联口径和纯统计修补分流，dev35的来源级审核材料及受限stage续接保持；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移旧数据。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料或重开耗尽工作；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev37`在原链路修CSV日期识别、完整返工容量、最终稿未完成内容的审核顺序及范围说明，dev35／dev36的来源级审核、返工与统计修补能力保持；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移旧数据。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料或重开耗尽工作；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
 
-新默认为`knowledge-extract@13`／`knowledge-review@11`、普通质量链0.20，plan／proof／stage复用sidecar继续0.19；旧12/10继续0.18、11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
+新默认为`knowledge-extract@14`／`knowledge-review@12`、普通质量链0.21，plan／proof／stage复用sidecar继续0.19；旧13/11继续0.20、12/10继续0.18、11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
+
+## dev37：CSV解析与完整返工
+
+1. `prepare_quality`按冻结Skill选择source-quality-v1／v2；只有新14/12的v2在CSV reader前去除解析文本绝对开头的BOM，保留原文、物理行、摘要与引用。无bundle及旧pair保持v1，历史读回按原policy重算。
+2. 沿原紧凑JSON与无损共享编码渲染完整请求，门槛384000；planning与读取包仍各256000。当前稿、实际审核意见、必要原文与规则全部计入，超限先停，不截断或改写已发生请求。
+3. 新最终稿有deferred时，先在既有完整来源coverage核其内容，再审核其余对象及global。区分可整理但未完成与真实证据缺口；记录正文说明当前输入与历史来源范围，不能只复用旧的“本次”表述。
+4. 从旧13/11候选续到新14/12时，旧候选／审核仍按v1核验，当前候选按v2重新计算；旧统计不跨policy继承，工作身份、实际反馈与有限次数保持。新候选重新完整独立审核，不能采用旧proof发布。
+
+字段见[dev37合同](data-conventions.md#csv-revision-input-repair)，人工反例与真实复验分别取证。
 
 ## dev36：返工完整性与统计修补
 
@@ -129,7 +138,7 @@ dev30以虚构返回核缺声明、不合规声明和有效输入，并检查私
 3. 核原 pool／授权／operation、completed invocation与payload、账本完整字节、四份缓存独立摘要、原 source／related／controls／Skill／规则和失败历史。冻结后出现 Git、账本或缓存变化时停止。
 4. 预约前先核已经确定的当前核心与历史材料存储下界；这不预测未知模型输出，实际落盘仍完整核验。使用当前 validator 校验原始结构化返回及全部质量义务，分别记录原提取版本与当前校验版本。只为合格候选承载完整历史，不更改原 JSON；完整包／当前核心分别核[4 MiB／1 MiB](data-conventions.md#candidate-storage-limits)，其余限额保持。
 5. 将 schema0.12 stage 与 schema0.13恢复门禁放在同一原子事务。原失败、预约和计数不改；不能先落新候选再补兼容门禁。
-6. 在原调用身份下执行真正独立 Review。旧无marker恢复请求继续去掉candidate内四键重复历史／程序provenance、保留根处完整语义反馈的原视图；新生成并带`current-draft-v1`的恢复候选按当前稿合同取用。当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；原known-completed提取证明仍核冻结的256000字节合同；后继新Review按现行320000字节门槛，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
+6. 在原调用身份下执行真正独立 Review。旧无marker恢复请求继续去掉candidate内四键重复历史／程序provenance、保留根处完整语义反馈的原视图；新生成并带`current-draft-v1`的恢复候选按当前稿合同取用。当前对象／统计／目标和required_checks保持，完整历史及原始payload／response在私库Git中受guard绑定，库外缓存按独立摘要核验；原known-completed提取证明仍核冻结的256000字节合同；后继新Review按现行384000字节门槛，超限使用既有分解审核。恢复成功、结构校验或本地缓存核验都不能代替 Review 通过。
 7. 按目标 plan 发布完整合格 group，再由新10/8生产队列核 marker、完整证明、相同 plan／bundle与已固定候选，CAS持久采用发布。重复采用不调用模型、不写提交，也不把旧失败counter改成passed。尚无真实group则不采用。
 8. 私库推送、远程完整恢复与模型读取各核实际提交和证据；本节流程存在不等于已取得真实通过结果。
 
@@ -219,7 +228,7 @@ extract@9的原始输出显式携带 `reuse_refs`。每项为 `{path, content_ve
 
 新提取的生成 Schema 按实际 `targets` 数量固定 `coverage_disposition` 的 `minItems`／`maxItems`，包括空清单和超过 256 项的情况；不额外增加来源上限。后置去重、正文实质、数字／来源／时间和独立审核继续执行；数组长度齐全不等于语义完成。有界标识枚举减少长 ID 抄写错误，模型返回后仍完整核验，不自动修正输出。
 
-当前 v3 传输按列名与全部行值表达相同字段对象数组，先还原列式结构，再还原字段字典与共享值；不改变原 JSON、来源身份、引用、规则或业务 schema。旧 v2／v1 请求按其引用精确重建真实字节。保留键转义，限制深度、节点和展开大小；完整请求超过 320000 字节时停止；原文planning／读取包仍各256000，见[容量规范](data-conventions.md#model-request-capacity)。新分解计划在首个 Review 前预检全部静态单元，global 在真实前序证书完成后核实际容量。
+当前 v3 传输按列名与全部行值表达相同字段对象数组，先还原列式结构，再还原字段字典与共享值；不改变原 JSON、来源身份、引用、规则或业务 schema。旧 v2／v1 请求按其引用精确重建真实字节。保留键转义，限制深度、节点和展开大小；完整请求超过 384000 字节时停止；原文planning／读取包仍各256000，见[容量规范](data-conventions.md#model-request-capacity)。新分解计划在首个 Review 前预检全部静态单元，global 在真实前序证书完成后核实际容量。
 
 ### 自动领域策略
 

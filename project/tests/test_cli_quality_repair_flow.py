@@ -141,8 +141,8 @@ class CliQualityRepairFlowTests(unittest.TestCase):
             old_review = first["last_result"]["review_path"]
             frozen = {path: (self.repo / path).read_bytes() for path in (old_path, old_review)}
             original = _load(frozen[old_path], "candidate")
-            self.assertEqual(original["skill_bundle"]["skills"]["extract"]["ref"], "knowledge-extract@13")
-            self.assertEqual(original["skill_bundle"]["skills"]["review"]["ref"], "knowledge-review@11")
+            self.assertEqual(original["skill_bundle"]["skills"]["extract"]["ref"], "knowledge-extract@14")
+            self.assertEqual(original["skill_bundle"]["skills"]["review"]["ref"], "knowledge-review@12")
             second = self.invoke(run)
             self.assertEqual(second["status"], "ready", second)
             candidate, _, _ = _read_reviewed(PipelineGit(self.repo), second["final_run"])

@@ -143,13 +143,15 @@ def _prioritize_revision_coverage(candidate, payload, units):
     independent coverage Review can still distinguish missing facts from work
     left undone, before spending calls on otherwise unaffected old objects.
     """
-    from .revision_context import revision_coverage_regressions
+    from .revision_context import pending_coverage_targets, revision_coverage_regressions
     regressions = revision_coverage_regressions(candidate)
-    if not regressions:
+    pending = pending_coverage_targets(candidate)
+    target_ids = {item["target_id"] for item in regressions} | set(pending)
+    if not target_ids:
         return units
     targets = {target["target_id"]: target for target in candidate["quality_context"]["targets"]}
     identities = {target_id: (targets[target_id]["source_id"], targets[target_id]["source_version"])
-                  for target_id in (item["target_id"] for item in regressions)}
+                  for target_id in target_ids}
     indexed = {fragment["fragment_id"]: (fragment["source_id"], fragment["source_version"])
                for fragment in payload["batch_context"]["source_ranges"]}
     priorities = []

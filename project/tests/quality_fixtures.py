@@ -39,6 +39,7 @@ def passed_review(required_checks, skill_bundle=None):
             and (skill_bundle["skills"]["extract"]["ref"], skill_bundle["skills"]["review"]["ref"])
                 in {("knowledge-extract@11", "knowledge-review@9"),
                     ("knowledge-extract@12", "knowledge-review@10"),
-                    ("knowledge-extract@13", "knowledge-review@11")}):
+                    ("knowledge-extract@13", "knowledge-review@11"),
+                    ("knowledge-extract@14", "knowledge-review@12")}):
         result["repair_scope"] = {"kind": "none", "missing_bindings": []}
     return result
