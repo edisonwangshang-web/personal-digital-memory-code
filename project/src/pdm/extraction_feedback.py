@@ -185,13 +185,21 @@ def prepare_feedback(git, failed_attempt, model_call):
     return ref
 
 
-def _model_view(diagnostic, run):
+def _model_view(diagnostic, run, *, complete=False):
     output = (diagnostic["validated_output"] if diagnostic.get("validation_target") == "validated_output"
               else diagnostic["response"]["output"])
     if not isinstance(output, dict):
         output = {}
     draft = {key: deepcopy(output[key]) for key in ("objects", "wiki", "wikis", "reuse_refs") if key in output}
     error = deepcopy(diagnostic["validation_error"])
+    if complete:
+        # A local validation error does not erase the rest of the latest draft.
+        # Its complete quality decisions remain work to repair, not certified
+        # facts; the actual independent Review is kept in revision_context.
+        if "quality" in output:
+            draft["quality"] = deepcopy(output["quality"])
+        return {"contract": CONTRACT, "draft_contract": "current-draft-complete-quality-v2",
+                "source_run_id": run, "draft": draft, "validation_error": error}
     details = error.get("details") or {}
     path = details.get("field_path", "") if isinstance(details, dict) else ""
     code = error.get("code", "")
@@ -218,14 +226,83 @@ def _model_view(diagnostic, run):
             "validation_error": error}
 
 
+def _completed_predecessor_payload(git, ref, payload, versions, context):
+    """Reconstruct only a completed 14/12 request for its 15/13 successor.
+
+    The existing fixed revision parent supplies the original batch identity;
+    the failed request's fixed reservation supplies its control HEAD. Nothing
+    is removed from the old scope. All three original request digests must
+    still match before this view can be used by a new extraction.
+    """
+    from .model_calls import request_binding
+    from .pipeline import _candidate_binding, _load, _run_path, _stage_path
+    from .skill_support import complete_feedback_enabled, resolve_skill_refs
+
+    try:
+        if (not complete_feedback_enabled(payload.get("skill_bundle"))
+                or payload.get("skill_bundle") != resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")
+                or set(versions) != set(context["versions"])
+                or any(versions[key] != context["versions"][key] for key in versions
+                       if key not in {"program_commit", "program_sha256"})
+                or payload.get("rules_version") != context["versions"]["rules_version"]
+                or payload.get("processing_mode") != "incremental"
+                or payload.get("output_contract") != "batch-v1"
+                or payload.get("quality_context", {}).get("policy_version") != "source-quality-v2"):
+            _fail("extraction_feedback_scope_changed")
+        revision = payload.get("revision_context")
+        parent_run = revision.get("source_run_id") if isinstance(revision, dict) else None
+        if not isinstance(parent_run, str) or _RUN.fullmatch(parent_run) is None:
+            _fail("extraction_feedback_scope_changed")
+        parent = _load(_read_snapshot(git, revision.get("stage"), _stage_path(parent_run)), "candidate")
+        old_bundle = resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")
+        current_batch, old_batch = payload.get("batch_context"), parent.get("batch_context")
+        if (parent.get("run_id") != parent_run or parent.get("binding") != _candidate_binding(parent)
+                or parent.get("binding") != revision.get("candidate_binding")
+                or parent.get("skill_bundle") != old_bundle
+                or parent.get("versions") != context["versions"]
+                or parent.get("quality_context") != payload.get("quality_context")
+                or parent.get("source_views") != payload.get("sources")
+                or parent.get("controls_digest") != payload.get("controls", {}).get("digest")
+                or not isinstance(current_batch, dict) or not isinstance(old_batch, dict)
+                or set(current_batch) != set(old_batch)
+                or any(current_batch[key] != old_batch[key] for key in current_batch
+                       if key not in {"plan_id", "batch_id"})):
+            _fail("extraction_feedback_scope_changed")
+        engine = _load(_read_snapshot(git, ref["engine"], _run_path(ref["source_run_id"], "engine")),
+                       "engine_provenance")
+        if (engine.get("versions") != context["versions"]
+                or not isinstance(payload.get("controls"), dict)
+                or "head" not in payload["controls"]):
+            _fail("extraction_feedback_scope_changed")
+        original = deepcopy(payload)
+        original.pop("extraction_feedback", None)
+        original["skill_bundle"] = old_bundle
+        original["batch_context"] = deepcopy(old_batch)
+        # Processing replaces the pre-reservation control HEAD immediately
+        # before launch. The actual audited request uses the atomic started /
+        # engine commit itself, whose bytes and ancestry were checked above.
+        original["controls"]["head"] = ref["started"]["commit_sha"]
+        if (context["scope_sha256"] != _scope(original)
+                or context["payload_sha256"] != hashlib.sha256(_raw(original)).hexdigest()
+                or context["request_binding"] != request_binding("extract", original)):
+            _fail("extraction_feedback_scope_changed")
+        return original
+    except CaptureError:
+        raise
+    except (KeyError, TypeError, ValueError, AttributeError):
+        _fail("extraction_feedback_scope_changed")
+
+
 def load_feedback(git, ref, payload, versions):
     """Recheck fixed Git feedback and current complete scope, without a ledger."""
     if not enabled(payload.get("skill_bundle")):
         _fail("extraction_feedback_contract_required")
     _, diagnostic, context = _checked_failure(git, ref)
     if context["versions"] != versions or context["scope_sha256"] != _scope(payload):
-        _fail("extraction_feedback_scope_changed")
-    return _model_view(diagnostic, ref["source_run_id"])
+        _completed_predecessor_payload(git, ref, payload, versions, context)
+    from .skill_support import complete_feedback_enabled
+    return _model_view(diagnostic, ref["source_run_id"],
+                       complete=complete_feedback_enabled(payload.get("skill_bundle")))
 
 
 def authority_refs(git, ref):

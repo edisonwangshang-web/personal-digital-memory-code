@@ -13,6 +13,7 @@ from pdm.knowledge_quality import resolve_statistic
 from pdm.pipeline import _hash, _read_reviewed, verify_publication
 from pdm.production import prepare_production, run_production
 from pdm.transaction import PipelineGit
+from pdm.skill_support import resolve_skill_refs
 from quality_fixtures import add_quality, passed_review
 
 
@@ -29,7 +30,8 @@ class StatisticRepairPipelineTests(unittest.TestCase):
         self.path = capture(self.repo, {"source_key": "artificial:twenty-six-bindings", "source_type": "note",
                             "acquisition_status": "full_text", "body": body})["path"]
         self.paths = [self.path]
-        prepare_production(self.repo, "statistics", self.paths, use_default_skills=True)
+        prepare_production(self.repo, "statistics", self.paths,
+                           skill_bundle=resolve_skill_refs("knowledge-extract@14", "knowledge-review@12"))
 
     def bindings(self, context):
         return [{"stat_id": stat["stat_id"], "record_id": "artificial-period",

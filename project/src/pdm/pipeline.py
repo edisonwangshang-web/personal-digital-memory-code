@@ -373,7 +373,8 @@ def _reuse_refs_enabled(skill_bundle):
             (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
             (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
             (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
-            (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12"))))
+            (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12")),
+            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13"))))
 
 
 def _feedback_quality_enabled(skill_bundle):
@@ -384,7 +385,8 @@ def _feedback_quality_enabled(skill_bundle):
             (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
             (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
             (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
-            (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12"))))
+            (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12")),
+            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13"))))
 
 
 def _processing_header(skill_bundle, fallback):
@@ -900,15 +902,26 @@ def _assert_substantive_revision(candidate):
         _error("revision_unchanged")
 
 
-def _revision_attempt_path(context, timeout_retry_ref=None):
+def _revision_attempt_path(context, timeout_retry_ref=None, extraction_feedback_ref=None):
     # Stable across new code/rules/queue names: an unknown launch cannot gain a
     # fresh identity by changing extraction material or starting another run.
-    identity = context if timeout_retry_ref is None else {"context": context, "timeout_retry_ref": timeout_retry_ref}
+    identity = context
+    if timeout_retry_ref is not None or extraction_feedback_ref is not None:
+        identity = {"context": context}
+        if timeout_retry_ref is not None:
+            identity["timeout_retry_ref"] = timeout_retry_ref
+        if extraction_feedback_ref is not None:
+            identity["extraction_feedback_ref"] = extraction_feedback_ref
     return "memory/runs/processes/revision-attempts/" + _hash(identity) + ".md"
 
 
-def _existing_revision_attempt(git, context, source_paths, related_runs):
-    path = _revision_attempt_path(context)
+def _revision_feedback_identity(bundle, ref):
+    from .skill_support import complete_feedback_enabled
+    return ref if complete_feedback_enabled(bundle) else None
+
+
+def _existing_revision_attempt(git, context, source_paths, related_runs, extraction_feedback_ref=None):
+    path = _revision_attempt_path(context, extraction_feedback_ref=extraction_feedback_ref)
     if not git.path(path).exists():
         if _last_commit(git, git.head(), path):
             _error("revision_attempt_deleted")
@@ -1390,6 +1403,7 @@ def _review_payload(candidate, payload):
             request.pop("quality_repair_context", None)
             request.pop("extraction_feedback", None)
             for key in ("quality_repair_context", "raw_extraction_output", "reuse_statistic_inheritance",
+                        "statistic_claims_materialization",
                         "extraction_feedback_ref", "stage_reuse_ref", "stage_reuse_started_commit"):
                 request["candidate"].pop(key, None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
@@ -1767,7 +1781,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             assert_publishable(git, [revision_from_run])
             revision_context = build_revision_context(git, revision_from_run, source_paths=source_paths, related_runs=related_runs)
             if _resume_unstarted is None and _revalidate_completed is None and timeout_retry_ref is None:
-                existing_revision = _existing_revision_attempt(git, revision_context, source_paths, related_runs)
+                existing_revision = _existing_revision_attempt(git, revision_context, source_paths, related_runs,
+                    _revision_feedback_identity(skill_bundle, extraction_feedback_ref))
                 if existing_revision is not None:
                     return existing_revision
             elif _resume_unstarted is not None and _revalidate_completed is None:
@@ -1969,7 +1984,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 if revision_context is not None:
                     pointer = {"run_id": run_id, "revision_context_sha256": _hash(revision_context),
                                "source_paths": source_paths, "related_runs": related_runs, "processing_key": key}
-                    started_files[_revision_attempt_path(revision_context, timeout_retry_ref)] = _document("revision_attempt", pointer,
+                    started_files[_revision_attempt_path(revision_context, timeout_retry_ref,
+                        _revision_feedback_identity(skill_bundle, extraction_feedback_ref))] = _document("revision_attempt", pointer,
                         _processing_header(skill_bundle, REVISION_SCHEMA_VERSION))
                 head = git.write_files(started_files, head, "process: reserve immutable run before model calls")
             if timeout_resume or stage_reuse_resume:
@@ -2021,7 +2037,16 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                     context_fields["quality_context"], sources, source_views, revision_context["candidate"]["extraction_output"],
                     frozen_objects=revision_context["candidate"]["objects"], controls_digest=controls["digest"])
             else:
-                from .skill_support import incremental_repair_enabled
+                from .skill_support import compact_statistics_enabled, incremental_repair_enabled
+                if compact_statistics_enabled(skill_bundle):
+                    if not isinstance(materialized_output, dict):
+                        _error("invalid_model_output")
+                    from .statistic_materialization import materialize_statistic_claims
+                    context_fields["raw_extraction_output"] = copy.deepcopy(response["output"])
+                    materialized_output, marker = materialize_statistic_claims(
+                        response["output"], context_fields["quality_context"], sources, source_views,
+                        reused_objects=_reuse_objects(materialized_output.get("reuse_refs"), related, sources))
+                    context_fields["statistic_claims_materialization"] = marker
                 if incremental_repair_enabled(skill_bundle) and isinstance(materialized_output, dict):
                     from .reuse_quality import materialize_reuse_statistic_claims
                     materialized_output, inherited = materialize_reuse_statistic_claims(
@@ -2359,6 +2384,10 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     repair_fields = {"quality_repair_context", "raw_extraction_output"}
     repair_mode = "quality_repair_context" in candidate
     inheritance_mode = "reuse_statistic_inheritance" in candidate
+    materialization_mode = "statistic_claims_materialization" in candidate
+    from .skill_support import compact_statistics_enabled
+    if materialization_mode != (compact_statistics_enabled(candidate.get("skill_bundle")) and not repair_mode):
+        _error("invalid_statistic_materialization")
     stage_reuse_material = None
     if candidate.get("stage_reuse_ref") is not None:
         if (not incremental or "batch_context" not in candidate
@@ -2366,23 +2395,39 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
                 or candidate.get("merge_inputs") or candidate.get("execution_context") is not None
                 or any(key in candidate for key in ("rebuild_context", "continuation_context", "revision_context",
                     "revision_resume", "revision_revalidation", "timeout_retry_ref", "extraction_reused_from",
-                    "extraction_feedback_ref", "raw_extraction_output", "quality_repair_context"))):
+                    "extraction_feedback_ref", "quality_repair_context"))
+                or "raw_extraction_output" in candidate and not materialization_mode):
             _error("invalid_stage_reuse")
         stage_reuse_material = _stage_reuse_material(git, candidate)
-    if "raw_extraction_output" in candidate and not (repair_mode or inheritance_mode):
+    if "raw_extraction_output" in candidate and not (repair_mode or inheritance_mode or materialization_mode):
         _error("invalid_quality_repair")
     if repair_mode and (not repair_fields <= candidate.keys() or "revision_context" not in candidate
                         or "extraction_reused_from" in candidate or "revision_resume" in candidate
                         or "revision_revalidation" in candidate):
         _error("invalid_quality_repair")
+    if materialization_mode and "raw_extraction_output" not in candidate:
+        _error("invalid_statistic_materialization")
+    raw_output = (stage_reuse_material["response"]["output"] if stage_reuse_material is not None else
+                  candidate["raw_extraction_output"] if repair_mode or inheritance_mode or materialization_mode
+                  else candidate["extraction_output"])
+    intermediate_output = raw_output
+    if materialization_mode:
+        if (not isinstance(raw_output, dict) or "raw_extraction_output" not in candidate
+                or raw_output != candidate["raw_extraction_output"]):
+            _error("invalid_statistic_materialization")
+        from .statistic_materialization import materialize_statistic_claims
+        intermediate_output, marker = materialize_statistic_claims(
+            raw_output, candidate["quality_context"], sources, candidate.get("source_views"),
+            reused_objects=_reuse_objects(raw_output.get("reuse_refs"), related, sources))
+        if marker != candidate["statistic_claims_materialization"]:
+            _error("statistic_materialization_changed")
     if inheritance_mode:
         from .skill_support import incremental_repair_enabled
         if (repair_mode or "raw_extraction_output" not in candidate and stage_reuse_material is None
                 or not incremental_repair_enabled(candidate.get("skill_bundle"))):
             _error("invalid_reuse_inheritance")
         from .reuse_quality import materialize_reuse_statistic_claims
-        raw = (stage_reuse_material["response"]["output"] if stage_reuse_material is not None
-               else candidate["raw_extraction_output"])
+        raw = intermediate_output
         if not isinstance(raw, dict):
             _error("invalid_reuse_inheritance")
         rebuilt, inherited = materialize_reuse_statistic_claims(
@@ -2392,9 +2437,9 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         if (not inherited["claims"] or inherited != candidate["reuse_statistic_inheritance"]
                 or rebuilt != candidate["extraction_output"]):
             _error("reuse_inheritance_changed")
-    raw_output = (stage_reuse_material["response"]["output"] if stage_reuse_material is not None else
-                  candidate["raw_extraction_output"] if repair_mode or inheritance_mode else candidate["extraction_output"])
-    if (stage_reuse_material is not None and not inheritance_mode
+    elif materialization_mode and intermediate_output != candidate["extraction_output"]:
+        _error("statistic_materialization_changed")
+    if (stage_reuse_material is not None and not inheritance_mode and not materialization_mode
             and raw_output != candidate["extraction_output"]):
         _error("stage_reuse_changed")
     extraction = _call_metadata({**candidate["extraction"], "output": raw_output})
@@ -2422,7 +2467,8 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         verify_revision_context(git, candidate["revision_context"], source_paths=[source["path"] for source in sources],
             related_runs=candidate["related_runs"], at_commit=candidate["base_head"], historical=historical,
             include_snapshots=False)
-        pointer_path = _revision_attempt_path(candidate["revision_context"], candidate.get("timeout_retry_ref"))
+        pointer_path = _revision_attempt_path(candidate["revision_context"], candidate.get("timeout_retry_ref"),
+            _revision_feedback_identity(candidate.get("skill_bundle"), candidate.get("extraction_feedback_ref")))
         pointer = _load(_committed(git, pointer_path), "revision_attempt",
             _processing_header(candidate.get("skill_bundle"), REVISION_SCHEMA_VERSION))
         if (pointer != {"run_id": run_id, "revision_context_sha256": _hash(candidate["revision_context"]),
@@ -2637,7 +2683,8 @@ def _computation_snapshots(git, candidate, visited=()):
             entries.extend(verify_decomposed_review(git, candidate, review, _candidate_payload(git, candidate, sources), sources, historical=True))
     if "revision_context" in candidate:
         from .revision_context import verify_revision_context
-        path = _revision_attempt_path(candidate["revision_context"], candidate.get("timeout_retry_ref"))
+        path = _revision_attempt_path(candidate["revision_context"], candidate.get("timeout_retry_ref"),
+            _revision_feedback_identity(candidate.get("skill_bundle"), candidate.get("extraction_feedback_ref")))
         pointer_commit = _last_commit(git, git.head(), path)
         entries.append({"commit_sha": pointer_commit, "path": path, "sha256": _hash(git.read(pointer_commit, path))})
         entries.extend(verify_revision_context(git, candidate["revision_context"],

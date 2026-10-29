@@ -100,6 +100,10 @@ _NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)\Z")
 _LOCATOR = re.compile(r"L([1-9]\d*)-L([1-9]\d*)\Z")
 _TEMPORAL_WORDS = re.compile(r"当前|目前|尚未|已经|截至|现已|未导入|未提交|\bcurrently\b|\balready\b|\bnot yet\b", re.I)
 _SOURCE_TIME_WORDS = re.compile(r"当时|导出时|导出说明|来源时间|原文.*时|截至|as of|at (?:export|source) time", re.I)
+_HISTORICAL_SOURCE_EVENT = re.compile(r"(?:该次|当次|那次|上次|前次)(?:导出|采集|读取)")
+_NONHISTORICAL_EVENT_WORDS = re.compile(
+    r"当前|目前|现在|现已|正在|此刻|将|会|预计|预期|即将|未来|明天|计划|打算|准备|"
+    r"(?<![A-Za-z])(?:now|currently|will|tomorrow|future)(?![A-Za-z])", re.I)
 _UNKNOWN_TIME_WORDS = re.compile(r"未知|不明|无法确定|未核实|未确认|unknown|unverified", re.I)
 _EXPLICIT_DATE = re.compile(r"(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])")
 _CHINESE_DATE = re.compile(
@@ -855,8 +859,17 @@ def validate_quality_output(output, context):
                 field = "source_refs"
                 refs = _quality_refs(claim["source_refs"], context)
                 field = "statement"
-                if not (_SOURCE_TIME_WORDS.search(claim["statement"])
-                        or _source_date_qualified(claim["statement"], refs)):
+                qualified = (_SOURCE_TIME_WORDS.search(claim["statement"])
+                             or _source_date_qualified(claim["statement"], refs))
+                if (not qualified and context.get("policy_version") == CSV_BOM_POLICY_VERSION
+                        and _HISTORICAL_SOURCE_EVENT.search(claim["statement"])
+                        and not _NONHISTORICAL_EVENT_WORDS.search(claim["statement"])):
+                    # A definite past acquisition/export is a source-time
+                    # qualifier, not a claim about the current repository.
+                    # The new branch does not borrow a date from another
+                    # paragraph or change any legacy accepted statement.
+                    qualified = True
+                if not qualified:
                     _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
                 field = "source_refs"
                 _record_refs_cover(record, refs)
@@ -1014,7 +1027,7 @@ def build_review_checks(candidate, context, scope=None):
     review = roles.get("review") if isinstance(roles, dict) else None
     context_readability = isinstance(review, dict) and review.get("ref") in {"knowledge-review@6", "knowledge-review@7"}
     completion_policy = isinstance(review, dict) and review.get("ref") in {
-        "knowledge-review@10", "knowledge-review@11", "knowledge-review@12"}
+        "knowledge-review@10", "knowledge-review@11", "knowledge-review@12", "knowledge-review@13"}
     from .skill_support import revision_coverage_enabled, statistic_evidence_enabled
     revision_policy = revision_coverage_enabled(bundle)
     statistic_policy = statistic_evidence_enabled(bundle)

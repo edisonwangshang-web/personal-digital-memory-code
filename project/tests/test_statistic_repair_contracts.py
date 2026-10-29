@@ -16,9 +16,10 @@ from test_knowledge_quality import source
 
 def request(bundle=None):
     item = source("日期,steps\n2025-01-01,1\n2025-01-02,2\n", "statistic-contract")
-    return {"quality_contract": "skill-quality-v1", "skill_bundle": bundle or resolve_skill_refs(),
+    selected = bundle or resolve_skill_refs()
+    return {"quality_contract": "skill-quality-v1", "skill_bundle": selected,
             "sources": [{"path": item["path"], "metadata": item["metadata"], "body": item["body"]}],
-            "quality_context": prepare_quality([item]),
+            "quality_context": prepare_quality([item], skill_bundle=selected),
             "candidate": {"objects": [{"metadata": {"id": "artificial-record", "type": "knowledge"}}]}}
 
 
@@ -39,9 +40,9 @@ class StatisticRepairContractTests(unittest.TestCase):
     def test_new_default_pair_and_schema_are_explicit_without_mixed_role_downgrade(self):
         bundle = resolve_skill_refs()
         self.assertEqual((bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]),
-                         ("knowledge-extract@14", "knowledge-review@12"))
+                         ("knowledge-extract@15", "knowledge-review@13"))
         self.assertTrue(statistic_repair_enabled(bundle))
-        self.assertEqual(quality_schema_version(bundle), "0.21")
+        self.assertEqual(quality_schema_version(bundle), "0.22")
         incremental = resolve_skill_refs("knowledge-extract@12", "knowledge-review@10")
         self.assertEqual(quality_schema_version(incremental), "0.18")
         previous = resolve_skill_refs("knowledge-extract@11", "knowledge-review@9")

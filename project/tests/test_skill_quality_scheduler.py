@@ -42,7 +42,7 @@ class SkillQualityScheduleTests(unittest.TestCase):
             self.assertEqual(self.state()["config"]["skill_bundle"], bundle)
         for event in self.state()["events"]:
             header, _ = parse_markdown((self.repo / event["path"]).read_bytes())
-            self.assertEqual(header["schema_version"], "0.21")
+            self.assertEqual(header["schema_version"], "0.22")
         self.assertEqual(self.ledger.snapshot()["started_calls"], 0)
 
     def test_invalid_bundle_blocks_before_configuration_is_written(self):
@@ -96,7 +96,7 @@ class SkillQualityScheduleTests(unittest.TestCase):
         state = _require(PipelineGit(self.repo), "new-quality")
         self.assertEqual(state["config"]["skill_bundle"], resolve_skill_refs())
         header, _ = parse_markdown((self.repo / result["config_path"]).read_bytes())
-        self.assertEqual(header["schema_version"], "0.21")
+        self.assertEqual(header["schema_version"], "0.22")
         self.assertNotIn("skill_bundle", self.state()["config"])
 
     def test_actual_schedule_work_passes_exact_snapshot_to_production(self):

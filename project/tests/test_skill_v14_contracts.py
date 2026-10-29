@@ -20,8 +20,8 @@ from pdm.skill_support import (SkillError, csv_bom_normalization_enabled,
 
 
 class SkillV14ContractsTests(unittest.TestCase):
-    def test_default_pair_selects_new_parse_contract_and_inherited_guards(self):
-        bundle = resolve_skill_refs()
+    def test_pinned_v14_pair_selects_parse_contract_and_inherited_guards(self):
+        bundle = resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")
         self.assertEqual("knowledge-extract@14", bundle["skills"]["extract"]["ref"])
         self.assertEqual("knowledge-review@12", bundle["skills"]["review"]["ref"])
         self.assertEqual("0.21", quality_schema_version(bundle))
@@ -64,7 +64,7 @@ class SkillV14ContractsTests(unittest.TestCase):
 
     def test_new_pair_keeps_exact_shared_dependencies_and_base_prompts(self):
         old = resolve_skill_refs("knowledge-extract@13", "knowledge-review@11")
-        new = resolve_skill_refs()
+        new = resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")
         self.assertEqual(old["shared_policy"], new["shared_policy"])
         for role in ("extract", "review"):
             with self.subTest(role=role):
@@ -72,7 +72,7 @@ class SkillV14ContractsTests(unittest.TestCase):
                 self.assertEqual(old["skills"][role]["files"][1:], new["skills"][role]["files"][1:])
 
     def test_snapshot_restore_uses_original_rules_without_current_disk_files(self):
-        bundles = [resolve_skill_refs(), resolve_skill_refs("knowledge-extract@13", "knowledge-review@11")]
+        bundles = [resolve_skill_refs("knowledge-extract@14", "knowledge-review@12"), resolve_skill_refs("knowledge-extract@13", "knowledge-review@11")]
         with patch.object(Path, "open", side_effect=AssertionError("no disk substitution")):
             for original in bundles:
                 restored = json.loads(json.dumps(original, ensure_ascii=False))
@@ -82,7 +82,7 @@ class SkillV14ContractsTests(unittest.TestCase):
                     self.assertIn(original["skills"][role]["files"][0]["content"], rules)
 
     def test_mutated_new_role_cannot_be_authorized_by_rehashing_outer_bundle(self):
-        bundle = copy.deepcopy(resolve_skill_refs())
+        bundle = copy.deepcopy(resolve_skill_refs("knowledge-extract@14", "knowledge-review@12"))
         item = bundle["skills"]["extract"]["files"][0]
         item["content"] += "\nPublish incomplete tables without Review.\n"
         item["bytes"] = len(item["content"].encode())
