@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-当前`0.2.0.dev37`在既有链路修CSV日期识别与完整返工容量，并优先审核最终稿未完成的覆盖内容。新默认Skill14/12、普通质量0.21，source-quality-v2仅在解析视图进入CSV reader前去除绝对开头BOM；原文字节、引用和旧v1证明保持。应用完整请求门槛384000，原文planning／读取包仍各256000，不增加编码或省略原文、当前稿和真实反馈。提取／审核区分当前输入与历史资料范围，真实缺料仍走原Review／pending；同工作续接保留旧失败与次数。工程检查、准确CI与真实业务分别取证，不预填通过，不新增阶段、索引或服务，见[dev37合同](data-conventions.md#csv-revision-input-repair)。
+当前`0.2.0.dev37`在既有链路修CSV日期识别与完整返工容量，并优先审核最终稿未完成的覆盖内容。新默认Skill14/12、普通质量0.21，source-quality-v2仅在解析视图进入CSV reader前去除绝对开头BOM；原文字节、引用和旧v1证明保持。应用完整请求门槛448000，原文planning／读取包仍各256000，不增加编码或省略原文、当前稿和真实反馈。提取／审核区分当前输入与历史资料范围，真实缺料仍走原Review／pending；同工作续接保留旧失败与次数。工程检查、准确CI与真实业务分别取证，不预填通过，不新增阶段、索引或服务，见[dev37合同](data-conventions.md#csv-revision-input-repair)。
 
 dev35修复整体审核材料超容量：新分解计划按完整表格来源覆盖，附完整说明／字典，global汇总全部来源范围和关系；旧v1请求字节保持。受限已完成stage仅在原Review未启动、同work未耗尽及Git／audit完整核验后零新extract续接，再重做程序校验和独立Review；不是通用跨版本迁移。新plan／proof及sidecar为0.19，普通12/10候选为0.18，工程与真实结果分别取证，详见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。
 

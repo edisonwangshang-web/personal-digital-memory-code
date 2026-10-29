@@ -8,7 +8,7 @@ dev32批次收尾M1已有链路的采集、答复续接、事项解决、调度�
 
 ## 本批工程检查
 
-dev37使用新14/12、普通质量0.21及source-quality-v2，核BOM quoted header、原文和旧证明保持、最终deferred优先coverage、当前／历史范围自足，以及完整请求384000与planning／读取包各256000的独立边界。旧13/11拒收稿的实际反馈可在同work有限次数内续接，新policy重算而不继承旧统计；不得以升级刷新次数。本批人工检查、准确提交CI与获准真实复验分别取证，不预填通过。dev36固定提交5d557e8／CI40848773015八任务已经通过，不代表dev37或真实业务通过。下文dev34—dev36保留原检查职责，见[dev37反例](scenarios-and-acceptance.md#csv-revision-input-acceptance)。
+dev37使用新14/12、普通质量0.21及source-quality-v2，核BOM quoted header、原文和旧证明保持、最终deferred优先coverage、当前／历史范围自足，以及完整请求448000与planning／读取包各256000的独立边界。旧13/11拒收稿的实际反馈可在同work有限次数内续接，新policy重算而不继承旧统计；不得以升级刷新次数。本批人工检查、准确提交CI与获准真实复验分别取证，不预填通过。dev36固定提交5d557e8／CI40848773015八任务已经通过，不代表dev37或真实业务通过。下文dev34—dev36保留原检查职责，见[dev37反例](scenarios-and-acceptance.md#csv-revision-input-acceptance)。
 
 dev35先核完整来源coverage、全局范围／关系汇总及已存v1请求字节兼容；新plan／proof与受限stage复用sidecar使用0.19，普通12/10候选保持0.18。受限复用须证明原completed、Review从未启动、decomposed_input_limit、同work下一attempt不超过4及原Git／audit一致，零新extract但重做程序校验和独立Review。unknown、耗尽或范围变化仍阻断；工程、新CI与真实全链结果尚待取证，不预填通过。合同／反例见[数据规范](data-conventions.md#review-material-recovery)、[场景验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
 

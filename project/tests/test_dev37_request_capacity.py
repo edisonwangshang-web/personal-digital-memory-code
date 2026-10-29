@@ -54,13 +54,13 @@ class Dev37RequestCapacityTests(unittest.TestCase):
             "statistic_claims": [], "temporal_claims": []}}
 
     def test_complete_extract_review_and_patch_keep_every_byte_at_the_new_native_boundary(self):
-        self.assertEqual(384_000, model_calls.MAX_INPUT_BYTES)
+        self.assertEqual(448_000, model_calls.MAX_INPUT_BYTES)
         with tempfile.TemporaryDirectory() as temporary:
             ledger = BudgetLedger.create(Path(temporary) / "ledger.json", 20, 0,
                                          "artificial capacity validation only")
             for kind in ("extract", "review", "patch"):
                 role = "review" if kind == "review" else "extract"
-                for size in (323_370, 384_000):
+                for size in (323_370, 399_506, 448_000):
                     with self.subTest(kind=kind, size=size):
                         payload = self.sized(role, self.material(kind), size)
                         frozen = deepcopy(payload)
@@ -87,7 +87,7 @@ class Dev37RequestCapacityTests(unittest.TestCase):
                                          "artificial rejected capacity validation")
             for kind in ("extract", "review", "patch"):
                 role = "review" if kind == "review" else "extract"
-                payload = self.sized(role, self.material(kind), 384_001)
+                payload = self.sized(role, self.material(kind), 448_001)
                 before = ledger.path.read_bytes()
                 operation = "oversize-" + kind
                 with self.subTest(kind=kind), \

@@ -125,7 +125,7 @@ class ProcessingPreflightTests(unittest.TestCase):
         self.assertEqual(self.ledger.snapshot()['started_calls'], 1)
 
     def test_complete_request_one_byte_over_bound_is_refused_before_run_or_native_audit(self):
-        checked, payload = self.sized_extraction_request(384_001)
+        checked, payload = self.sized_extraction_request(448_001)
         self.assertEqual(checked['status'], 'blocked_capacity', checked)
         before = self.snapshot()
         with self.assertRaises(CaptureError) as raised:

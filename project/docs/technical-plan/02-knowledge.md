@@ -4,7 +4,7 @@
 
 ## 当前范围
 
-当前dev37使用新默认Skill14/12及普通质量0.21。source-quality-v2修复BOM加引号表头的日期识别，仅改解析视图，保留原文字节、行号及引用；旧v1按原行为重建。最终稿存在deferred时，既有分解Review先核相应完整来源coverage，再核其他对象和最后global；实际可整理内容不能仅因资料量或格式而全部暂缓，真实缺料仍由独立Review／pending判断。资料包、历史知识和当前输入的范围分别说明，复用旧记录不豁免范围修订。完整请求门槛384000，planning／读取包仍各256000，不增加编码或阶段。旧Skill、来源0.1、正式0.2及plan／proof／sidecar0.19保持，准确CI与真实业务另验，见[dev37合同](../data-conventions.md#csv-revision-input-repair)。下文dev34—dev36说明能力引入时的历史合同。
+当前dev37使用新默认Skill14/12及普通质量0.21。source-quality-v2修复BOM加引号表头的日期识别，仅改解析视图，保留原文字节、行号及引用；旧v1按原行为重建。最终稿存在deferred时，既有分解Review先核相应完整来源coverage，再核其他对象和最后global；实际可整理内容不能仅因资料量或格式而全部暂缓，真实缺料仍由独立Review／pending判断。资料包、历史知识和当前输入的范围分别说明，复用旧记录不豁免范围修订。完整请求门槛448000，planning／读取包仍各256000，不增加编码或阶段。旧Skill、来源0.1、正式0.2及plan／proof／sidecar0.19保持，准确CI与真实业务另验，见[dev37合同](../data-conventions.md#csv-revision-input-repair)。下文dev34—dev36说明能力引入时的历史合同。
 
 dev35保持原模型角色与Skill12/10。coverage按完整表格来源分别阅读，并携完整说明／字典；global依据全部已核覆盖证书、完整最终正文、全来源范围清单和关系图做汇总一致性核对，不把证书当作亲自读过原文。旧v1计划及请求按原字节恢复，不能原地套新布局。原已完成提取因审核容量阻塞时，只有第三层完成受限Git／audit核验才复用原结果；本层仍须独立审核，不新增提取角色或发布豁免。新plan／proof为0.19，普通候选0.18保持；工程和真实结果分别取证，见[合同](../data-conventions.md#review-material-recovery)。
 
@@ -129,11 +129,11 @@ flowchart TD
 
 当前提取和审核采用 `pdm-columnar-shared-json-v3`：用列名和全部行值表达同字段对象数组，先逐行逐列还原并解保留键转义，再还原 v2 字段字典，最后解 v1 共享引用。字段名、字符串、数值、顺序、原文、规则、候选、意见和计算范围逐值完整保留；不是摘要。资料中的同名标记只是数据，输出仍用原字段和原 JSON Schema，不输出别名或共享表 ID。恢复过程受深度、节点数及展开大小限制，冲突或不匹配拒绝。
 
-历史 extract@5／review@4 继续用无损字段字典 v2，extract@1—@4／review@1—@3 继续按原 v1，原实际请求字节不重算；当前版本及相关 plan 明确绑定实际编码、完整解码说明和全部请求字节。传输编码变化本身不迁移业务schema或放宽容量；现行应用完整请求门槛为`384000`字节，原文planning与读取包仍各`256000`，旧请求字节保持，见[容量规范](../data-conventions.md#model-request-capacity)。
+历史 extract@5／review@4 继续用无损字段字典 v2，extract@1—@4／review@1—@3 继续按原 v1，原实际请求字节不重算；当前版本及相关 plan 明确绑定实际编码、完整解码说明和全部请求字节。传输编码变化本身不迁移业务schema或放宽容量；现行应用完整请求门槛为`448000`字节，原文planning与读取包仍各`256000`，旧请求字节保持，见[容量规范](../data-conventions.md#model-request-capacity)。
 
 分解计划在首次独立 Review 前完整渲染所有非 global 单元，任一超限即零 Review 调用停止。global 必须等真实前序证书齐备，再检查实际请求；早期单元通过或人工短证书不能保证完整组适配。完整返工材料超限时同样停止，不删原文、反馈、规则或统计范围来换取执行。
 
-新 queue 默认 `auto`：完整普通 Review 请求不超过 `384000` 字节时一次独立审核，超限或显式指定 `decomposed-v1` 时才转 object／coverage／global 分解。各审核 unit 持久保存 `reservation`／`result`／`counter`；完成节点核验后零调用复用，安全未启动失败有限重试，`unknown` 先对账，换 queue、规则或合同不清次数。已存`selected-input-scope-v1`及新v2清单分别说明所选来源、本批提供片段和本单元实际正文，不能代替未读原文。
+新 queue 默认 `auto`：完整普通 Review 请求不超过 `448000` 字节时一次独立审核，超限或显式指定 `decomposed-v1` 时才转 object／coverage／global 分解。各审核 unit 持久保存 `reservation`／`result`／`counter`；完成节点核验后零调用复用，安全未启动失败有限重试，`unknown` 先对账，换 queue、规则或合同不清次数。已存`selected-input-scope-v1`及新v2清单分别说明所选来源、本批提供片段和本单元实际正文，不能代替未读原文。
 
 ## 自动分类与处理路径
 

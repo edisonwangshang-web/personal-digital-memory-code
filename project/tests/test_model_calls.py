@@ -250,7 +250,7 @@ class ModelCallTests(unittest.TestCase):
 
         # These fixed behavioral boundaries distinguish the model transport
         # allowance from the independently bounded 256 kB batch/package APIs.
-        for size in (256_001, 320_000, 323_370, 384_000):
+        for size in (256_001, 320_000, 323_370, 384_000, 399_506, 448_000):
             with self.subTest(size=size), self.mocked_process() as mocked, \
                     patch.object(model_calls, '_events', wraps=model_calls._events) as events:
                 payload = payload_of_size(size)
@@ -264,7 +264,7 @@ class ModelCallTests(unittest.TestCase):
         before = self.ledger.path.read_bytes()
         with self.mocked_process() as mocked:
             with self.assertRaises(ModelCallError) as raised:
-                model_calls.call_model('answer', payload_of_size(384_001), ledger=self.ledger,
+                model_calls.call_model('answer', payload_of_size(448_001), ledger=self.ledger,
                                         operation_id='native-size-over')
             self.assertEqual(raised.exception.code, 'input_limit')
             mocked.popen.assert_not_called()

@@ -28,7 +28,7 @@ from typing import Any, Dict
 
 
 # Serialized request byte bound; this does not guarantee the model's token capacity.
-MAX_INPUT_BYTES = 384_000
+MAX_INPUT_BYTES = 448_000
 MAX_STREAM_BYTES = 2_000_000
 # Larger structured period summaries may legitimately need more than ten
 # minutes. Callers must opt in; the 120-second default and unknown handling stay.
