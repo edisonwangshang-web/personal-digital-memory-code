@@ -2,9 +2,18 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev35`修复独立审核材料容量与受限已完成stage续接，dev34的增量复用、校验反馈和最终完成度保持；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移格式。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev36`在原链路补返工内容回退、统计关联口径和纯统计修补分流，dev35的来源级审核材料及受限stage续接保持；主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成，不新增阶段或迁移旧数据。工程回归使用虚构资料，不调用真实模型；真实复验按实际授权和可用执行方式另取证，不自动重做已完成资料或重开耗尽工作；只dev，不推送或合并master，不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
 
-新默认为`knowledge-extract@12`／`knowledge-review@10`、普通质量链0.18，旧11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
+新默认为`knowledge-extract@13`／`knowledge-review@11`、普通质量链0.20，plan／proof／stage复用sidecar继续0.19；旧12/10继续0.18、11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
+
+## dev36：返工完整性与统计修补
+
+1. 普通内容返工仍给模型当前完整稿、实际未解决意见及必要证据。输出后按稳定target比较前稿与本稿覆盖；summarized退回deferred须形成准确回退说明，原目标缺项／重复继续拒绝，不以对象数量或名称判断遗漏。
+2. 新13/11的分解计划有回退目标时，优先核对应完整来源coverage，保留其他object／coverage及最后global；审核区分未做完与真实证据缺口，不自动恢复旧稿，也不强行保留已被纠正的错误内容。旧计划顺序和请求不变。
+3. 新Review缺失统计关联给定stat_id、record_id和准确body_evidence。新`statistic-bindings-repair-v2`验证真实Review锚和当前冻结候选；patch仍走原返工入口，三元组须与已核Review锚一致，程序按原固定定义展开value、source／locator／quote，其他正文和关系不动。
+4. v2完整最终稿存在已知deferred内容时，不以局部object的纯统计退回冻结整稿；改走现有内容／覆盖审核或待确认。确实仅缺关联时继续定点补丁，不要求后续全部审核先完成，也不误拦局部草稿。修订后仍须完整独立Review和原发布检查。
+
+旧v1、原失败和调用历史保持。首次加最多三次重试共四次，不因新Skill、queue或版本刷新；本节不生成合成模型回执、不承诺零新调用，不新增模型角色／阶段。人工检查、准确CI和获准真实链各自取证，见[合同](data-conventions.md#revision-completeness-repair)及[场景](scenarios-and-acceptance.md#revision-completeness-acceptance)。
 
 文档分工如下：
 

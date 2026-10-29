@@ -19,6 +19,63 @@ def _fail(code="invalid_revision_context"):
     raise CaptureError(code, "返工上下文未通过原候选、独立审核、来源与控制核验")
 
 
+def revision_coverage_regressions(candidate):
+    """Return bounded current-draft regressions, never facts to copy back.
+
+    A record may be renamed, merged or corrected during revision. The stable
+    input targets, rather than the old object count, identify supplied content
+    that was summarized in the rejected draft and is now left unfinished.
+    Review still decides whether the new deferral is an actual evidence gap.
+    Historical Skill requests must retain their exact original layout.
+    """
+    from .skill_support import revision_coverage_enabled
+    if not isinstance(candidate, dict):
+        _fail("revision_coverage_context_mismatch")
+    if not revision_coverage_enabled(candidate.get("skill_bundle")):
+        return []
+    context = candidate.get("revision_context")
+    if context is None:
+        return []
+    if not isinstance(context, dict) or not isinstance(context.get("candidate"), dict):
+        _fail("revision_coverage_context_mismatch")
+    previous = context["candidate"]
+
+    def index(value):
+        try:
+            targets = value["quality_context"]["targets"]
+            rows = value["extraction_output"]["quality"]["coverage_disposition"]
+            if not isinstance(targets, list) or not isinstance(rows, list):
+                raise ValueError
+            target_map = {item["target_id"]: item for item in targets}
+            dispositions = {item["target_id"]: item for item in rows}
+            if (len(target_map) != len(targets) or len(dispositions) != len(rows)
+                    or set(target_map) != set(dispositions)
+                    or any(not isinstance(key, str) or not key for key in target_map)
+                    or any(not isinstance(item.get(key), str) or not item[key]
+                           for item in targets for key in ("source_id", "source_version"))):
+                raise ValueError
+            for row in rows:
+                ids = row["record_ids"]
+                if (row["status"] not in {"summarized", "deferred"}
+                        or not isinstance(ids, list) or any(not isinstance(identifier, str) for identifier in ids)
+                        or len(ids) != len(set(ids)) or not isinstance(row["reason"], str)):
+                    raise ValueError
+            return target_map, dispositions
+        except (KeyError, TypeError, ValueError, AttributeError):
+            _fail("revision_coverage_context_mismatch")
+
+    old_targets, old_rows = index(previous)
+    targets, rows = index(candidate)
+    if (targets != old_targets
+            or candidate.get("quality_context") != previous.get("quality_context")):
+        _fail("revision_coverage_context_mismatch")
+    return [{"target_id": target_id, "previous_status": "summarized", "current_status": "deferred",
+             "previous_record_ids": sorted(old_rows[target_id]["record_ids"]),
+             "reason": rows[target_id]["reason"]}
+            for target_id in sorted(targets)
+            if old_rows[target_id]["status"] == "summarized" and rows[target_id]["status"] == "deferred"]
+
+
 def supports_phase_revision(candidate):
     """Only the frozen feedback-quality contract admits draft/reply repair.
 

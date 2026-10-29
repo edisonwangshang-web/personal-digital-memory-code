@@ -64,6 +64,17 @@ STATISTIC_BINDINGS_SCHEMA = _object({
     })},
 })
 STATISTIC_REPAIR_CONTRACT = "statistic-bindings-repair-v1"
+STATISTIC_REPAIR_CONTRACT_V2 = "statistic-bindings-repair-v2"
+
+
+def repair_scope_schema(*, evidence_required=False):
+    """New roles pin exact body anchors; historical schemas retain two fields."""
+    result = copy.deepcopy(REPAIR_SCOPE_SCHEMA)
+    if evidence_required:
+        item = result["properties"]["missing_bindings"]["items"]
+        item["properties"]["body_evidence"] = dict(_STRING)
+        item["required"].append("body_evidence")
+    return result
 
 _DATE_COLUMNS = {"日期", "date", "Date"}
 _ZONE_COLUMNS = {"时区", "timezone", "time_zone"}
@@ -983,7 +994,14 @@ def build_review_checks(candidate, context, scope=None):
     roles = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     review = roles.get("review") if isinstance(roles, dict) else None
     context_readability = isinstance(review, dict) and review.get("ref") in {"knowledge-review@6", "knowledge-review@7"}
-    completion_policy = isinstance(review, dict) and review.get("ref") == "knowledge-review@10"
+    completion_policy = isinstance(review, dict) and review.get("ref") in {"knowledge-review@10", "knowledge-review@11"}
+    from .skill_support import revision_coverage_enabled, statistic_evidence_enabled
+    revision_policy = revision_coverage_enabled(bundle)
+    statistic_policy = statistic_evidence_enabled(bundle)
+    regressions = []
+    if revision_policy:
+        from .revision_context import revision_coverage_regressions
+        regressions = revision_coverage_regressions(candidate)
     batch_material = candidate.get("batch_material")
     draft_only = isinstance(batch_material, dict) and batch_material.get("draft_only") is True
     dispositions = {}
@@ -1015,6 +1033,25 @@ def build_review_checks(candidate, context, scope=None):
                    "objects": [{"path": path, "sha256": _hash(objects[path])} for path in selected_paths],
                    "source_scope_ids": sorted(selected_scopes), "target_ids": selected_targets,
                    "quality_sha256": _hash(material)}
+        if statistic_policy and label == "object_statistics_time":
+            binding["statistic_binding_policy"] = "statistic-bindings-v2"
+            instruction += (
+                " Apply statistic-bindings-v2 consistently: a collective denominator statement binds the row_count "
+                "of each metric the text actually includes; a single-metric statement does not imply unrelated metrics. "
+                "Do not require all available catalog statistics. Missing bindings must identify the exact stat_id, "
+                "record_id and a verbatim body_evidence excerpt retaining its actual period, denominator and metric "
+                "meaning. Equal values, shared tables or a previous pass do not establish a semantic association. "
+                "Values and source anchors are computed by the program, not recalculated by the model.")
+        if revision_policy and label in {"metric_coverage", "semantic_coverage", "global_organization"}:
+            changed = [item for item in regressions if item["target_id"] in selected_targets]
+            if changed:
+                binding["revision_coverage_regressions"] = copy.deepcopy(changed)
+                instruction += (
+                    " These targets were declared summarized in the immediately preceding draft but are now deferred. "
+                    "This is a draft comparison, not accepted source truth. Use the supplied current sources to "
+                    "distinguish unfinished processing from a genuine correction or evidence gap. Do not silently "
+                    "drop available content or copy the previous text back as fact. Merge and valid correction are "
+                    "allowed; real unresolved evidence must follow needs_confirmation.")
         if completion_policy:
             binding["completion_policy"] = "draft-content-v1" if draft_only else "final-content-completion-v1"
             if label in {"metric_coverage", "semantic_coverage", "global_organization"}:
@@ -1059,6 +1096,8 @@ def build_review_checks(candidate, context, scope=None):
                  "evidence_ids": evidence, "instruction": instruction}
         if allowed_results is not None:
             check["allowed_results"] = allowed_results
+        if revision_policy and label in {"metric_coverage", "semantic_coverage", "global_organization"} and changed:
+            check["revision_coverage_regressions"] = copy.deepcopy(changed)
         checks.append(check)
 
     if kind in {"complete", "object"}:
@@ -1076,12 +1115,17 @@ def build_review_checks(candidate, context, scope=None):
                 "speaker and original meaning; missing source support requires revision.", [path], [], evidence, relevant)
             add("object_classification", "Check health/career/learning against the same facts; a valid enum is not semantic validation.",
                 [path], [], evidence, relevant)
+            record_id = objects[path].get("metadata", {}).get("id")
+            statistic_targets = ([target["target_id"] for target in material["targets"]
+                                  if any(row["target_id"] == target["target_id"] and record_id in row["record_ids"]
+                                         for row in candidate["extraction_output"]["quality"]["coverage_disposition"])]
+                                 if statistic_policy else [])
             add("object_statistics_time", "Check every numerical/descriptive claim, its coverage and units, structured stat IDs, "
                 "and source-time/current/unknown qualifiers. Every derived numerical claim requires a declared program stat_id; "
                 "undeclared calculations require needs_revision, while literal observations must cite raw evidence. "
                 "Unstructured prose is also in scope; verify old operational statements "
                 "are not asserted as current. Never infer cause, diagnosis or advice from descriptive statistics.",
-                [path], [], evidence, relevant)
+                [path], statistic_targets, evidence, relevant)
     if kind in {"complete", "coverage"}:
         for target in material["targets"]:
             relevant = [target["source_scope_id"]]
@@ -1101,12 +1145,12 @@ def build_review_checks(candidate, context, scope=None):
     return checks
 
 
-def validate_review_repair_scope(output):
+def validate_review_repair_scope(output, *, evidence_required=False, candidate=None):
     """Validate the declared repair shape, not its factual or semantic merit."""
     if not isinstance(output, dict) or "repair_scope" not in output:
         _error("invalid_review_repair_scope", "新审核合同缺少明确返工范围")
     scope = output["repair_scope"]
-    _schema(scope, REPAIR_SCOPE_SCHEMA, "invalid_review_repair_scope")
+    _schema(scope, repair_scope_schema(evidence_required=evidence_required), "invalid_review_repair_scope")
     kind, bindings = scope["kind"], scope["missing_bindings"]
     seen = set()
     for binding in bindings:
@@ -1114,6 +1158,8 @@ def validate_review_repair_scope(output):
         if any(not value.strip() for value in pair) or pair in seen:
             _error("invalid_review_repair_scope", "缺失统计关联须使用不重复的准确身份")
         seen.add(pair)
+        if evidence_required and not binding["body_evidence"].strip():
+            _error("invalid_review_repair_scope", "缺失统计关联须给出准确的正文摘录")
     if kind == "statistic_bindings":
         checks = output.get("checks", [])
         if (output.get("verdict") != "needs_revision" or not bindings
@@ -1122,16 +1168,52 @@ def validate_review_repair_scope(output):
             _error("invalid_review_repair_scope", "只有明确纯统计关联遗漏的真实退回可要求局部返工")
     elif bindings or kind == "content" and output.get("verdict") != "needs_revision":
         _error("invalid_review_repair_scope", "返工范围与总审核结论不一致")
+    if evidence_required and candidate is not None and kind == "statistic_bindings":
+        _validate_review_binding_evidence(scope, candidate)
     return scope
 
 
-def validate_quality_review(output, checks, *, repair_scope_supported=False):
+def _validate_review_binding_evidence(scope, candidate, checks=None, review_quality_context=None):
+    """Check exact reviewed anchors; never infer meaning from equal values."""
+    objects = _candidate_objects(candidate)
+    records = {obj.get("metadata", {}).get("id"): obj for path, obj in objects.items()
+               if path.startswith("memory/records/")}
+    context = candidate.get("quality_context", {})
+    statistics = {stat["stat_id"]: stat for stat in context.get("statistics", [])}
+    visible_statistics = None
+    if review_quality_context is not None:
+        if not isinstance(review_quality_context, dict) or not isinstance(review_quality_context.get("statistics"), list):
+            _error("invalid_quality_scope", "统计审核缺少实际可见统计目录")
+        visible_statistics = {stat["stat_id"] for stat in review_quality_context["statistics"]}
+    quality = candidate.get("extraction_output", {}).get("quality", {})
+    summarized = {row["target_id"]: set(row["record_ids"])
+                  for row in quality.get("coverage_disposition", []) if row["status"] == "summarized"}
+    existing = {(row["stat_id"], row["record_id"]) for row in quality.get("statistic_claims", [])}
+    failed = None
+    if checks is not None:
+        failed = {check["check_id"]: check for check in checks}
+    for item in scope["missing_bindings"]:
+        obj, stat = records.get(item["record_id"]), statistics.get(item["stat_id"])
+        if (obj is None or stat is None or item["body_evidence"] not in obj.get("body", "")
+                or item["record_id"] not in summarized.get(stat["target_id"], set())
+                or (item["stat_id"], item["record_id"]) in existing
+                or visible_statistics is not None and item["stat_id"] not in visible_statistics):
+            _error("statistic_repair_body_mismatch", "审核缺项未绑定实际记录正文和统计目标")
+        if failed is not None and not any(
+                check["kind"] == "object_statistics_time"
+                and obj["path"] in check["object_paths"] and stat["target_id"] in check["target_ids"]
+                for check in failed.values()):
+            _error("statistic_repair_scope_mismatch", "审核缺项超出实际失败对象和统计范围")
+
+
+def validate_quality_review(output, checks, *, repair_scope_supported=False,
+                            repair_evidence_supported=False, candidate=None, review_quality_context=None):
     """Require every predeclared check, exact scope, evidence and consistent verdict."""
     fields = {"verdict", "reasons", "checks"} | ({"repair_scope"} if repair_scope_supported else set())
     if not isinstance(output, dict) or set(output) != fields:
         _error("invalid_quality_review", "独立审核缺少完整逐项质量结果")
     if repair_scope_supported:
-        validate_review_repair_scope(output)
+        validate_review_repair_scope(output, evidence_required=repair_evidence_supported, candidate=candidate)
     expected = {check["check_id"]: check for check in checks}
     if not expected or len(expected) != len(checks):
         _error("invalid_quality_review", "必需审核项无效")
@@ -1163,6 +1245,11 @@ def validate_quality_review(output, checks, *, repair_scope_supported=False):
         outcomes.append(result["result"])
     if seen != set(expected):
         _error("quality_review_coverage_mismatch", "独立审核没有完成所有必需检查")
+    if repair_evidence_supported and output["repair_scope"]["kind"] == "statistic_bindings":
+        if candidate is None:
+            _error("invalid_quality_scope", "统计关联审核缺少实际固定候选")
+        failed_checks = [expected[item["check_id"]] for item in output["checks"] if item["result"] != "passed"]
+        _validate_review_binding_evidence(output["repair_scope"], candidate, failed_checks, review_quality_context)
     verdict = ("needs_revision" if "needs_revision" in outcomes else
                "needs_confirmation" if "needs_confirmation" in outcomes else "passed")
     if output["verdict"] != verdict:

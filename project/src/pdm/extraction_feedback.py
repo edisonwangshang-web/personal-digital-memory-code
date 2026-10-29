@@ -33,11 +33,8 @@ def _sha(value):
 
 
 def enabled(bundle):
-    skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
-    return (isinstance(skills, dict)
-            and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
-                    for role, ref in (("extract", "knowledge-extract@12"),
-                                      ("review", "knowledge-review@10"))))
+    from .skill_support import incremental_repair_enabled
+    return incremental_repair_enabled(bundle)
 
 
 def _scope(payload):

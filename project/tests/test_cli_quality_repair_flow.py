@@ -99,7 +99,7 @@ class CliQualityRepairFlowTests(unittest.TestCase):
                 stat = next(item for item in payload["quality_context"]["statistics"]
                             if item["operation"] == "mean"
                             and resolve_statistic(payload["quality_context"], item)["source_id"] == source["source_id"])
-                bindings.append({"stat_id": stat["stat_id"], "record_id": rid})
+                bindings.append({"stat_id": stat["stat_id"], "record_id": rid, "body_evidence": body})
             self.bindings = sorted(bindings, key=lambda item: (item["stat_id"], item["record_id"]))
             output = add_quality({"objects": objects, "wikis": wikis, "reuse_refs": []}, payload["quality_context"])
             self.assertEqual(output["quality"]["statistic_claims"], [])
@@ -141,8 +141,8 @@ class CliQualityRepairFlowTests(unittest.TestCase):
             old_review = first["last_result"]["review_path"]
             frozen = {path: (self.repo / path).read_bytes() for path in (old_path, old_review)}
             original = _load(frozen[old_path], "candidate")
-            self.assertEqual(original["skill_bundle"]["skills"]["extract"]["ref"], "knowledge-extract@12")
-            self.assertEqual(original["skill_bundle"]["skills"]["review"]["ref"], "knowledge-review@10")
+            self.assertEqual(original["skill_bundle"]["skills"]["extract"]["ref"], "knowledge-extract@13")
+            self.assertEqual(original["skill_bundle"]["skills"]["review"]["ref"], "knowledge-review@11")
             second = self.invoke(run)
             self.assertEqual(second["status"], "ready", second)
             candidate, _, _ = _read_reviewed(PipelineGit(self.repo), second["final_run"])

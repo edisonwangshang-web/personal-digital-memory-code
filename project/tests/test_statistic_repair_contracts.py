@@ -39,9 +39,11 @@ class StatisticRepairContractTests(unittest.TestCase):
     def test_new_default_pair_and_schema_are_explicit_without_mixed_role_downgrade(self):
         bundle = resolve_skill_refs()
         self.assertEqual((bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]),
-                         ("knowledge-extract@12", "knowledge-review@10"))
+                         ("knowledge-extract@13", "knowledge-review@11"))
         self.assertTrue(statistic_repair_enabled(bundle))
-        self.assertEqual(quality_schema_version(bundle), "0.18")
+        self.assertEqual(quality_schema_version(bundle), "0.20")
+        incremental = resolve_skill_refs("knowledge-extract@12", "knowledge-review@10")
+        self.assertEqual(quality_schema_version(incremental), "0.18")
         previous = resolve_skill_refs("knowledge-extract@11", "knowledge-review@9")
         self.assertEqual(quality_schema_version(previous), "0.15")
         self.assertTrue(statistic_repair_enabled(previous))
@@ -58,6 +60,7 @@ class StatisticRepairContractTests(unittest.TestCase):
         normal = output_schema("extract", payload)
         self.assertEqual(set(normal["required"]), {"objects", "wiki", "quality", "reuse_refs"})
         self.assertEqual(normal["properties"]["quality"]["properties"]["coverage_disposition"]["minItems"], 1)
+        payload["skill_bundle"] = resolve_skill_refs("knowledge-extract@12", "knowledge-review@10")
         pairs = [{"stat_id": item["stat_id"], "record_id": "artificial-record"}
                  for item in payload["quality_context"]["statistics"][:2]]
         payload["quality_repair_context"] = {"contract": "statistic-bindings-repair-v1", "missing_bindings": pairs}

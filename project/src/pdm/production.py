@@ -289,7 +289,8 @@ def _feedback_enabled(bundle):
                         for role, ref in pair) for pair in (
                     (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
                     (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
-                    (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")))))
+                    (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
+            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")))))
 
 
 def _revision_feedback(git, previous, state, projection, processing_paths, *, draft, merge_runs):

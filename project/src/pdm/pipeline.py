@@ -371,7 +371,8 @@ def _reuse_refs_enabled(skill_bundle):
             (("extract", "knowledge-extract@9"), ("review", "knowledge-review@7")),
             (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
             (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
-            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10"))))
+            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
+            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11"))))
 
 
 def _feedback_quality_enabled(skill_bundle):
@@ -380,7 +381,8 @@ def _feedback_quality_enabled(skill_bundle):
         for role, ref in pair) for pair in (
             (("extract", "knowledge-extract@10"), ("review", "knowledge-review@8")),
             (("extract", "knowledge-extract@11"), ("review", "knowledge-review@9")),
-            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10"))))
+            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
+            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11"))))
 
 
 def _processing_header(skill_bundle, fallback):
@@ -605,11 +607,13 @@ def _call_metadata(response):
             "output_sha256": _hash(response["output"])}
 
 
-def _review_output(output, *, required_checks=None, quality=False, skill_bundle=None):
+def _review_output(output, *, required_checks=None, quality=False, skill_bundle=None, candidate=None,
+                   review_quality_context=None):
     quality = quality or required_checks is not None
     fields = {"verdict", "reasons", "checks"} if quality else {"verdict", "reasons"}
-    from .skill_support import statistic_repair_enabled
+    from .skill_support import statistic_repair_enabled, statistic_evidence_enabled
     repair_scope_supported = quality and statistic_repair_enabled(skill_bundle)
+    repair_evidence_supported = quality and statistic_evidence_enabled(skill_bundle)
     if repair_scope_supported:
         fields.add("repair_scope")
     if (not isinstance(output, dict) or set(output) != fields
@@ -623,10 +627,12 @@ def _review_output(output, *, required_checks=None, quality=False, skill_bundle=
             _error("invalid_model_output")
         if required_checks is not None:
             from .knowledge_quality import validate_quality_review
-            validate_quality_review(output, required_checks, repair_scope_supported=repair_scope_supported)
+            validate_quality_review(output, required_checks, repair_scope_supported=repair_scope_supported,
+                                    repair_evidence_supported=repair_evidence_supported, candidate=candidate,
+                                    review_quality_context=review_quality_context)
         elif repair_scope_supported:
             from .knowledge_quality import validate_review_repair_scope
-            validate_review_repair_scope(output)
+            validate_review_repair_scope(output, evidence_required=repair_evidence_supported, candidate=candidate)
 
 
 def _candidate_binding(candidate):
@@ -1475,7 +1481,8 @@ def _persist_review(git, candidate, stage_bytes, stage_commit, review_call, outp
         sources = _candidate_sources(git, candidate, historical=True)
         request = _review_payload(candidate, _candidate_payload(git, candidate, sources))
     _review_output(output, quality=quality, required_checks=request["required_checks"] if request else None,
-                   skill_bundle=candidate.get("skill_bundle"))
+                   skill_bundle=candidate.get("skill_bundle"), candidate=candidate,
+                   review_quality_context=request.get("quality_context") if request else None)
     from .assembly_final import extraction_invocations
     if (_call_metadata({**review_call, "output": output}) != review_call
             or review_call["invocation_id"] in extraction_invocations(candidate)):
@@ -2155,7 +2162,8 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 reviewed = model_call("review", copy.deepcopy(request))
                 review_call = _call_metadata(reviewed)
                 output = reviewed["output"]
-                _review_output(output, required_checks=request.get("required_checks"), skill_bundle=skill_bundle)
+                _review_output(output, required_checks=request.get("required_checks"), skill_bundle=skill_bundle, candidate=candidate,
+                               review_quality_context=request.get("quality_context"))
                 if review_call["invocation_id"] == extraction["invocation_id"]:
                     _error("review_not_independent")
             except (ModelCallError, CaptureError) as error:
@@ -2515,7 +2523,7 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
             or git.read(stage_commit, stage_path) != stage_bytes or git.read(review_commit, review_path) != review_bytes):
         _error("review_binding_mismatch")
     call = _call_metadata({**review["call"], "output": review["output"]})
-    _review_output(review["output"], quality=_quality_enabled(candidate), skill_bundle=candidate.get("skill_bundle"))
+    _review_output(review["output"], quality=_quality_enabled(candidate), skill_bundle=candidate.get("skill_bundle"), candidate=candidate)
     from .assembly_final import SCHEMA as ASSEMBLY_SCHEMA, extraction_invocations
     if call != review["call"] or call["invocation_id"] in extraction_invocations(candidate):
         _error("review_not_independent")
@@ -2533,7 +2541,8 @@ def _read_reviewed_data(git, run_id, *, source_paths=None, historical=False, vis
         _error("review_binding_mismatch")
     elif _quality_enabled(candidate):
         request = _review_payload(candidate, _candidate_payload(git, candidate, sources))
-        _review_output(review["output"], required_checks=request["required_checks"], skill_bundle=candidate.get("skill_bundle"))
+        _review_output(review["output"], required_checks=request["required_checks"], skill_bundle=candidate.get("skill_bundle"), candidate=candidate,
+                       review_quality_context=request.get("quality_context"))
         if review.get("request_binding") != _model_request_binding("review", request):
             _error("review_request_mismatch")
     elif "request_binding" in review:

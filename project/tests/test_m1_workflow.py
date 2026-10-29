@@ -108,7 +108,7 @@ class M1CommandWorkflowTests(unittest.TestCase):
             old = self.process([self.paths[0]])
             self.assertEqual(old["status"], "passed")
             metadata, body = parse_markdown((self.repo / old["stage_path"]).read_bytes())
-            self.assertEqual(metadata["schema_version"], "0.18")
+            self.assertEqual(metadata["schema_version"], "0.20")
             self.assertEqual(json.loads(body)["quality_contract"], "skill-quality-v1")
             original = self.invoke("publish", "--repo", str(self.repo), "--run", old["run_id"])
             payload = {"request_key": "artificial:cli-correction", "action": "corrects",
@@ -128,7 +128,7 @@ class M1CommandWorkflowTests(unittest.TestCase):
             update = self.process(self.paths[:2], [old["run_id"]])
             self.assertEqual(update["status"], "passed")
             metadata, body = parse_markdown((self.repo / update["stage_path"]).read_bytes())
-            self.assertEqual(metadata["schema_version"], "0.18")
+            self.assertEqual(metadata["schema_version"], "0.20")
             candidate = json.loads(body)
             selected_paths = {(source["source_id"], source["source_version"]): source["path"]
                               for source in candidate["quality_context"]["sources"]}
@@ -142,7 +142,7 @@ class M1CommandWorkflowTests(unittest.TestCase):
             self.assertEqual(dispositions[self.paths[1]]["status"], "summarized")
             self.assertIn("实际是1", dispositions[self.paths[1]]["body_evidence"][0]["text"])
             review_meta, review_body = parse_markdown((self.repo / update["review_path"]).read_bytes())
-            self.assertEqual(review_meta["schema_version"], "0.18")
+            self.assertEqual(review_meta["schema_version"], "0.20")
             reviewed = json.loads(review_body)["output"]
             self.assertEqual(reviewed["verdict"], "passed")
             self.assertEqual(len(self.review_requests), 2)

@@ -12,8 +12,8 @@ import re
 
 QUALITY_CONTRACT = "skill-quality-v1"
 BUNDLE_SCHEMA = "skill-bundle-v1"
-DEFAULT_EXTRACT_SKILL_REF = "knowledge-extract@12"
-DEFAULT_REVIEW_SKILL_REF = "knowledge-review@10"
+DEFAULT_EXTRACT_SKILL_REF = "knowledge-extract@13"
+DEFAULT_REVIEW_SKILL_REF = "knowledge-review@11"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 MAX_FILE_BYTES = 64_000
@@ -44,6 +44,8 @@ _MANIFEST_HASHES = {
     "knowledge-review@9": "sha256-e225a117fc552bff0bee58dbf4b81cd7bc177f03ca8099a5a56c4557690c847a",
     "knowledge-extract@12": "sha256-6b538f1014cd5ad9f35adfbe007b7350b95433816b4443101985677d46cd656c",
     "knowledge-review@10": "sha256-03f3b3a21c3ba8683bc4854d396e3cb89e9dfd650650f967ba7ecde4f2965558",
+    "knowledge-extract@13": "sha256-9a923703a4913a7a59409d41613cf5baaf7746089576aadf228719d2868451f6",
+    "knowledge-review@11": "sha256-9eee2fef44350495531c3c8c3244c61e140025c94cdaaec09caf6241347e9325",
 }
 _ROLES = ("extract", "review")
 _SNAPSHOT_KEYS = {"path", "content", "sha256", "bytes"}
@@ -262,13 +264,16 @@ def validate_skill_bundle(bundle):
     if ((bundle["skills"]["extract"]["ref"] == "knowledge-extract@12")
             != (bundle["skills"]["review"]["ref"] == "knowledge-review@10")):
         raise SkillError("invalid_skill_pair")
+    if ((bundle["skills"]["extract"]["ref"] == "knowledge-extract@13")
+            != (bundle["skills"]["review"]["ref"] == "knowledge-review@11")):
+        raise SkillError("invalid_skill_pair")
     if any(manifest["shared_policy"] != bundle["shared_policy"] for manifest in manifests):
         raise SkillError("shared_policy_mismatch")
     return bundle
 
 
 def statistic_repair_enabled(bundle):
-    """Registered 11/9 and 12/10 retain the frozen-text quality repair."""
+    """Registered 11/9 and later pairs retain the frozen-text quality repair."""
     skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     return incremental_repair_enabled(bundle) or (isinstance(skills, dict)
             and all(isinstance(skills.get(role), dict) and skills[role].get("ref") == ref
@@ -277,11 +282,24 @@ def statistic_repair_enabled(bundle):
 
 
 def incremental_repair_enabled(bundle):
-    """Only the explicit 12/10 contract permits new incremental materialization."""
+    """Explicit 12/10 and 13/11 retain pinned incremental materialization."""
+    skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
+    return revision_coverage_enabled(bundle) or (isinstance(skills, dict) and all(isinstance(skills.get(role), dict)
+            and skills[role].get("ref") == ref for role, ref in
+            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10"))))
+
+
+def revision_coverage_enabled(bundle):
+    """Only 13/11 adds current-draft coverage regression obligations."""
     skills = bundle.get("skills", {}) if isinstance(bundle, dict) else {}
     return (isinstance(skills, dict) and all(isinstance(skills.get(role), dict)
             and skills[role].get("ref") == ref for role, ref in
-            (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10"))))
+            (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11"))))
+
+
+def statistic_evidence_enabled(bundle):
+    """Only 13/11 requires Review-pinned body evidence for missing pairs."""
+    return revision_coverage_enabled(bundle)
 
 
 def resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None, *,

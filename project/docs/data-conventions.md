@@ -1,6 +1,32 @@
 # 数据规范
 
-当前开发为`0.2.0.dev35`；Skill12/10及普通质量候选0.18保持，新分解审核plan／proof和受限stage复用sidecar使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。下文按dev标记保留旧合同，不将新字段回填到历史运行。
+当前开发为`0.2.0.dev36`；新默认Skill13/11及普通质量候选0.20，分解审核plan／proof和受限stage复用sidecar继续使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。旧12/10的0.18及更早合同保持；下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+
+<a id="revision-completeness-repair"></a>
+
+## dev36：返工完整性、统计口径与修补分流
+
+本节仅由新13/11启用，沿用提取、程序校验、独立Review及条件发布，不增加阶段。前稿内容只是未发布草稿，不因曾标记summarized就成为已确认事实。
+
+### 内容回退与审核顺序
+
+程序按稳定`target_id`比较`revision_context.candidate`和当前`extraction_output.quality.coverage_disposition`。来源／目标范围须与该返工上下文一致；目标缺项或重复仍由原质量校验拒绝。前稿summarized而本稿deferred的目标形成紧凑回退说明，绑定前后状态、目标及当前理由，不以对象数量或路径改变判断内容丢失。
+
+存在回退时，既有分解Review优先核对应完整来源coverage，再执行未完成的对象／其他coverage，global仍最后；来源、说明／字典、必要语义范围及完整证明要求不减少。审核根据当前原文区分可整理但未完成的needs_revision和真实缺料的needs_confirmation；合法合并、纠错与已知错误撤回不得被“保留旧稿”要求强行覆盖。程序不自动拼回前稿，也不凭deferred理由关键词代替语义审核。旧12/10及更早计划顺序、单元身份与请求字节保持。
+
+### 统计关联口径与v2定点补丁
+
+提取和审核使用相同统计口径：一段正文明确表述多个指标共用分母时，关联须列出实际适用的各target统计；只表述单字段时不强加其他字段。相同数字、同表或同期间本身不能证明关联，不要求把整个统计目录搬入正文。
+
+新Review的`repair_scope.missing_bindings`每项为`{stat_id, record_id, body_evidence}`；body_evidence须是指定当前记录正文中的准确非空摘录，并包含理解该统计所需的限定。程序核对真实Review、固定候选／统计和范围，不能仅用reasons中的笼统说明替代正文锚。
+
+新合同`statistic-bindings-repair-v2`复用已有定点返工：原正文、身份、来源、分类、关系及旧quality冻结，原生patch仍只返回指定三元组。v2的body_evidence还须与真实Review锚相同；程序从固定统计展开value和根来源引用，再执行完整独立Review。该合同不产生合成模型调用、不保证零新调用，也不免除语义关联核对。旧`statistic-bindings-repair-v1`继续按原二元缺项及原patch合同核验，不回填新锚。
+
+### 纯统计模式的完整稿条件
+
+局部object Review仅能证明该对象的问题范围，不能证明整组只缺统计。新v2最终候选仍有已知deferred内容或内容回退时，不启用冻结整稿的纯统计模式，保留原反馈并走既有内容／覆盖审核或待确认路径。完整稿确实只缺统计关联时继续定点补丁；不要求所有后续审核先完成才能修复早停对象，也不将局部draft_only草稿误判为完整最终稿。
+
+普通新质量链为0.20，plan／proof／stage复用sidecar结构继续0.19。旧请求、来源0.1、正式0.2和历史证明保持；来源、规则、控制或正文改变仍按原门禁处理。同一工作首次加最多三次重试共四次，耗尽和unknown不因本节重开。检查见[dev36验收](scenarios-and-acceptance.md#revision-completeness-acceptance)。
 
 <a id="model-request-capacity"></a>
 
@@ -137,7 +163,7 @@ production将本次worker参数传到各实际调用，不向已有queue或账�
 
 原样最终候选真实Review退回后保留原意见。若需实质跨批修订而现有请求仍不能承载，后续返回`blocked_context`／`assembly_revision_required`及零新调用，不重复原样再审或刷新次数。正常可承载final、10/8草稿及答复续接仍按下文有限反馈返工。该安全回退不代表已经实现任意大规模跨批语义修订。
 
-来源及采集`0.1`、正式对象`0.2`保持；新12/10普通质量链为`0.18`，旧11/9为`0.15`，旧10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
+来源及采集`0.1`、正式对象`0.2`保持；新13/11普通质量链为`0.20`，旧12/10为`0.18`、11/9为`0.15`、10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。11/9继续引用`knowledge-context-v1`核来源、时间、范围和已提供关系，旧审核只证明其原版本。
 
@@ -250,13 +276,13 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 <a id="skill-quality-contract"></a>
 
-## M1 Skill 引用与知识质量契约（12/10为 `0.18`，旧11/9为 `0.15`）
+## M1 Skill 引用与知识质量契约（13/11为 `0.20`，旧12/10为 `0.18`）
 
-显式bundle启用`quality_contract="skill-quality-v1"`，新12/10使用0.18、旧11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。
+显式bundle启用`quality_contract="skill-quality-v1"`，新13/11使用0.20、旧12/10使用0.18、11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。新返工检查和v2正文锚见[dev36合同](#revision-completeness-repair)。
 
 ### Skill 引用、展开与运行绑定
 
-CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@12／review@10，历史extract@1—@11与review@1—@9原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
+CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@13／review@11，历史extract@1—@12与review@1—@10原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
 
 `skill_bundle` 顶层为 `schema_version="skill-bundle-v1"`、`quality_contract`、`skills`、`shared_policy` 和 `sha256`。`skills.extract`／`skills.review` 各保存 `ref`、`role`、`version`、`manifest`、`files`、`base_prompt`；每个内容快照包含 `path`、`content`、`sha256`、`bytes`。manifest 和完整依赖按注册摘要核验，bundle摘要覆盖除其自身 `sha256` 外的规范JSON；角色和共享规范必须一致。设计阶段的 `skill_binding` 在实际格式中由完整bundle与请求绑定共同承担，不另存同名字段。
 
@@ -432,7 +458,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增0.19分解审核／stage复用证明门禁，普通12/10继续0.18，旧11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
+Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增13/11普通质量0.20门禁，分解审核／stage复用证明继续0.19，旧12/10继续0.18、11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 

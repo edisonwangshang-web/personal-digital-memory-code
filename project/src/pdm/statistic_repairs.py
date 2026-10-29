@@ -1,8 +1,9 @@
 """Materialize an explicitly reviewed missing-statistic mapping repair.
 
-The model chooses the exact record excerpt and statistical identity. This
-module only completes the value and a source anchor from that identity. It
-does not infer mappings from equal numbers, edit frozen knowledge, or verify
+The model chooses the exact record excerpt and statistical identity. The v2
+contract binds that choice in the actual Review; a later patch cannot replace
+it. This module only completes the value and a source anchor from the identity.
+It does not infer mappings from equal numbers, edit frozen knowledge, or verify
 Git authority: callers first verify the complete revision context and current
 controls, and rebuild the small context before accepting a stored patch.
 """
@@ -18,6 +19,8 @@ from .knowledge_quality import (build_review_checks, prepare_quality, project_qu
 
 CONTRACT = "statistic-bindings-repair-v1"
 SCHEMA = "0.15"
+CONTRACT_V2 = "statistic-bindings-repair-v2"
+SCHEMA_V2 = "0.20"
 
 
 def _fail(code="invalid_statistic_repair"):
@@ -36,14 +39,15 @@ def is_enabled(bundle):
     return statistic_repair_enabled(bundle)
 
 
-def _pairs(values):
+def _pairs(values, *, evidence_required=False):
     if not isinstance(values, list):
         _fail()
     pairs = []
+    fields = {"stat_id", "record_id"} | ({"body_evidence"} if evidence_required else set())
     for value in values:
-        if (not isinstance(value, dict) or set(value) != {"stat_id", "record_id"}
+        if (not isinstance(value, dict) or set(value) != fields
                 or any(not isinstance(value[key], str) or not value[key].strip()
-                       for key in ("stat_id", "record_id"))):
+                       for key in fields)):
             _fail()
         pairs.append((value["stat_id"], value["record_id"]))
     if len(set(pairs)) != len(pairs):
@@ -138,6 +142,8 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
     candidate = revision_context["candidate"]
     if not is_enabled(candidate.get("skill_bundle")):
         return None
+    from .skill_support import statistic_evidence_enabled
+    reviewed_evidence = statistic_evidence_enabled(candidate.get("skill_bundle"))
     material = {key: value for key, value in revision_context.items() if key not in {"binding", "model_context"}}
     record = revision_context.get("review_record")
     if (revision_context.get("contract") != "review-feedback-v1"
@@ -149,13 +155,19 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
             or record.get("output") != revision_context.get("review_output")):
         _fail("statistic_repair_feedback_mismatch")
     output = record["output"]
-    scope = validate_review_repair_scope(output)
+    scope = (validate_review_repair_scope(output, evidence_required=True, candidate=candidate)
+             if reviewed_evidence else validate_review_repair_scope(output))
     if scope["kind"] != "statistic_bindings":
         return None
     checks, reviewed_scope = _review_checks(candidate, record)
     if checks is None:
         return None
-    validate_quality_review(output, checks, repair_scope_supported=True)
+    if reviewed_evidence:
+        validate_quality_review(output, checks, repair_scope_supported=True,
+                                repair_evidence_supported=True, candidate=candidate,
+                                review_quality_context=project_quality(current_quality_context, reviewed_scope))
+    else:
+        validate_quality_review(output, checks, repair_scope_supported=True)
     indexed_checks = {check["check_id"]: check for check in checks}
     if any(indexed_checks[check["check_id"]]["kind"] != "object_statistics_time"
            for check in output["checks"] if check["result"] != "passed"):
@@ -172,6 +184,13 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
     frozen = candidate.get("objects")
     view = _quality_view(original, frozen)
     validate_quality_output(view, current_quality_context)
+    if (reviewed_evidence and candidate.get("batch_material", {}).get("draft_only") is not True
+            and any(row["status"] == "deferred" for row in original["quality"]["coverage_disposition"])):
+        # A stopped object Review only proves that object's repair scope. It
+        # cannot freeze an unfinished final candidate as a metadata-only job.
+        # Leave genuine evidence gaps and content repair to their existing
+        # Review/pending paths; this function must not invent either verdict.
+        return None
     records = _records(frozen)
     statistics = {stat["stat_id"]: stat for stat in current_quality_context["statistics"]}
     visible = project_quality(current_quality_context, reviewed_scope)
@@ -182,7 +201,9 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
     summarized = {row["target_id"]: set(row["record_ids"])
                   for row in original["quality"]["coverage_disposition"] if row["status"] == "summarized"}
     existing = {(claim["stat_id"], claim["record_id"]) for claim in original["quality"]["statistic_claims"]}
-    missing = sorted(_pairs(scope["missing_bindings"]))
+    missing = sorted(_pairs(scope["missing_bindings"], evidence_required=reviewed_evidence))
+    body_evidence = ({(entry["stat_id"], entry["record_id"]): entry["body_evidence"]
+                      for entry in scope["missing_bindings"]} if reviewed_evidence else {})
     for sid, rid in missing:
         if (sid not in statistics or rid not in records or (sid, rid) in existing
                 or rid not in summarized.get(statistics[sid]["target_id"], set())):
@@ -202,7 +223,10 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
                    for ref in records[rid]["metadata"]["sources"] if isinstance(ref, dict)):
             _fail("statistic_repair_scope_mismatch")
         _statistic_scope(stat, records[rid])
-    context = {"contract": CONTRACT, "schema_version": SCHEMA,
+        if reviewed_evidence and body_evidence[(sid, rid)] not in records[rid]["body"]:
+            _fail("statistic_repair_body_mismatch")
+    context = {"contract": CONTRACT_V2 if reviewed_evidence else CONTRACT,
+               "schema_version": SCHEMA_V2 if reviewed_evidence else SCHEMA,
                "source_run_id": candidate["run_id"], "revision_binding": revision_context["binding"],
                "candidate_binding": candidate["binding"], "stage": deepcopy(revision_context.get("stage")),
                "review": deepcopy(revision_context.get("review")),
@@ -211,8 +235,17 @@ def build_repair_context(revision_context, current_quality_context, *, sources=N
                "quality_context_sha256": _hash(current_quality_context),
                "original_output_sha256": _hash(original), "frozen_objects_sha256": _hash(frozen),
                "record_bindings": _record_bindings(frozen),
-               "missing_bindings": [{"stat_id": sid, "record_id": rid} for sid, rid in missing]}
+               "missing_bindings": [{"stat_id": sid, "record_id": rid,
+                    **({"body_evidence": body_evidence[(sid, rid)]} if reviewed_evidence else {})}
+                    for sid, rid in missing]}
     context["binding"] = _hash(context)
+    if reviewed_evidence and sources is not None:
+        # Verify the already reviewed excerpts against the same numerical and
+        # root-source checks a future patch must pass, before another call.
+        # This is a pure materialization of copied data, not a model response.
+        materialize_patch({"statistic_bindings": deepcopy(context["missing_bindings"])}, context,
+            current_quality_context, sources, source_views, original,
+            frozen_objects=frozen, controls_digest=controls_digest)
     return context
 
 
@@ -239,8 +272,11 @@ def materialize_patch(raw_patch, repair_context, current_quality_context, source
     expected_fields = {"contract", "schema_version", "source_run_id", "revision_binding", "candidate_binding",
                        "stage", "review", "controls_digest", "source_bindings_sha256", "quality_context_sha256",
                        "original_output_sha256", "frozen_objects_sha256", "record_bindings", "missing_bindings", "binding"}
-    if (set(repair_context) != expected_fields or repair_context.get("contract") != CONTRACT
-            or repair_context.get("schema_version") != SCHEMA
+    reviewed_evidence = repair_context.get("contract") == CONTRACT_V2
+    expected_contract = CONTRACT_V2 if reviewed_evidence else CONTRACT
+    expected_schema = SCHEMA_V2 if reviewed_evidence else SCHEMA
+    if (set(repair_context) != expected_fields or repair_context.get("contract") != expected_contract
+            or repair_context.get("schema_version") != expected_schema
             or repair_context.get("binding") != _hash({key: value for key, value in repair_context.items() if key != "binding"})
             or repair_context["quality_context_sha256"] != _hash(current_quality_context)
             or repair_context["original_output_sha256"] != _hash(original_output)
@@ -262,9 +298,14 @@ def materialize_patch(raw_patch, repair_context, current_quality_context, source
         if pair in entries:
             _fail("statistic_repair_duplicate")
         entries[pair] = entry["body_evidence"]
-    missing = _pairs(repair_context["missing_bindings"])
+    missing = _pairs(repair_context["missing_bindings"], evidence_required=reviewed_evidence)
     if set(entries) != set(missing):
         _fail("statistic_repair_scope_mismatch")
+    if reviewed_evidence:
+        reviewed = {(entry["stat_id"], entry["record_id"]): entry["body_evidence"]
+                    for entry in repair_context["missing_bindings"]}
+        if entries != reviewed:
+            _fail("statistic_repair_review_body_mismatch")
     records = _records(frozen_objects)
     statistics = {stat["stat_id"]: stat for stat in current_quality_context["statistics"]}
     lines = _source_lines(sources, source_views, current_quality_context)

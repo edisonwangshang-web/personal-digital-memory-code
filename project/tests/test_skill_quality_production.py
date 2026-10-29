@@ -49,7 +49,7 @@ class SkillQualityProductionTests(unittest.TestCase):
         git = PipelineGit(self.repo)
         meta, _ = parse_markdown(git.read(git.head(),
             "memory/runs/processes/queues/quality/state.md"))
-        self.assertEqual(meta["schema_version"], "0.18")
+        self.assertEqual(meta["schema_version"], "0.20")
         before = git.head(), self.ledger.path.read_bytes()
         self.assertEqual(run_production(self.repo, "quality", model_call=self.adapter)["status"], "published")
         self.assertEqual((git.head(), self.ledger.path.read_bytes()), before)

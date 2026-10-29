@@ -135,6 +135,40 @@ def _scope(candidate, payload, sources=None):
         validate_source_views(sources, views, candidate["batch_context"])
 
 
+def _prioritize_revision_coverage(candidate, payload, units):
+    """Check regressed supplied content in existing coverage units first.
+
+    Complete source scopes and every required unit are preserved. In particular
+    this does not turn an unfinished draft into an automatic failure: the first
+    independent coverage Review can still distinguish missing facts from work
+    left undone, before spending calls on otherwise unaffected old objects.
+    """
+    from .revision_context import revision_coverage_regressions
+    regressions = revision_coverage_regressions(candidate)
+    if not regressions:
+        return units
+    targets = {target["target_id"]: target for target in candidate["quality_context"]["targets"]}
+    identities = {target_id: (targets[target_id]["source_id"], targets[target_id]["source_version"])
+                  for target_id in (item["target_id"] for item in regressions)}
+    indexed = {fragment["fragment_id"]: (fragment["source_id"], fragment["source_version"])
+               for fragment in payload["batch_context"]["source_ranges"]}
+    priorities = []
+    for index, unit in enumerate(units):
+        if unit["kind"] != "coverage":
+            continue
+        covered = {indexed[identifier] for identifier in unit["fragment_ids"]}
+        score = sum(identity in covered for identity in identities.values())
+        if score:
+            # Source-wide units share explanatory notes. Prefer the unit with
+            # the most affected targets, while retaining stable ties.
+            priorities.append((-score, index, unit))
+    if not priorities:
+        _fail("decomposed_incomplete_revision_scope")
+    first = [unit for _, _, unit in sorted(priorities, key=lambda item: item[:2])]
+    moved = {unit["unit_id"] for unit in first}
+    return first + [unit for unit in units if unit["unit_id"] not in moved]
+
+
 def _layout(candidate, payload):
     objects = candidate["objects"]
     by_path = {obj["path"]: obj for obj in objects}
@@ -201,7 +235,7 @@ def _layout(candidate, payload):
         # coverage obligation. It is never split by bytes to manufacture a pass.
         unit("coverage", by_path, missing)
     unit("global", by_path, reply_ids)
-    return units, graph
+    return _prioritize_revision_coverage(candidate, payload, units), graph
 
 
 def _source_layout(candidate, payload):
@@ -237,7 +271,8 @@ def _source_layout(candidate, payload):
     if (not coverage or set().union(*(set(unit["fragment_ids"]) for unit in coverage)) != expected
             or table_paths - set(by_path)):
         _fail("decomposed_incomplete_input_scope")
-    return [unit for unit in units if unit["kind"] == "object"] + coverage + [units[-1]], graph
+    selected = [unit for unit in units if unit["kind"] == "object"] + coverage + [units[-1]]
+    return _prioritize_revision_coverage(candidate, payload, selected), graph
 
 
 def _source_contract(candidate):
@@ -530,7 +565,7 @@ def _certificate(unit, result, node, *, request_contract=None):
     return certificate
 
 
-def _result_node(git, plan, unit, reservation, result_path, request=None):
+def _result_node(git, plan, unit, reservation, result_path, request=None, *, candidate=None):
     from .pipeline import _call_metadata, _review_output
     result, data = _read(git, result_path, "decomposed_review_result")
     expected = {"run_id", "plan_id", "unit_id", "request_sha256", "reservation", "call", "output"}
@@ -554,7 +589,8 @@ def _result_node(git, plan, unit, reservation, result_path, request=None):
                 or reservation["input_bytes"] != result["request_binding"]["bytes"]):
             _fail("decomposed_request_mismatch")
         _review_output(result["output"], quality=True, required_checks=request["required_checks"],
-                       skill_bundle=request.get("skill_bundle"))
+                       skill_bundle=request.get("skill_bundle"), candidate=candidate,
+                       review_quality_context=request.get("quality_context"))
     else:
         _review_output(result["output"])
     reference = result["reservation"]
@@ -625,7 +661,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
             if attempt["request_sha256"] == request_sha and attempt["plan_id"] == plan["plan_id"]:
                 if git._existing(attempt["result_path"]) is not None:
                     reservation, _ = _read(git, attempt["reservation_path"], "decomposed_review_reservation")
-                    node, result = _result_node(git, plan, unit, reservation, attempt["result_path"], request)
+                    node, result = _result_node(git, plan, unit, reservation, attempt["result_path"], request,
+                                                candidate=candidate)
                     break
                 if attempt["status"] in {"reserved", "unknown"}:
                     operation = adapter.ledger.operation(attempt["operation_id"]) if adapter is not None else None
@@ -678,7 +715,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
                 call = _call_metadata(response)
                 if plan.get("quality_contract") == QUALITY_CONTRACT:
                     _review_output(response["output"], quality=True, required_checks=request["required_checks"],
-                                   skill_bundle=request.get("skill_bundle"))
+                                   skill_bundle=request.get("skill_bundle"), candidate=candidate,
+                       review_quality_context=request.get("quality_context"))
                 else:
                     _review_output(response["output"])
                 if call["invocation_id"] in invocations:
@@ -735,7 +773,8 @@ def run_decomposed_review(git, candidate, stage_commit, payload, model_call):
             _write(git, retry["result_path"], saved, "decomposed_review_result")
             retry["status"] = saved["output"]["verdict"]
             _write(git, counter_path, counter, "decomposed_review_attempts", mutable=True)
-            node, result = _result_node(git, plan, unit, reservation, retry["result_path"], request)
+            node, result = _result_node(git, plan, unit, reservation, retry["result_path"], request,
+                                        candidate=candidate)
         if result["call"]["invocation_id"] in invocations:
             _fail("review_not_independent")
         invocations.add(result["call"]["invocation_id"])
@@ -788,7 +827,8 @@ def verify_decomposed_review(git, candidate, review, payload, sources, historica
         from .model_calls import MAX_INPUT_BYTES
         if reservation["input_bytes"] > MAX_INPUT_BYTES:
             _fail("decomposed_input_limit")
-        node, checked = _result_node(git, plan, unit, reservation, reference["path"], request)
+        node, checked = _result_node(git, plan, unit, reservation, reference["path"], request,
+                                     candidate=candidate)
         if node != reference or checked != result or _hash(data) != reference["sha256"]:
             _fail()
         git.run("merge-base", "--is-ancestor", plan["stage_commit"], reservation_ref["commit_sha"])

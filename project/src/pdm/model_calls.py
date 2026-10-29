@@ -121,20 +121,21 @@ def output_schema(role, payload):
         if role == "extract" and "quality_repair_context" in payload:
             raise ValueError("invalid_quality_repair_context")
         return base
-    from .knowledge_quality import QUALITY_SCHEMA, QUALITY_REVIEW_CHECK_SCHEMA, REPAIR_SCOPE_SCHEMA
+    from .knowledge_quality import QUALITY_SCHEMA, QUALITY_REVIEW_CHECK_SCHEMA, repair_scope_schema
+    from .skill_support import statistic_evidence_enabled
     if role == "extract" and "quality_repair_context" in payload:
         return _statistic_repair_output_schema(payload)
     result = (_object(dict(base["properties"], quality=QUALITY_SCHEMA)) if role == "extract"
               else _object(dict(base["properties"], checks=_array(QUALITY_REVIEW_CHECK_SCHEMA))))
-    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-review@9", "knowledge-review@10"}:
-        result["properties"]["repair_scope"] = deepcopy(REPAIR_SCOPE_SCHEMA)
+    if role == "review" and payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-review@9", "knowledge-review@10", "knowledge-review@11"}:
+        result["properties"]["repair_scope"] = repair_scope_schema(evidence_required=statistic_evidence_enabled(payload["skill_bundle"]))
         result["required"].append("repair_scope")
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13"}:
         result["properties"]["reuse_refs"] = _array(_object({"path": _STRING, "content_version": _STRING}))
         result["required"].append("reuse_refs")
         if payload.get("output_contract") != "batch-v1":
             result["properties"]["wiki"] = {"anyOf": [result["properties"]["wiki"], {"type": "null"}]}
-    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12"}:
+    if payload["skill_bundle"]["skills"][role]["ref"] in {"knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13"}:
         context = payload.get("quality_context")
         targets = context.get("targets") if isinstance(context, dict) else None
         if not isinstance(targets, list):
@@ -150,24 +151,25 @@ def output_schema(role, payload):
         return result
     if payload["skill_bundle"]["skills"][role]["ref"] in {
             "knowledge-extract@5", "knowledge-review@4", "knowledge-extract@6", "knowledge-review@5",
-            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10"}:
+            "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10", "knowledge-review@11"}:
         return _reference_schema(result, role, payload)
     return result
 
 
 def _statistic_repair_output_schema(payload):
     """Constrain only explicitly requested identities; body meaning stays semantic."""
-    from .knowledge_quality import STATISTIC_BINDINGS_SCHEMA, STATISTIC_REPAIR_CONTRACT
-    from .skill_support import statistic_repair_enabled
+    from .knowledge_quality import STATISTIC_BINDINGS_SCHEMA, STATISTIC_REPAIR_CONTRACT, STATISTIC_REPAIR_CONTRACT_V2
+    from .skill_support import statistic_repair_enabled, statistic_evidence_enabled
     context = payload.get("quality_repair_context")
     if (not statistic_repair_enabled(payload.get("skill_bundle")) or not isinstance(context, dict)
-            or context.get("contract") != STATISTIC_REPAIR_CONTRACT):
+            or context.get("contract") != (STATISTIC_REPAIR_CONTRACT_V2 if statistic_evidence_enabled(payload.get("skill_bundle")) else STATISTIC_REPAIR_CONTRACT)):
         raise ValueError("invalid_quality_repair_context")
     bindings = context.get("missing_bindings")
+    binding_fields = {"stat_id", "record_id", "body_evidence"} if statistic_evidence_enabled(payload.get("skill_bundle")) else {"stat_id", "record_id"}
     if (not isinstance(bindings, list) or not bindings
-            or any(not isinstance(item, dict) or set(item) != {"stat_id", "record_id"}
+            or any(not isinstance(item, dict) or set(item) != binding_fields
                    or any(not isinstance(item[key], str) or not item[key].strip()
-                          for key in ("stat_id", "record_id")) for item in bindings)):
+                          for key in binding_fields) for item in bindings)):
         raise ValueError("invalid_quality_repair_context")
     pairs = [(item["stat_id"], item["record_id"]) for item in bindings]
     if len(set(pairs)) != len(pairs):
@@ -254,8 +256,8 @@ def render_model_request(role, payload):
             wire_instructions = KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
             encoder = encode_shared_json_v2
         elif bundle["skills"][role]["ref"] in {
-                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12",
-                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10"}:
+                "knowledge-extract@6", "knowledge-extract@7", "knowledge-extract@8", "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13",
+                "knowledge-review@5", "knowledge-review@6", "knowledge-review@7", "knowledge-review@8", "knowledge-review@9", "knowledge-review@10", "knowledge-review@11"}:
             from .skill_wire_v2 import WIRE_INSTRUCTIONS as KEY_INSTRUCTIONS
             from .skill_wire_v3 import WIRE_INSTRUCTIONS as TABLE_INSTRUCTIONS, encode_shared_json_v3
             wire_instructions = TABLE_INSTRUCTIONS + "\n\n" + KEY_INSTRUCTIONS + "\n\n" + WIRE_INSTRUCTIONS
@@ -274,7 +276,7 @@ def render_model_request(role, payload):
         })
         if (bundle["skills"]["extract"]["ref"], bundle["skills"]["review"]["ref"]) in {
                 ("knowledge-extract@10", "knowledge-review@8"), ("knowledge-extract@11", "knowledge-review@9"),
-                ("knowledge-extract@12", "knowledge-review@10")}:
+                ("knowledge-extract@12", "knowledge-review@10"), ("knowledge-extract@13", "knowledge-review@11")}:
             from .quality_projection import PROJECTION_INSTRUCTIONS, project_quality_payload
             instructions += "\n\n" + PROJECTION_INSTRUCTIONS
             material = project_quality_payload(material)

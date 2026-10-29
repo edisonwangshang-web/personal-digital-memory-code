@@ -1,5 +1,7 @@
 # 协作约定
 
+当前dev36仅修现有返工和审核交接：新默认Skill13/11、普通质量0.20，来源0.1／正式0.2及plan／proof／sidecar0.19保持。按稳定target比较前稿summarized到本稿deferred的回退，对应完整来源coverage在既有分解Review内优先核查，不按文件数量判丢失、不自动拼回前稿；合法纠错、合并及真实缺料仍按Review／pending处理。新统计审核明确适用指标和准确正文锚，statistic-bindings-repair-v2冻结Review给出的body_evidence；最终稿有已知未完成内容时不选纯统计补丁。旧Skill／v1合同及请求字节保持，不新增阶段或模型服务。先人工回归和准确CI，当前不预填通过、不重开耗尽工作，两个master不动。
+
 当前dev35后续仅将应用完整模型请求门槛调为320000字节；原文planning与便携读取包仍各256000，其他存储上限、Skill、schema及旧请求字节不变。字节不等于token，真实服务接收仍待验收；已采用stage的后继被Review退回后走正常反馈返工，不重复采用旧源。
 
 当前dev35修复独立审核材料容量：新12/10分解计划按`selected-input-scope-v2`逐完整表格来源覆盖，并带完整说明／字典，由global汇总全部范围与关系；已存v1请求按原字节核验。新plan／proof及受限stage复用sidecar使用0.19，普通候选仍0.18，来源0.1／正式0.2不迁移。仅原提取已completed且已固定、Review从未启动、因`decomposed_input_limit`阻塞且同work尚未耗尽时，可在下一attempt核Git与原audit后零新extract复用，再按新工程校验和独立Review。次数、unknown和旧历史不重置，不做通用跨版本迁移，不增加阶段／接收方，两个master不动；工程、新CI及真实发布读取分别取证。
