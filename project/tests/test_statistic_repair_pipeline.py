@@ -32,7 +32,8 @@ class StatisticRepairPipelineTests(unittest.TestCase):
         prepare_production(self.repo, "statistics", self.paths, use_default_skills=True)
 
     def bindings(self, context):
-        return [{"stat_id": stat["stat_id"], "record_id": "artificial-period"}
+        return [{"stat_id": stat["stat_id"], "record_id": "artificial-period",
+                 "body_evidence": self.excerpt(context, stat["stat_id"])}
                 for stat in context["statistics"] if stat["operation"] in {"present_count", "blank_count"}
                 and next(target for target in context["targets"] if target["target_id"] == stat["target_id"]).get("column", "").startswith("metric-")]
 
@@ -136,7 +137,8 @@ class StatisticRepairPipelineTests(unittest.TestCase):
         self.assertTrue(repaired["objects"][0]["body"].endswith("supplied artificial table."))
 
     def test_patch_cannot_return_text_and_keeps_the_real_completed_failure(self):
-        run_production(self.repo, "statistics", model_call=self.adapter, max_steps=1)
+        first = run_production(self.repo, "statistics", model_call=self.adapter, max_steps=1)
+        self.assertEqual(first["status"], "needs_revision", first)
         self.invalid_patch = True
         result = run_production(self.repo, "statistics", model_call=self.adapter, max_steps=1)
         self.assertEqual(result["status"], "failed", result)
@@ -145,7 +147,8 @@ class StatisticRepairPipelineTests(unittest.TestCase):
         self.assertFalse((self.repo / "memory/records/artificial-period.md").exists())
 
     def test_unknown_patch_is_not_replayed_after_queue_rename(self):
-        run_production(self.repo, "statistics", model_call=self.adapter, max_steps=1)
+        first = run_production(self.repo, "statistics", model_call=self.adapter, max_steps=1)
+        self.assertEqual(first["status"], "needs_revision", first)
         self.interrupt_patch = True
         with self.assertRaises(KeyboardInterrupt):
             run_production(self.repo, "statistics", model_call=self.adapter, max_steps=1)
