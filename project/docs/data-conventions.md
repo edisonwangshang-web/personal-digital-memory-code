@@ -1,6 +1,6 @@
 # 数据规范
 
-当前开发为`0.2.0.dev38`；新默认Skill15/13及普通质量候选0.22，分解审核plan／proof和受限stage复用sidecar继续使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。旧14/12的0.21、13/11的0.20及更早合同保持；下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+当前开发为`0.2.0.dev39`，仅补未来失败诊断；沿用Skill15/13及普通质量候选0.22，分解审核plan／proof和受限stage复用sidecar继续使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。旧14/12的0.21、13/11的0.20及更早合同保持；下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
 
 <a id="complete-task-statistic-input"></a>
 
@@ -126,9 +126,11 @@ Review10对最终候选中deferred的覆盖检查及相应全局完成度检查�
 
 <a id="failed-extraction-diagnostics"></a>
 
-## dev30：提取校验失败的私有诊断
+## 提取校验失败的私有诊断
 
-dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。对象更新、领域等其他独立失败分支仍不承诺保存返回。
+dev39在既有`related_records_omitted`、`related_identity_changed`、`correction_evidence_missing`和`required_related_context`专用catch接入同一私有`extraction_diagnostic`。原生安全五字段继续留存；实际被校验的物化输出不同则另存`validated_output`及准确`validation_target`，不把物化内容冒充模型原件。`related_records_omitted`的details提供排序后的`missing_record_paths`、`required_record_paths`和`returned_record_paths`，只报告实际已核定路径，不补写模型返回或放宽遗漏门禁。旧失败没有留存返回或这些详情时仍无法事后恢复，也不能判定当时具体缺哪篇知识或新指标是否完成；本补丁不重开耗尽工作、不增加调用或恢复入口。
+
+dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。除上文明示接入的旧记录／关联完整性分支外，其他独立失败仍不承诺保存返回。
 
 | 字段 | 含义 |
 | --- | --- |

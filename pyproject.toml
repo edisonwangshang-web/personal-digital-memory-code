@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-digital-memory"
-version = "0.2.0.dev38"
+version = "0.2.0.dev39"
 description = "个人数字化记忆：来源采集、独立审核与可核验工程版本"
 requires-python = ">=3.11"
 dependencies = []

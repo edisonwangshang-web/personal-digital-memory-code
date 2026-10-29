@@ -6,7 +6,9 @@
 
 ## 当前阶段
 
-当前批次为`0.2.0.dev38`，仅修完整任务加工、普通统计声明、返工目标反馈及过去来源事件的时间限定。新默认`knowledge-extract@15`／`knowledge-review@13`，普通质量schema0.22；source-quality-v2、来源0.1、正式0.2及plan／proof／stage复用sidecar0.19保持。完整请求448000、planning／读取包各256000不变。本批人工检查、准确提交CI与获准真实复验分别取证，不预填通过，不更新master、不重开耗尽工作。合同见[dev38修复](data-conventions.md#complete-task-statistic-input)，检查见[dev38场景](scenarios-and-acceptance.md#complete-task-statistic-acceptance)。
+当前批次为`0.2.0.dev39`，仅为既有旧记录／关联完整性失败补齐未来私有诊断和准确缺失路径，不改变拒绝条件、阶段或加工规则。Skill15/13、普通质量0.22、source-quality-v2及来源／正式知识／证明格式保持；不恢复过去丢失返回，不声称原内容已经修好，不重开耗尽工作。人工检查和dev39准确CI另取证，当前不预填通过，两个master不更新。字段见[失败诊断](data-conventions.md#failed-extraction-diagnostics)，检查见[dev39场景](scenarios-and-acceptance.md#related-failure-diagnostic-acceptance)。
+
+dev38准确提交`43a16baa88c58bca2fa98ff9b0eed00580903064`的[CI40917650566](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40917650566)八任务已通过，仅证明该固定工程版本，不能代替dev39检查或真实内容验收；下面保留其能力范围。
 
 发布包逐个核验各代Skill的固定manifest与依赖，允许历史v1／v2质量policy共存；当前默认提取／审核配对仍须共享同一policy，旧新依赖缺失或篡改继续拒绝。
 

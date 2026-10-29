@@ -35,8 +35,8 @@ REVIEW_STRATEGIES = frozenset({"legacy-v1", "auto", "decomposed-v1"})
 CURRENT_DRAFT_REVIEW_CONTRACT = "current-draft-v1"
 
 
-def _error(code="invalid_pipeline_data"):
-    raise CaptureError(code, "加工版本或证据校验未通过；保留已有资料，核对后重试")
+def _error(code="invalid_pipeline_data", *, details=None):
+    raise CaptureError(code, "加工版本或证据校验未通过；保留已有资料，核对后重试", details=details)
 
 
 def _hash(value):
@@ -743,7 +743,11 @@ def _updated_objects(git, objects, related, *, check_current=False, rebuild_cont
         returned = {obj["path"] for obj in objects}
         old_records = {path for path in known if path.startswith("memory/records/")}
         if not old_records.issubset(returned):
-            _error("related_records_omitted")
+            _error("related_records_omitted", details={
+                "missing_record_paths": sorted(old_records - returned),
+                "required_record_paths": sorted(old_records),
+                "returned_record_paths": sorted(path for path in returned if path.startswith("memory/records/")),
+            })
         changed_ids = {obj["metadata"]["id"] for obj in objects if obj["path"] in old_records
                        and obj["metadata"]["content_version"] != known[obj["path"]]["content_version"]}
         if changed_ids:
@@ -2104,8 +2108,13 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                       "correction_evidence_missing", "required_related_context"}:
                     raise
                 git.check(head)
+                from .extraction_feedback import failure_context
+                diagnostic = _extraction_diagnostic(git, error, response,
+                    context_fields.get("extraction_request_binding"), materialized_output,
+                    failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call))
                 return _failure(git, run_id, "extract", error.code, head, extraction, schema_version, current_call_count(),
-                    failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
+                    failure_name="revalidation-failure" if _revalidate_completed is not None else "failure",
+                    extraction_diagnostic=diagnostic)
         else:
             _targets_clear(git, objects, rebuild_context)
         if _feedback_quality_enabled(skill_bundle):

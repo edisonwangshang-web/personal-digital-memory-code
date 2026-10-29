@@ -8,6 +8,8 @@ dev32批次收尾M1已有链路的采集、答复续接、事项解决、调度�
 
 ## 本批工程检查
 
+dev39仅核未来关联完整性失败的诊断留存与定位，旧错误码、遗漏／身份／纠正门禁、工程根及容量边界和耗尽次数保持。该检查不能恢复或证明历史实际内容，准确dev39 CI另核；dev38固定43a16ba／CI40917650566已通过，不代替本批证据。见[dev39反例](scenarios-and-acceptance.md#related-failure-diagnostic-acceptance)。
+
 dev38核完整任务质量规则、普通短统计声明的原生／展开绑定、当前quality与剩余目标反馈、过去来源事件时间限定及受限14到15续接。新15/13普通质量0.22，source-quality-v2与完整请求448000保持；同输入、审计、工作和原次数必须不变，旧失败不能获得发布权。本批人工检查、准确CI与真实业务分别取证，不预填通过。dev37准确06fa458／CI40890115369八任务已通过，仅证明该固定工程；检查见[dev38反例](scenarios-and-acceptance.md#complete-task-statistic-acceptance)。
 
 dev37使用新14/12、普通质量0.21及source-quality-v2，核BOM quoted header、原文和旧证明保持、最终deferred优先coverage、当前／历史范围自足，以及完整请求448000与planning／读取包各256000的独立边界。旧13/11拒收稿的实际反馈可在同work有限次数内续接，新policy重算而不继承旧统计；不得以升级刷新次数。本批人工检查、准确提交CI与获准真实复验分别取证，不预填通过。dev36固定提交5d557e8／CI40848773015八任务已经通过，不代表dev37或真实业务通过。下文dev34—dev36保留原检查职责，见[dev37反例](scenarios-and-acceptance.md#csv-revision-input-acceptance)。

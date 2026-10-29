@@ -29,6 +29,8 @@ python -P -B -m pdm environment verify --repo "$PDM_DATA_REPO"
 
 ## 查看提取失败诊断
 
+dev39补齐旧记录／关联完整性专用失败分支的同一私有诊断；`related_records_omitted`可在details查看实际缺失、应有和返回的record路径。只改善以后发生的定位，不恢复历史未保存的返回，不代表原加工内容已修好，也不授权耗尽工作重新调用。
+
 dev33补齐增量复用统计校验失败的同一诊断路径；`reuse_statistic_claims_missing`可在`validation_error.details.missing_claims`中定位实际缺失的记录／统计ID。原失败未保存返回时仍不能事后恢复，修复后也不重开已耗尽工作。
 
 诊断机制沿用既有私有失败记录，本批仅使用虚构资料核对工程行为。提取输出／时态质量校验失败后，现有返回的`failure_path`指向私有资料根的`failure.md`；存在`extraction_diagnostic`时，可在私有环境查看可见模型返回和`validation_error.details`中的具体record／claim／JSON字段及正文字符位置。CLI摘要和调用账本不输出这些正文，不把失败文件复制到公开仓库或公开CI。
