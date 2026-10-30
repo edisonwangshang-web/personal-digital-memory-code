@@ -2,9 +2,18 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev40`统一现有提取返回后至候选固定前的受控失败留存，修正普通增量的混合复用顺序，并补完整人工组合验收。主路径仍为 **source → staging → record／topic**，分类和质量检查在原提取／独立Review中完成；沿用Skill15/13、普通质量0.22及所有已有schema，不迁移旧数据。不恢复丢失返回、不重开耗尽工作、不调用真实模型；只dev，不推送或合并master、不启动M2，准确检查与阶段状态见[Roadmap](roadmap.md)。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev41`在原流程统一输入识别、时间／引用校验与准确返工；新Skill16/14、普通质量0.23和source-quality-v3，旧15/13及原证明按原规则核验。主路径仍为 **source → staging → record／topic**，纯引用修补仍是既有extract阶段，不增加模型调用角色或免除独立Review。来源0.1／正式知识0.2不迁移；只dev，不调用真实模型、不重开耗尽工作或更新master，准确检查见[Roadmap](roadmap.md)。
 
-新默认为`knowledge-extract@15`／`knowledge-review@13`、普通质量链0.22，plan／proof／stage复用sidecar继续0.19；旧14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15，基础提示词extract v14／review v10／answer v8保持。旧10/8、0.12及assembly0.14按原绑定恢复，不因默认变化升级或重跑。实际字段见[数据规范](data-conventions.md)；`memory/`路径均指私有资料库，公库不含个人原文、知识或运行历史。
+新默认为`knowledge-extract@16`／`knowledge-review@14`、普通质量链0.23，plan／proof／stage复用sidecar继续0.19。旧15/13继续0.22、14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15；基础提示词资产和旧Skill不原地修改。旧运行不因默认变化升级或重跑；字段统一见[数据规范](data-conventions.md)，memory路径均指私有资料库。
+
+## dev41：准确反馈与引用字段修补
+
+1. 新16/14加载固定v3规则，quality_context按source-quality-v3识别表格／语义并区分真实时间主张与窄义范围免责声明。旧15/13及更早仍按原policy，不原地改旧画像、规则或请求。
+2. 在现有验证与私有诊断中附准确、有上限的实际issues，结构或权限不支持继续检查时停在原保护，不把首错等同整稿全部问题，也不声称语义检查已经全部完成。
+3. 只有当前程序确认纯引用错误并给reference-fields-repair-v1时，原extract接收当前稿和指定路径、输出reference_repairs；未指定字段冻结。程序物化成完整稿后重做全部校验和独立Review，不自动选择别处证据，不让混合时间／内容问题走此模式。
+4. 标准入口人工组合同时核CLI、最终请求、输出schema、准确反馈依赖和返工后发布读取；旧来源／知识／证明、同work计数及unknown保持。准确提交CI与真实内容验收分别记录，不重开耗尽工作。
+
+字段见[统一交接合同](data-conventions.md#stable-processing-contract)，反例见[统一交接验收](scenarios-and-acceptance.md#stable-processing-acceptance)。
 
 ## dev40：同一候选的组合验收与失败留存
 

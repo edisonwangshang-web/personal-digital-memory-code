@@ -52,7 +52,7 @@ def _pool(ledger):
     return {field: state.get(field) for field in _POOL_FIELDS}
 
 
-def failure_context(git, payload, versions, processing_key, run_id, model_call):
+def failure_context(git, payload, versions, processing_key, run_id, model_call, *, generation_parent=None):
     """Freeze a small identity only; the visible response stays in diagnostics."""
     if not enabled(payload.get("skill_bundle")):
         return None
@@ -74,6 +74,21 @@ def failure_context(git, payload, versions, processing_key, run_id, model_call):
         if (isinstance(call, dict) and call.get("status") == "completed"
                 and call.get("payload_sha256") == context["payload_sha256"]):
             context["completed_extract"] = deepcopy(call)
+    from .skill_support import stable_processing_enabled
+    if stable_processing_enabled(payload.get("skill_bundle")):
+        call = context.get("completed_extract")
+        invocations = {call["invocation_id"]} if isinstance(call, dict) else set()
+        feedback = payload.get("extraction_feedback")
+        if isinstance(feedback, dict) and "repair_context" in feedback:
+            ancestors = feedback.get("generation_invocations")
+            if (not isinstance(ancestors, list) or not ancestors
+                    or any(not isinstance(item, str) or not item for item in ancestors)):
+                _fail("reference_repair_context_changed")
+            invocations.update(ancestors)
+            if not isinstance(generation_parent, dict):
+                _fail("reference_repair_context_changed")
+            context["reference_generation_parent"] = deepcopy(generation_parent)
+        context["generation_invocations"] = sorted(invocations)
     return context
 
 
@@ -98,7 +113,7 @@ def _read_snapshot(git, ref, path):
     return raw
 
 
-def _checked_failure(git, ref):
+def _checked_failure(git, ref, *, _seen=()):
     from .engine_provenance import read_reservation
     from .pipeline import _call_metadata, _load, _run_path
     fields = {"contract", "source_run_id", "failure", "started", "engine",
@@ -107,6 +122,9 @@ def _checked_failure(git, ref):
             or not isinstance(ref["source_run_id"], str) or _RUN.fullmatch(ref["source_run_id"]) is None):
         _fail()
     run = ref["source_run_id"]
+    if run in _seen or len(_seen) >= 4:
+        _fail()
+    _seen = (*_seen, run)
     failure = _load(_read_snapshot(git, ref["failure"], _run_path(run, "failure")), "failure")
     started = _load(_read_snapshot(git, ref["started"], _run_path(run, "started")), "processing_attempt")
     engine = _load(_read_snapshot(git, ref["engine"], _run_path(run, "engine")), "engine_provenance")
@@ -129,6 +147,10 @@ def _checked_failure(git, ref):
     context = diagnostic["validation_context"]
     context_fields = {"contract", "run_id", "processing_key", "scope_sha256", "versions",
                       "payload_sha256", "request_binding", "audit_pool", "operation_id", "completed_extract"}
+    if "generation_invocations" in context:
+        context_fields.add("generation_invocations")
+    if "reference_generation_parent" in context:
+        context_fields.add("reference_generation_parent")
     call = context.get("completed_extract")
     parents = git.text("rev-list", "--parents", "-n", "1", ref["failure"]["commit_sha"]).split()[1:]
     error = diagnostic.get("validation_error")
@@ -148,6 +170,28 @@ def _checked_failure(git, ref):
             or call.get("invocation_id") != metadata["invocation_id"]
             or failure.get("call", {}).get("invocation_id") != metadata["invocation_id"]
             or not isinstance(error, dict) or error.get("code") != failure.get("error")):
+        _fail()
+    if "generation_invocations" in context:
+        generations = context["generation_invocations"]
+        if (not isinstance(generations, list) or not 1 <= len(generations) <= 4
+                or any(not isinstance(item, str) or not item or len(item) > 256 for item in generations)
+                or generations != sorted(set(generations))
+                or metadata["invocation_id"] not in generations):
+            _fail()
+        expected_generations = {metadata["invocation_id"]}
+        if "reference_generation_parent" in context:
+            parent_ref = context["reference_generation_parent"]
+            _, _, parent = _checked_failure(git, parent_ref, _seen=_seen)
+            if (parent.get("audit_pool") != context["audit_pool"]
+                    or parent.get("versions") != context["versions"]
+                    or parent.get("scope_sha256") != context["scope_sha256"]
+                    or not parent.get("generation_invocations")):
+                _fail()
+            git.run("merge-base", "--is-ancestor", parent_ref["failure"]["commit_sha"], ref["started"]["commit_sha"])
+            expected_generations.update(parent["generation_invocations"])
+        if generations != sorted(expected_generations):
+            _fail()
+    elif "reference_generation_parent" in context:
         _fail()
     return failure, diagnostic, context
 
@@ -185,7 +229,7 @@ def prepare_feedback(git, failed_attempt, model_call):
     return ref
 
 
-def _model_view(diagnostic, run, *, complete=False):
+def _model_view(diagnostic, run, *, complete=False, stable=False):
     output = (diagnostic["validated_output"] if diagnostic.get("validation_target") == "validated_output"
               else diagnostic["response"]["output"])
     if not isinstance(output, dict):
@@ -198,8 +242,17 @@ def _model_view(diagnostic, run, *, complete=False):
         # facts; the actual independent Review is kept in revision_context.
         if "quality" in output:
             draft["quality"] = deepcopy(output["quality"])
-        return {"contract": CONTRACT, "draft_contract": "current-draft-complete-quality-v2",
+        view = {"contract": CONTRACT, "draft_contract": "current-draft-complete-quality-v2",
                 "source_run_id": run, "draft": draft, "validation_error": error}
+        if stable:
+            generations = diagnostic.get("validation_context", {}).get("generation_invocations")
+            if generations is not None:
+                view["generation_invocations"] = deepcopy(generations)
+            from .reference_repairs import build_context
+            repair = build_context(view)
+            if repair is not None:
+                view["repair_context"] = repair
+        return view
     details = error.get("details") or {}
     path = details.get("field_path", "") if isinstance(details, dict) else ""
     code = error.get("code", "")
@@ -305,9 +358,13 @@ def load_feedback(git, ref, payload, versions):
     _, diagnostic, context = _checked_failure(git, ref)
     if context["versions"] != versions or context["scope_sha256"] != _scope(payload):
         _completed_predecessor_payload(git, ref, payload, versions, context)
-    from .skill_support import complete_feedback_enabled
+    from .skill_support import complete_feedback_enabled, stable_processing_enabled
+    if stable_processing_enabled(payload.get("skill_bundle")) and not context.get("generation_invocations"):
+        _fail("extraction_feedback_unavailable")
     return _model_view(diagnostic, ref["source_run_id"],
-                       complete=complete_feedback_enabled(payload.get("skill_bundle")))
+                       complete=complete_feedback_enabled(payload.get("skill_bundle")),
+                       stable=(stable_processing_enabled(payload.get("skill_bundle"))
+                               and "quality_repair_context" not in payload))
 
 
 def authority_refs(git, ref):

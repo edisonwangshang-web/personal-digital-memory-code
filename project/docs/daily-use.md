@@ -114,7 +114,9 @@ python -P -B -m pdm capture --repo "$PDM_DATA_REPO" --input "$source_json" \
 
 新12/10不增加命令阶段：符合精确复用条件的旧统计关联由程序继承，变化项仍由模型提取并独立审核。普通程序校验失败后继续同一`production run`，程序在原四次上限内核原返回与调用身份，再把当前失败稿、准确错误及必要证据交给下次提取；无raw、unknown或上下文变化时停止。不要把诊断文件手工当成已通过候选，不为耗尽任务换ID或账本。最终未完成资料仍须返工或待确认，不能凭去向字段齐全报告完成；完整规则见[增量修复合同](data-conventions.md#incremental-repair-contract)。
 
-当前新任务默认为`knowledge-extract@15`与`knowledge-review@13`、普通quality0.22；旧14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15，旧10/8的0.12及assembly0.14保持原证明。程序准备清单、可复算统计和绑定，模型提取并独立审核；精确`reuse_refs`继续按原条件物化和审核，不用空输出省略旧记录。旧任务沿用原Skill及格式，不靠改队列名清失败或unknown；专用旧恢复合同不因新默认自动扩权。
+当前新任务默认为`knowledge-extract@16`与`knowledge-review@14`、普通quality0.23及source-quality-v3；旧15/13继续0.22、14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15，旧10/8的0.12及assembly0.14保持原证明。程序准备清单、可复算统计和绑定，模型提取并独立审核；精确`reuse_refs`继续按原条件物化和审核，不用空输出省略旧记录。旧任务沿用原Skill及格式，不靠改队列名清失败或unknown；专用旧恢复合同不因新默认自动扩权。
+
+新16/14只有在程序明确提供纯引用`reference-fields-repair-v1`上下文时，才在同一extract修指定引用，其余稿冻结后完整重检和独立Review；时间／语义／正文混合问题仍完整返工。issues超限或范围不明不假装全部已查完。详见[统一返工合同](data-conventions.md#stable-processing-contract)。
 
 ```bash
 python -P -B -m pdm production prepare --repo "$PDM_DATA_REPO" --id "$queue_id" \

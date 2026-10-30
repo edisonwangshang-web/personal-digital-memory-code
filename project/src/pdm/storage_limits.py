@@ -1,7 +1,7 @@
 """Bounded candidate history storage, separate from model input capacity.
 
-Only a registered schema-0.12/10/8, schema-0.15/11/9 or schema-0.18/12/10 candidate may use the larger
-envelope. Its current computation remains within the legacy file cap;
+Only a registered, exactly paired quality candidate may use the larger envelope.
+The stable 0.23/16/14 pair and historical pairs keep separate contracts. Its current computation remains within the legacy file cap;
 only the three explicit, separately verified lineage fields are discounted.
 This resource check never grants publication or recovery authority.
 """
@@ -54,7 +54,7 @@ def candidate_storage_sizes(candidate):
     if not isinstance(candidate, dict) or not isinstance(candidate.get("run_id"), str) or not _RUN.fullmatch(candidate["run_id"]):
         _fail()
     schema = quality_schema_version(candidate.get("skill_bundle"))
-    header = {"schema_version": schema if schema in {"0.15", "0.18", "0.20", "0.21", "0.22"} else "0.12",
+    header = {"schema_version": schema if schema in {"0.15", "0.18", "0.20", "0.21", "0.22", "0.23"} else "0.12",
               "kind": "candidate", "run_id": candidate["run_id"]}
     current = {key: value for key, value in candidate.items() if key not in _LINEAGE}
     return {"core_bytes": len(markdown(header, _canonical(current).decode("utf-8") + "\n")),
@@ -80,7 +80,7 @@ def validate_candidate_bytes(data, expected_run_id=None):
         metadata = json.loads(header, object_pairs_hook=_unique, parse_constant=_constant)
         candidate = json.loads(body, object_pairs_hook=_unique, parse_constant=_constant)
         if (not isinstance(metadata, dict) or set(metadata) != {"kind", "schema_version", "run_id"}
-                or metadata.get("kind") != "candidate" or metadata.get("schema_version") not in {"0.12", "0.15", "0.18", "0.20", "0.21", "0.22"}
+                or metadata.get("kind") != "candidate" or metadata.get("schema_version") not in {"0.12", "0.15", "0.18", "0.20", "0.21", "0.22", "0.23"}
                 or not isinstance(candidate, dict) or not isinstance(candidate.get("run_id"), str)
                 or not _RUN.fullmatch(candidate["run_id"]) or metadata["run_id"] != candidate["run_id"]
                 or expected_run_id is not None and candidate["run_id"] != expected_run_id
@@ -88,7 +88,9 @@ def validate_candidate_bytes(data, expected_run_id=None):
             _fail()
         from .skill_support import validate_skill_bundle
         bundle = validate_skill_bundle(candidate.get("skill_bundle"))
-        expected_pair = (("knowledge-extract@15", "knowledge-review@13")
+        expected_pair = (("knowledge-extract@16", "knowledge-review@14")
+                         if metadata["schema_version"] == "0.23" else
+                         ("knowledge-extract@15", "knowledge-review@13")
                          if metadata["schema_version"] == "0.22" else
                          ("knowledge-extract@14", "knowledge-review@12")
                          if metadata["schema_version"] == "0.21" else

@@ -81,7 +81,7 @@ class ReuseQualityTests(unittest.TestCase):
             if payload.get("output_contract") == "batch-v1":
                 output["wikis"] = [{**output.pop("wiki"), "record_ids": [self.record_id]}]
             if payload.get("skill_bundle", {}).get("skills", {}).get("extract", {}).get("ref") in {
-                    "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13", "knowledge-extract@14", "knowledge-extract@15"}:
+                    "knowledge-extract@9", "knowledge-extract@10", "knowledge-extract@11", "knowledge-extract@12", "knowledge-extract@13", "knowledge-extract@14", "knowledge-extract@15", "knowledge-extract@16"}:
                 output["reuse_refs"] = []
             if self.reuse:
                 documents = [doc for item in payload["related"] for doc in item["documents"]]
@@ -92,7 +92,7 @@ class ReuseQualityTests(unittest.TestCase):
                                          for doc in documents]}
             if self.omit_claims:
                 output["quality"]["statistic_claims"] = []
-            if payload.get("skill_bundle", {}).get("skills", {}).get("extract", {}).get("ref") == "knowledge-extract@15":
+            if payload.get("skill_bundle", {}).get("skills", {}).get("extract", {}).get("ref") in {"knowledge-extract@15", "knowledge-extract@16"}:
                 output["quality"]["statistic_claims"] = [
                     {key: claim[key] for key in ("stat_id", "record_id", "body_evidence")}
                     for claim in output["quality"]["statistic_claims"]]

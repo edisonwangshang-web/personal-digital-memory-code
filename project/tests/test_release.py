@@ -178,7 +178,7 @@ class ReleaseTests(unittest.TestCase):
                       for role in ("extract", "review")})
         return files
 
-    def rebound_policy_manifest(self, files, change, ref="knowledge-extract@15"):
+    def rebound_policy_manifest(self, files, change, ref="knowledge-extract@16"):
         """Isolate policy checks after an explicitly changed fixture registry pin."""
         files = dict(files)
         role, version = ref.split("@")
@@ -195,15 +195,16 @@ class ReleaseTests(unittest.TestCase):
         files[name] = replacement
         return files
 
-    def test_historical_v1_and_current_v2_policies_coexist_in_registered_assets(self):
+    def test_historical_v1_v2_and_current_v3_policies_coexist_in_registered_assets(self):
         files = self.quality_asset_files()
         self.assertIn("project/skills/shared/knowledge-quality-v1.md", files)
         self.assertIn("project/skills/shared/knowledge-quality-v2.md", files)
+        self.assertIn("project/skills/shared/knowledge-quality-v3.md", files)
         _check_skill_assets(files)
 
     def test_every_historical_and_current_policy_remains_required_and_byte_bound(self):
         files = self.quality_asset_files()
-        for version in ("v1", "v2"):
+        for version in ("v1", "v2", "v3"):
             path = "project/skills/shared/knowledge-quality-" + version + ".md"
             for action in ("missing", "changed"):
                 with self.subTest(version=version, action=action):
@@ -218,7 +219,7 @@ class ReleaseTests(unittest.TestCase):
     def test_default_roles_cannot_mix_historical_and_current_policies(self):
         files = self.quality_asset_files()
         registry = "project/src/pdm/skill_support.py"
-        for role, current, previous in (("EXTRACT", "15", "14"), ("REVIEW", "13", "12")):
+        for role, current, previous in (("EXTRACT", "16", "15"), ("REVIEW", "14", "13")):
             with self.subTest(role=role):
                 altered = dict(files)
                 needle = f'DEFAULT_{role}_SKILL_REF = "knowledge-{role.lower()}@{current}"'.encode()
@@ -230,13 +231,13 @@ class ReleaseTests(unittest.TestCase):
 
     def test_new_default_pair_cannot_both_rebind_to_the_wrong_historical_policy(self):
         files = self.quality_asset_files()
-        legacy = json.loads(files["project/skills/knowledge-extract/14/manifest.json"])["shared_policy"]
+        legacy = json.loads(files["project/skills/knowledge-extract/15/manifest.json"])["shared_policy"]
         def use_legacy_policy(manifest):
             manifest["shared_policy"] = dict(legacy)
             for dependency in manifest["dependencies"]:
                 if dependency["kind"] == "policy":
                     dependency.update(path=legacy["path"], sha256=legacy["sha256"])
-        for ref in ("knowledge-extract@15", "knowledge-review@13"):
+        for ref in ("knowledge-extract@16", "knowledge-review@14"):
             files = self.rebound_policy_manifest(files, use_legacy_policy, ref)
         with self.assertRaises(ReleaseError):
             _check_skill_assets(files)

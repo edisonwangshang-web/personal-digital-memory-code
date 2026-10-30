@@ -141,6 +141,24 @@ class CandidateStorageTests(unittest.TestCase):
         commit = self.write({self.path: data})
         self.assertEqual(self.adapter.read(commit, self.path), data)
 
+    def test_stable_and_previous_quality_pairs_keep_separate_storage_schemas(self):
+        pairs = (("16", "14", "0.23"), ("15", "13", "0.22"))
+        for extract, review, schema in pairs:
+            value = self.candidate()
+            value["skill_bundle"] = resolve_skill_refs("knowledge-extract@" + extract,
+                                                       "knowledge-review@" + review)
+            data = self.saved(value, schema=schema)
+            with self.subTest(schema=schema):
+                self.assertGreater(len(data), LEGACY_FILE_BYTES)
+                self.assertEqual(validate_candidate_bytes(data)["total_bytes"], len(data))
+                other = "0.22" if schema == "0.23" else "0.23"
+                self.assert_rejected(lambda: validate_candidate_bytes(self.saved(value, schema=other)))
+                oversized = copy.deepcopy(value)
+                oversized["raw_extraction_output"] = {"body": "x" * LEGACY_FILE_BYTES}
+                self.assert_rejected(lambda: validate_candidate_bytes(self.saved(oversized, schema=schema)))
+        self.assertEqual(self.adapter.head(), self.head)
+        self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+
     def test_current_body_and_full_history_caps_remain_separate(self):
         current = self.candidate(padding=100)
         current["objects"][0]["body"] = "X" * LEGACY_FILE_BYTES

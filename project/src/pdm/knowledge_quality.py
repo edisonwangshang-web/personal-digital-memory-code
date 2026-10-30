@@ -20,6 +20,7 @@ from .contracts import CaptureError, canonical
 QUALITY_CONTRACT = "skill-quality-v1"
 QUALITY_POLICY_VERSION = "source-quality-v1"
 CSV_BOM_POLICY_VERSION = "source-quality-v2"
+SOURCE_QUALITY_V3 = "source-quality-v3"
 STATISTICS_POLICY_VERSION = "descriptive-v1"
 
 
@@ -285,7 +286,7 @@ def _source_scope_id(profile):
                                    ("source_id", "source_version", "provided_locators", "fragments", "line_sha256")})[:32]
 
 
-def _csv_rows(lines, *, normalize_bom=False):
+def _csv_rows(lines, *, normalize_bom=False, require_table_evidence=False):
     """Return physically located CSV rows, or a reason for semantic review."""
     ordered = sorted(lines)
     if not ordered or ordered[0] != 1:
@@ -322,6 +323,15 @@ def _csv_rows(lines, *, normalize_bom=False):
         return None, "csv_column_mismatch"
     if not any(re.search(r"[A-Za-z\u4e00-\u9fff]", header) for header in headers):
         return None, "ambiguous_header"
+    if require_table_evidence and len(result) == 1:
+        # One punctuation-bearing sentence is not evidence of a zero-row
+        # table. Retain explicit quoted headers and recognized structural or
+        # metric headers; genuinely ambiguous one-line text needs Review.
+        header_text = "\n".join(lines[number] for number in result[0]["lines"]).removeprefix("\ufeff")
+        quoted_header = re.fullmatch(r'\s*"(?:[^"]|"")*"\s*(?:[,\t;]\s*"(?:[^"]|"")*"\s*)+',
+                                     header_text, re.S)
+        if not quoted_header and not any(header in _STRUCTURE_COLUMNS or header in _UNITS for header in headers):
+            return None, "single_line_not_table"
     result[0]["values"] = headers
     return result, None
 
@@ -498,11 +508,12 @@ def _table_material(profile, rows):
 
 def prepare_quality(sources, source_views=None, *, skill_bundle=None, policy_version=None):
     """Inventory only actual input lines; never combine independent table counts."""
-    from .skill_support import csv_bom_normalization_enabled
-    selected_policy = (CSV_BOM_POLICY_VERSION if csv_bom_normalization_enabled(skill_bundle)
+    from .skill_support import csv_bom_normalization_enabled, stable_processing_enabled
+    selected_policy = (SOURCE_QUALITY_V3 if stable_processing_enabled(skill_bundle) else
+                       CSV_BOM_POLICY_VERSION if csv_bom_normalization_enabled(skill_bundle)
                        else QUALITY_POLICY_VERSION)
     if policy_version is not None:
-        if (policy_version not in {QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION}
+        if (policy_version not in {QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION, SOURCE_QUALITY_V3}
                 or skill_bundle is not None and policy_version != selected_policy):
             _error("invalid_quality_context", "质量契约或规则版本不匹配")
         # Stateless reading/materialization reconstructs a context by its
@@ -553,7 +564,9 @@ def prepare_quality(sources, source_views=None, *, skill_bundle=None, policy_ver
             "tables": [], "format": "text",
         }
         profile["evidence_id"] = _source_scope_id(profile)
-        rows, reason = _csv_rows(lines, normalize_bom=selected_policy == CSV_BOM_POLICY_VERSION)
+        rows, reason = _csv_rows(lines,
+            normalize_bom=selected_policy in {CSV_BOM_POLICY_VERSION, SOURCE_QUALITY_V3},
+            require_table_evidence=selected_policy == SOURCE_QUALITY_V3)
         if rows is not None:
             profile["format"] = "csv"
             with localcontext() as decimal_context:
@@ -581,7 +594,7 @@ def prepare_quality(sources, source_views=None, *, skill_bundle=None, policy_ver
 
 def _validate_context(context):
     if (not isinstance(context, dict) or context.get("contract") != QUALITY_CONTRACT
-            or context.get("policy_version") not in {QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION}):
+            or context.get("policy_version") not in {QUALITY_POLICY_VERSION, CSV_BOM_POLICY_VERSION, SOURCE_QUALITY_V3}):
         _error("invalid_quality_context", "质量契约或规则版本不匹配")
     for field in ("sources", "targets", "statistics", "system_facts"):
         _list(context.get(field), "invalid_quality_context")
@@ -755,6 +768,178 @@ def _temporal_details(output, field_path, *, claim_index=None, record_id=None,
     return details
 
 
+_V3_BOUNDARY = re.compile(r"[。！？!?；;，,\n]|\.(?:\s+|$)|但是|然而|不过|并且|但|而|"
+    r"(?:且|并|同时)(?=当前|目前|现在|现已|已经|尚未|明天|未来|将会)")
+_V3_FUTURE = re.compile(r"即将|明天|后天|未来|下(?:周|月|年)|将会|将要|\bwill\b|\btomorrow\b", re.I)
+_V3_WORDS = re.compile(_TEMPORAL_WORDS.pattern + r"|现在|正在|" + _V3_FUTURE.pattern, re.I)
+_V3_LITERAL = re.compile(
+    r'(?:字段|列|属性|枚举|标签|标题|变量)(?:的)?(?:名称|名|值)?\s*(?:为|是|叫|称为)?\s*[:：]?\s*'
+    r'(?P<prefix>“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
+    r'|(?P<suffix>“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
+    r'\s*(?:是|为)?\s*(?:字段|列名|属性|枚举|标签|标题|变量)')
+_V3_DISCLAIMER = re.compile(
+    r'不(?:能)?(?:据此|由此)?(?:证明|代表)|不足以(?:证明|代表)|'
+    r'不能(?:据此|由此)(?:断言|判断|推断)|无法(?:据此|由此)?(?:判断|确认|确定)')
+_V3_SOURCE_QUALIFIER = re.compile(
+    r'当时|导出时|来源时间|(?:该次|当次|那次|上次|前次)(?:导出|采集|读取)|'
+    r'at (?:export|source) time', re.I)
+_V3_REPORTED = re.compile(
+    r'(?:来源|原文|文档|报告|材料|导出说明)[^。！？!?；;，,\n]{0,24}当时'
+    r'[^。！？!?；;，,\n]{0,12}(?:称|写|记载|说明|描述|提出|规定)|'
+    r'当时(?:的)?(?:来源|原文|文档|报告|材料)[^。！？!?；;，,\n]{0,12}(?:称|写|记载|说明|描述|提出|规定)')
+
+
+def _v3_parts(text):
+    literal = [match.span(name) for match in _V3_LITERAL.finditer(text)
+               for name in ("prefix", "suffix") if match.group(name) is not None]
+    start = 0
+    for boundary in _V3_BOUNDARY.finditer(text):
+        if any(left <= boundary.start() and boundary.end() <= right for left, right in literal):
+            continue
+        if start < boundary.start():
+            yield start, boundary.start(), text[start:boundary.start()]
+        start = boundary.end()
+    if start < len(text):
+        yield start, len(text), text[start:]
+
+
+def _v3_state_matches(part):
+    """Narrow metadiscourse exceptions, never a blanket negation exemption."""
+    excluded = [match.span(name) for match in _V3_LITERAL.finditer(part)
+                for name in ("prefix", "suffix") if match.group(name) is not None]
+    # The cue governs only the rest of this clause. Earlier actual assertions
+    # and later comma/adversative clauses retain their independent checks.
+    excluded.extend((match.start(), len(part)) for match in _V3_DISCLAIMER.finditer(part))
+    return [match for match in _V3_WORDS.finditer(part)
+            if not any(start <= match.start() and match.end() <= end for start, end in excluded)]
+
+
+def _v3_source_prefix(statement, start):
+    """A comma can follow a pure time/reporting lead-in, a sentence cannot."""
+    sentence_start = 0
+    for boundary in _SENTENCE_BOUNDARY.finditer(statement, 0, start):
+        sentence_start = boundary.end()
+    return statement[sentence_start:start]
+
+
+def collect_temporal_diagnostics(output, context):
+    """Pure v3 time diagnostics for the existing failure aggregator.
+
+    Old policies deliberately keep their original validator and return no new
+    diagnostics. This bounded lexical guard does not replace semantic Review.
+    No candidate, audit, source body, counter or repository state is modified.
+    """
+    errors = []
+    def remember(error, *, index=None, record_id=None, statement=None, span=None, field="statement"):
+        path = getattr(error, "_quality_field_path", None) or (
+                ("quality", "temporal_claims") if index is None else
+                ("quality", "temporal_claims", index, field))
+        details = _temporal_details(output, path, claim_index=index, record_id=record_id,
+                                    statement=statement, body_span=span)
+        errors.append({"code": error.code, "message": str(error), "details": details})
+    try:
+        _validate_context(context)
+        if context["policy_version"] != SOURCE_QUALITY_V3:
+            return []
+        records = _record_map(output)
+        quality = output.get("quality")
+        claims = _list(quality.get("temporal_claims") if isinstance(quality, dict) else None)
+    except (CaptureError, AttributeError) as error:
+        if not isinstance(error, CaptureError):
+            error = CaptureError("invalid_quality_output", "质量映射缺少对应知识正文")
+        remember(error)
+        return errors
+    facts = {fact.get("system_fact_id"): fact for fact in context["system_facts"] if isinstance(fact, dict)}
+    covered, seen = {}, set()
+    for index, claim in enumerate(claims):
+        record_id = claim.get("record_id") if isinstance(claim, dict) else None
+        statement = claim.get("statement") if isinstance(claim, dict) else None
+        field, bad_span = "statement", None
+        try:
+            _schema(claim, QUALITY_SCHEMA["properties"]["temporal_claims"]["items"],
+                    "invalid_quality_output", _path=("quality", "temporal_claims", index))
+            record_id, statement = claim["record_id"], claim["statement"]
+            record = _body(records, record_id, statement)
+            covered.setdefault(record_id, []).extend(match.span() for match in
+                re.finditer(re.escape(statement), record["body"]))
+            key = (record_id, statement)
+            if key in seen:
+                _error("quality_temporal_mismatch", "时间状态声明重复")
+            seen.add(key)
+            state_parts = [(start, end, part, _v3_state_matches(part))
+                           for start, end, part in _v3_parts(statement)]
+            state_parts = [row for row in state_parts if row[3]]
+            basis = claim["basis"]
+            if basis == "current_state":
+                field = "system_fact_id"
+                fact = facts.get(claim["system_fact_id"]) if isinstance(claim["system_fact_id"], str) else None
+                if not fact or fact.get("statement") != statement or not fact.get("binding"):
+                    _error("quality_current_state_unverified", "当前系统状态必须绑定调用者核定的版本事实")
+                if claim["source_refs"]:
+                    field = "source_refs"
+                    _record_refs_cover(record, _quality_refs(claim["source_refs"], context))
+                continue
+            field = "system_fact_id"
+            if claim["system_fact_id"] is not None:
+                _error("quality_temporal_mismatch", "非当前状态不能借用系统事实身份")
+            field = "source_refs"
+            refs = _quality_refs(claim["source_refs"], context)
+            _record_refs_cover(record, refs)
+            field = "statement"
+            if basis == "unknown":
+                for start, end, part, matches in state_parts:
+                    question = re.search(r"是否|有无|能否|\bwhether\b", part, re.I)
+                    unknown = _UNKNOWN_TIME_WORDS.search(part)
+                    states = list(re.finditer(r"已经|现已|正在|尚未|未导入|未提交|\balready\b|\bnot yet\b", part, re.I))
+                    uncertain_question = bool(question and unknown and len(states) == 1
+                        and question.start() < states[0].start()
+                        and (unknown.start() < question.start() or unknown.start() > states[0].end()))
+                    if (not _UNKNOWN_TIME_WORDS.search(part) or _V3_FUTURE.search(part)
+                            or states and not uncertain_question):
+                        bad_span = (record["body"].index(statement) + start,
+                                    record["body"].index(statement) + end)
+                        _error("quality_temporal_mismatch", "未知声明不能覆盖同句或后句的实际当前／未来状态")
+                if not state_parts and not (_UNKNOWN_TIME_WORDS.search(statement)
+                        or _V3_DISCLAIMER.search(statement) or _V3_LITERAL.search(statement)):
+                    _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
+            elif basis == "source_time":
+                for start, end, part, matches in state_parts:
+                    first = matches[0].start()
+                    prefix = _v3_source_prefix(statement, start)
+                    # A pure attribution prefix may introduce a quoted state
+                    # after a comma. A prior actual assertion cannot lend that
+                    # prefix to an independent current/future assertion.
+                    reported = bool(_V3_REPORTED.search(part[:first]) or
+                        _V3_REPORTED.fullmatch(prefix.strip(" \t\r,:：，")))
+                    qualified = (_V3_SOURCE_QUALIFIER.search(part)
+                        or _source_date_qualified(part, refs)
+                        or _V3_SOURCE_QUALIFIER.search(prefix)
+                        or _source_date_qualified(prefix, refs))
+                    if ((_CURRENT_TIME_WORDS.search(part) or _V3_FUTURE.search(part)) and not reported
+                            or not qualified):
+                        bad_span = (record["body"].index(statement) + start,
+                                    record["body"].index(statement) + end)
+                        _error("quality_temporal_mismatch", "来源时间须限定每个实际状态断言，不能覆盖独立当前／未来事实")
+                if not state_parts and not (_V3_SOURCE_QUALIFIER.search(statement)
+                        or _source_date_qualified(statement, refs)
+                        or _V3_DISCLAIMER.search(statement) or _V3_LITERAL.search(statement)):
+                    _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
+        except CaptureError as error:
+            remember(error, index=index, record_id=record_id, statement=statement,
+                     span=bad_span, field=field)
+    for record_id, record in records.items():
+        for start, end, part in _v3_parts(record["body"]):
+            matches = _v3_state_matches(part)
+            uncovered = [match for match in matches if not any(
+                left <= start + match.start() and start + match.end() <= right
+                for left, right in covered.get(record_id, []))]
+            if uncovered:
+                match = uncovered[0]
+                remember(CaptureError("quality_temporal_missing", "实际状态断言缺少对应时间声明"),
+                    record_id=record_id, span=(start + match.start(), start + match.end()))
+    return errors
+
+
 def validate_quality_output(output, context):
     """Reject absent/contradictory machine-verifiable commitments before Review."""
     _validate_context(context)
@@ -839,6 +1024,12 @@ def validate_quality_output(output, context):
             _error("quality_statistic_mismatch", "统计声明值未出现在对应正文")
         refs = _quality_refs(claim["sources"], context, stat)
         _record_refs_cover(record, refs)
+    if context["policy_version"] == SOURCE_QUALITY_V3:
+        diagnostics = collect_temporal_diagnostics(output, context)
+        if diagnostics:
+            first = diagnostics[0]
+            _error(first["code"], first["message"], details=first["details"])
+        return
     temporal = set()
     facts = {fact.get("system_fact_id"): fact for fact in context["system_facts"] if isinstance(fact, dict)}
     for index, claim in enumerate(_list(quality["temporal_claims"])):
@@ -1027,7 +1218,8 @@ def build_review_checks(candidate, context, scope=None):
     review = roles.get("review") if isinstance(roles, dict) else None
     context_readability = isinstance(review, dict) and review.get("ref") in {"knowledge-review@6", "knowledge-review@7"}
     completion_policy = isinstance(review, dict) and review.get("ref") in {
-        "knowledge-review@10", "knowledge-review@11", "knowledge-review@12", "knowledge-review@13"}
+        "knowledge-review@10", "knowledge-review@11", "knowledge-review@12", "knowledge-review@13",
+        "knowledge-review@14"}
     from .skill_support import revision_coverage_enabled, statistic_evidence_enabled
     revision_policy = revision_coverage_enabled(bundle)
     statistic_policy = statistic_evidence_enabled(bundle)

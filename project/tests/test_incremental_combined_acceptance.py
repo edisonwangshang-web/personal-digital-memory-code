@@ -73,8 +73,8 @@ class IncrementalCombinedAcceptanceTests(unittest.TestCase):
         self.mode = "complete"
         self.review_findings = []
         self.bundle = resolve_skill_refs()
-        self.assertEqual("knowledge-extract@15", self.bundle["skills"]["extract"]["ref"])
-        self.assertEqual("knowledge-review@13", self.bundle["skills"]["review"]["ref"])
+        self.assertEqual("knowledge-extract@16", self.bundle["skills"]["extract"]["ref"])
+        self.assertEqual("knowledge-review@14", self.bundle["skills"]["review"]["ref"])
         self.ledger.reserve("artificial-old-unknown", ["answer"])
         self.ledger.start("artificial-old-unknown", "answer", "0" * 64)
         self.ledger.finish("artificial-old-unknown", "answer", "unknown", error_code="timeout")

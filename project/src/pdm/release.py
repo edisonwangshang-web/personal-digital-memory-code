@@ -255,7 +255,9 @@ def _check_skill_assets(files: dict[str, bytes]) -> None:
                 descriptor(item, _SKILL_ROOT)
             descriptor(manifest["base_prompt"], "project")
             policy = manifest["shared_policy"]
-            expected_policy = ("knowledge-quality-v2" if ref in {
+            expected_policy = ("knowledge-quality-v3" if ref in {
+                "knowledge-extract@16", "knowledge-review@14"} else
+                "knowledge-quality-v2" if ref in {
                 "knowledge-extract@15", "knowledge-review@13"} else "knowledge-quality-v1")
             if (not isinstance(policy, dict) or set(policy) != {"id", "path", "sha256"}
                     or policy["id"] != expected_policy

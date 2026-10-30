@@ -20,8 +20,8 @@ from pdm.skill_support import (SkillError, compact_statistics_enabled,
 
 
 class SkillV15ContractsTests(unittest.TestCase):
-    def test_default_pair_selects_short_generation_with_existing_guards(self):
-        bundle = resolve_skill_refs()
+    def test_pinned_pair_selects_short_generation_with_existing_guards(self):
+        bundle = resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")
         self.assertEqual("knowledge-extract@15", bundle["skills"]["extract"]["ref"])
         self.assertEqual("knowledge-review@13", bundle["skills"]["review"]["ref"])
         self.assertEqual("0.22", quality_schema_version(bundle))
@@ -64,7 +64,7 @@ class SkillV15ContractsTests(unittest.TestCase):
 
     def test_new_shared_policy_is_pinned_but_other_dependencies_and_base_stay(self):
         old = resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")
-        new = resolve_skill_refs()
+        new = resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")
         self.assertEqual("knowledge-quality-v2", new["shared_policy"]["id"])
         self.assertEqual("shared/knowledge-quality-v2.md", new["shared_policy"]["path"])
         self.assertNotEqual(old["shared_policy"], new["shared_policy"])
@@ -75,7 +75,7 @@ class SkillV15ContractsTests(unittest.TestCase):
                 self.assertEqual(new["shared_policy"]["sha256"], new["skills"][role]["files"][1]["sha256"])
 
     def test_snapshot_restore_uses_original_policy_and_rules_without_disk(self):
-        bundles = [resolve_skill_refs(), resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")]
+        bundles = [resolve_skill_refs("knowledge-extract@15", "knowledge-review@13"), resolve_skill_refs("knowledge-extract@14", "knowledge-review@12")]
         with patch.object(Path, "open", side_effect=AssertionError("no disk substitution")):
             for original in bundles:
                 restored = json.loads(json.dumps(original, ensure_ascii=False))
@@ -86,7 +86,7 @@ class SkillV15ContractsTests(unittest.TestCase):
 
     def test_outer_rehash_cannot_replace_old_shared_policy_with_new_policy(self):
         old = copy.deepcopy(resolve_skill_refs("knowledge-extract@14", "knowledge-review@12"))
-        old["shared_policy"] = copy.deepcopy(resolve_skill_refs()["shared_policy"])
+        old["shared_policy"] = copy.deepcopy(resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")["shared_policy"])
         value = {key: value for key, value in old.items() if key != "sha256"}
         old["sha256"] = "sha256-" + hashlib.sha256(json.dumps(value, ensure_ascii=False,
             sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
@@ -94,7 +94,7 @@ class SkillV15ContractsTests(unittest.TestCase):
             validate_skill_bundle(old)
 
     def test_mutated_new_shared_policy_is_rejected_after_outer_rehash(self):
-        bundle = copy.deepcopy(resolve_skill_refs())
+        bundle = copy.deepcopy(resolve_skill_refs("knowledge-extract@15", "knowledge-review@13"))
         item = bundle["skills"]["extract"]["files"][1]
         item["content"] += "\nIncomplete available data may be published.\n"
         item["bytes"] = len(item["content"].encode())

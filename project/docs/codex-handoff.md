@@ -4,7 +4,7 @@
 
 ## 目标与当前范围
 
-当前开发版`0.2.0.dev40`只补统一受控提取失败诊断、普通增量混合复用顺序和人工多来源组合验收。程序固定新普通候选顺序标记，旧无标记及batch行为保持；Skill15/13、普通质量0.22和全部既有schema／次数不变。不新增阶段、真实模型调用或master变更，不重开耗尽工作；准确工程检查、真实业务及目标runner分别核验，详见[Roadmap](roadmap.md)及[本批合同](data-conventions.md#combined-incremental-contract)。
+当前开发版`0.2.0.dev41`使用新Skill16/14、knowledge-quality-v3、普通质量0.23和source-quality-v3，在原阶段统一时间／引用与返工交接，新增输入识别边界和标准入口人工交叉验收。纯引用窄补丁不新建阶段，物化后仍完整校验和独立Review；旧15/13及历史证明不迁移，unknown、耗尽工作及原次数不重开。只dev，两个master不动，不新增真实调用；准确检查与真实业务分别核验，详见[Roadmap](roadmap.md)与[合同](data-conventions.md#stable-processing-contract)。
 
 历史dev35批次针对整体coverage请求超容量，采用完整表格来源＋完整说明／字典的v2审核布局，global汇总全部范围和关系。新plan／proof及受限stage复用sidecar为0.19，普通12/10候选仍0.18，旧v1计划及请求字节保持。只有原提取completed且固定、Review从未启动、decomposed_input_limit阻塞与同work未耗尽都可核验时，才在下一attempt以原Git／audit观察零新extract复用，再重新程序校验和独立Review。不是通用跨版本迁移；旧失败、unknown、消费及四次上限不变。当前工程、新CI与真实Review／发布／读取待取证，不标M1完成；两个master不动。见[合同](data-conventions.md#review-material-recovery)及[验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
 

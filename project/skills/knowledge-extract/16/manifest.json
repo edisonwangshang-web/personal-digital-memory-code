@@ -1,0 +1,42 @@
+{
+  "schema_version": "skill-manifest-v1",
+  "id": "knowledge-extract",
+  "version": "16",
+  "role": "extract",
+  "quality_contract": "skill-quality-v1",
+  "entrypoint": {
+    "path": "knowledge-extract/16/SKILL.md",
+    "sha256": "sha256-e88e1cfdb5662cf33c5a1b3409a049693b51bbaaefb7ae67ae6a1ba99b1b7a98"
+  },
+  "dependencies": [
+    {
+      "path": "shared/knowledge-quality-v3.md",
+      "sha256": "sha256-f5bfa78bec5ac36f736a022a2fbb86a4edb9fda69e7858542a1efa3bf4decd5e",
+      "kind": "policy"
+    },
+    {
+      "path": "shared/output-contract-v1.md",
+      "sha256": "sha256-e03f59621100dbf3d47fb2816c6346ec5eeda0ce1efaad5d79ed7d9b37d4c10d",
+      "kind": "reference"
+    },
+    {
+      "path": "shared/knowledge-context-v1.md",
+      "sha256": "sha256-a5d4cf0f0fe2059eaff7180d5866a14f0201d7b5d8fe3eff112b2f622427974f",
+      "kind": "reference"
+    },
+    {
+      "path": "shared/statistic-bindings-v2.md",
+      "sha256": "sha256-15709d9ba95c6444a12e92fd3236ae03ccdc807247dde895f0fec7b7e07a0016",
+      "kind": "reference"
+    }
+  ],
+  "shared_policy": {
+    "id": "knowledge-quality-v3",
+    "path": "shared/knowledge-quality-v3.md",
+    "sha256": "sha256-f5bfa78bec5ac36f736a022a2fbb86a4edb9fda69e7858542a1efa3bf4decd5e"
+  },
+  "base_prompt": {
+    "path": "prompts/extract.md",
+    "sha256": "sha256-8b7b052fa9e8076238c6077f6e82314287c39d6bf72981b64bc1c9d641af5e0f"
+  }
+}

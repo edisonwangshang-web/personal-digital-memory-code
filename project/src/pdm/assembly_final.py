@@ -31,6 +31,11 @@ def extraction_invocations(candidate):
             previous = candidate["revision_context"]
             found.update(extraction_invocations(previous["candidate"]))
             found.add(previous["review_record"]["call"]["invocation_id"])
+        if "reference_repair_context" in candidate:
+            # This list is rebuilt from the fixed failure feedback while the
+            # candidate is verified. A reference-only patch still derives its
+            # frozen prose from every earlier extraction in that chain.
+            found.update(candidate["reference_repair_context"]["generation_invocations"])
         return found
     return ({item["extraction"]["invocation_id"] for item in candidate["assembly"]["inputs"]}
             | {call["invocation_id"] for item in candidate["assembly"]["inputs"] for call in item["review_calls"]}
@@ -118,7 +123,7 @@ def _material(git, plan, draft_runs, run_id, base_head, created_at, *, historica
                        "review": {"path": _run_path(source_run, "review"), "commit_sha": review_commit,
                                   "sha256": _hash(_committed(git, _run_path(source_run, "review")))},
                        "extraction": deepcopy(candidate["extraction"]), "review_calls": review_calls})
-        if "quality_repair_context" in candidate:
+        if "quality_repair_context" in candidate or "reference_repair_context" in candidate:
             inputs[-1]["generation_invocations"] = sorted(extraction_invocations(candidate))
         prior.append({"run_id": source_run, "binding": candidate["binding"], "objects": deepcopy(candidate["objects"]),
                       "review_id": review["review_id"], "batch_context": deepcopy(candidate["batch_context"])})

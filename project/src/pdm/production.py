@@ -292,7 +292,8 @@ def _feedback_enabled(bundle):
                     (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
             (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
             (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12")),
-            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13")))))
+            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13")),
+            (("extract", "knowledge-extract@16"), ("review", "knowledge-review@14")))))
 
 
 def _revision_feedback(git, previous, state, projection, processing_paths, *, draft, merge_runs):

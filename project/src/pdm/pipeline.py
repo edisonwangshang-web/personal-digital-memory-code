@@ -328,25 +328,42 @@ def _string(value, maximum=65536):
     return value
 
 
-def _refs(refs, sources):
+def _refs(refs, sources, *, field_path=None, record_id=None, ref_offset=0):
+    def reject(code, ref=None, index=None):
+        details = None
+        if field_path is not None:
+            details = {"field_path": field_path + (f"/{index + ref_offset}" if index is not None else ""),
+                       "record_id": record_id}
+            if index is not None:
+                details["ref_index"] = index + ref_offset
+            if isinstance(ref, dict):
+                details.update({key: ref[key] for key in ("source_id", "source_version", "locator")
+                                if isinstance(ref.get(key), str)})
+        _error(code, details=details)
     if not isinstance(refs, list) or not 1 <= len(refs) <= MAX_OBJECT_SOURCE_REFS:
-        _error("invalid_model_output")
+        reject("invalid_model_output")
     selected = {(source["source_id"], source["source_version"]): source for source in sources}
-    for ref in refs:
+    for index, ref in enumerate(refs):
         if not isinstance(ref, dict) or set(ref) != {"source_id", "source_version", "locator", "quote"}:
-            _error("invalid_model_output")
+            reject("invalid_model_output", ref, index)
         if not isinstance(ref["source_id"], str) or not isinstance(ref["source_version"], str):
-            _error("source_reference_mismatch")
+            reject("source_reference_mismatch", ref, index)
         source = selected.get((ref["source_id"], ref["source_version"]))
         if source is None:
-            _error("source_reference_mismatch")
+            reject("source_reference_mismatch", ref, index)
         lines = source["body"].splitlines(keepends=True)
         match = re.fullmatch(r"L([1-9][0-9]*)-L([1-9][0-9]*)", ref["locator"] if isinstance(ref["locator"], str) else "")
         if not match:
-            _error("invalid_locator")
+            reject("invalid_locator", ref, index)
         start, end = map(int, match.groups())
-        if not 1 <= start <= end <= len(lines) or _string(ref["quote"]) not in "".join(lines[start - 1:end]):
-            _error("invalid_quote")
+        if not 1 <= start <= end <= len(lines):
+            reject("invalid_quote", ref, index)
+        try:
+            quote = _string(ref["quote"])
+        except CaptureError as error:
+            reject(error.code, ref, index)
+        if quote not in "".join(lines[start - 1:end]):
+            reject("invalid_quote", ref, index)
 
 
 def _time(value):
@@ -375,7 +392,8 @@ def _reuse_refs_enabled(skill_bundle):
             (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
             (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
             (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12")),
-            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13"))))
+            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13")),
+            (("extract", "knowledge-extract@16"), ("review", "knowledge-review@14"))))
 
 
 def _feedback_quality_enabled(skill_bundle):
@@ -387,7 +405,8 @@ def _feedback_quality_enabled(skill_bundle):
             (("extract", "knowledge-extract@12"), ("review", "knowledge-review@10")),
             (("extract", "knowledge-extract@13"), ("review", "knowledge-review@11")),
             (("extract", "knowledge-extract@14"), ("review", "knowledge-review@12")),
-            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13"))))
+            (("extract", "knowledge-extract@15"), ("review", "knowledge-review@13")),
+            (("extract", "knowledge-extract@16"), ("review", "knowledge-review@14"))))
 
 
 def _processing_header(skill_bundle, fallback):
@@ -1442,7 +1461,7 @@ def _review_payload(candidate, payload):
             request.pop("quality_repair_context", None)
             request.pop("extraction_feedback", None)
             for key in ("quality_repair_context", "raw_extraction_output", "reuse_statistic_inheritance",
-                        "statistic_claims_materialization",
+                        "statistic_claims_materialization", "reference_repair_context",
                         "extraction_feedback_ref", "stage_reuse_ref", "stage_reuse_started_commit"):
                 request["candidate"].pop(key, None)
         request["required_checks"] = build_review_checks(candidate, candidate["quality_context"])
@@ -1950,6 +1969,11 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         if extraction_feedback_ref is not None:
             from .extraction_feedback import load_feedback
             payload["extraction_feedback"] = load_feedback(git, extraction_feedback_ref, payload, versions)
+            from .skill_support import stable_processing_enabled
+            if stable_processing_enabled(skill_bundle) and "repair_context" in payload["extraction_feedback"]:
+                if "quality_repair_context" in context_fields:
+                    _error("invalid_reference_repair_context")
+                context_fields["reference_repair_context"] = copy.deepcopy(payload["extraction_feedback"]["repair_context"])
         reused_stage_material = None
         stage_reuse_files = {}
         if stage_reuse is not None:
@@ -2055,10 +2079,21 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             git.check(head)
             if code is not None:
                 error = CaptureError(code, str(error), details=getattr(error, "details", None))
+            from .skill_support import stable_processing_enabled
+            if stable_processing_enabled(skill_bundle) and materialized_output is not None:
+                from .extraction_validation import collect_issues
+                collected = collect_issues(materialized_output, sources,
+                    quality_context=context_fields.get("quality_context"),
+                    source_views=source_views if batch else None, related=related, versions=versions,
+                    check_current=incremental and not draft_only, first_error=error)
+                error.details = {**(error.details if isinstance(getattr(error, "details", None), dict) else {}),
+                                 **collected}
             from .extraction_feedback import failure_context
             diagnostic = _extraction_diagnostic(git, error, response,
                 context_fields.get("extraction_request_binding"), materialized_output,
-                failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call)
+                failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call,
+                    generation_parent=context_fields.get("extraction_feedback_ref")
+                    if "reference_repair_context" in context_fields else None)
                 if response is not None else None)
             return _failure(git, run_id, "extract", error.code, head,
                 _failure_call(error, response) if call is None else call, schema_version, current_call_count(),
@@ -2090,7 +2125,14 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 context_fields["revision_resume"] = attach_revision_resume_extraction(model_call, _resume_unstarted, extraction, payload)
             created = timestamp()
             materialized_output = response["output"]
-            if "quality_repair_context" in context_fields:
+            if "reference_repair_context" in context_fields:
+                from .reference_repairs import materialize_patch
+                context_fields["raw_extraction_output"] = copy.deepcopy(response["output"])
+                # Even a malformed repair must preserve the complete checked
+                # draft for diagnosis, rather than making a patch the draft.
+                materialized_output = copy.deepcopy(payload["extraction_feedback"]["draft"])
+                materialized_output = materialize_patch(response["output"], payload["extraction_feedback"])
+            elif "quality_repair_context" in context_fields:
                 from .statistic_repairs import materialize_patch
                 context_fields["raw_extraction_output"] = copy.deepcopy(response["output"])
                 materialized_output = materialize_patch(response["output"], context_fields["quality_repair_context"],
@@ -2235,7 +2277,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 output = reviewed["output"]
                 _review_output(output, required_checks=request.get("required_checks"), skill_bundle=skill_bundle, candidate=candidate,
                                review_quality_context=request.get("quality_context"))
-                if review_call["invocation_id"] == extraction["invocation_id"]:
+                from .assembly_final import extraction_invocations
+                forbidden = (extraction_invocations(candidate) if "reference_repair_context" in candidate
+                             else {extraction["invocation_id"]})
+                if review_call["invocation_id"] in forbidden:
                     _error("review_not_independent")
             except (ModelCallError, CaptureError) as error:
                 git.check(head)
@@ -2426,10 +2471,17 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
         _error("source_mismatch")
     repair_fields = {"quality_repair_context", "raw_extraction_output"}
     repair_mode = "quality_repair_context" in candidate
+    reference_mode = "reference_repair_context" in candidate
     inheritance_mode = "reuse_statistic_inheritance" in candidate
     materialization_mode = "statistic_claims_materialization" in candidate
-    from .skill_support import compact_statistics_enabled
-    if materialization_mode != (compact_statistics_enabled(candidate.get("skill_bundle")) and not repair_mode):
+    from .skill_support import compact_statistics_enabled, stable_processing_enabled
+    if reference_mode and (not stable_processing_enabled(candidate.get("skill_bundle"))
+            or "extraction_feedback_ref" not in candidate or "raw_extraction_output" not in candidate
+            or repair_mode or inheritance_mode or materialization_mode
+            or any(key in candidate for key in ("stage_reuse_ref", "revision_resume", "revision_revalidation"))):
+        _error("invalid_reference_repair_context")
+    if materialization_mode != (compact_statistics_enabled(candidate.get("skill_bundle"))
+                               and not repair_mode and not reference_mode):
         _error("invalid_statistic_materialization")
     stage_reuse_material = None
     if candidate.get("stage_reuse_ref") is not None:
@@ -2438,11 +2490,11 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
                 or candidate.get("merge_inputs") or candidate.get("execution_context") is not None
                 or any(key in candidate for key in ("rebuild_context", "continuation_context", "revision_context",
                     "revision_resume", "revision_revalidation", "timeout_retry_ref", "extraction_reused_from",
-                    "extraction_feedback_ref", "quality_repair_context"))
+                    "extraction_feedback_ref", "quality_repair_context", "reference_repair_context"))
                 or "raw_extraction_output" in candidate and not materialization_mode):
             _error("invalid_stage_reuse")
         stage_reuse_material = _stage_reuse_material(git, candidate)
-    if "raw_extraction_output" in candidate and not (repair_mode or inheritance_mode or materialization_mode):
+    if "raw_extraction_output" in candidate and not (repair_mode or reference_mode or inheritance_mode or materialization_mode):
         _error("invalid_quality_repair")
     if repair_mode and (not repair_fields <= candidate.keys() or "revision_context" not in candidate
                         or "extraction_reused_from" in candidate or "revision_resume" in candidate
@@ -2451,9 +2503,17 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     if materialization_mode and "raw_extraction_output" not in candidate:
         _error("invalid_statistic_materialization")
     raw_output = (stage_reuse_material["response"]["output"] if stage_reuse_material is not None else
-                  candidate["raw_extraction_output"] if repair_mode or inheritance_mode or materialization_mode
+                  candidate["raw_extraction_output"] if repair_mode or reference_mode or inheritance_mode or materialization_mode
                   else candidate["extraction_output"])
     intermediate_output = raw_output
+    if reference_mode:
+        from .reference_repairs import materialize_patch
+        feedback = _candidate_payload(git, candidate, sources).get("extraction_feedback")
+        if not isinstance(feedback, dict) or feedback.get("repair_context") != candidate["reference_repair_context"]:
+            _error("reference_repair_context_changed")
+        intermediate_output = materialize_patch(raw_output, feedback)
+        if intermediate_output != candidate["extraction_output"]:
+            _error("reference_repair_scope_mismatch")
     if materialization_mode:
         if (not isinstance(raw_output, dict) or "raw_extraction_output" not in candidate
                 or raw_output != candidate["raw_extraction_output"]):

@@ -1,6 +1,30 @@
 # 数据规范
 
-当前开发为`0.2.0.dev40`，在原链路统一受控提取失败诊断、固定普通候选的混合复用顺序并补人工组合验收。沿用Skill15/13及普通质量候选0.22，分解审核plan／proof和受限stage复用sidecar继续0.19；来源0.1、正式知识0.2与旧合同不迁移。下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+当前开发为`0.2.0.dev41`，新不可变Skill16/14与knowledge-quality-v3采用普通质量0.23及source-quality-v3。仅新固定pair／policy启用本批时间、引用与返工边界，旧15/13／0.22／v2及历史资产不迁移。来源0.1、正式知识0.2和分解plan／proof／stage复用sidecar0.19保持；下文dev标记区分引入批次，不向历史运行回填新字段。
+
+<a id="stable-processing-contract"></a>
+
+## dev41：时间、引用与返工的统一边界
+
+`stable_processing_enabled(bundle)`只接受固定`knowledge-extract@16`／`knowledge-review@14`及准确knowledge-quality-v3描述符。普通质量候选、审核和对应运行使用0.23，quality_context使用source-quality-v3；旧15/13仍为0.22／knowledge-quality-v2／source-quality-v2，更早按原快照。新程序不将旧候选套入新规则，也不自动把旧耗尽工作变成可重试。
+
+### 时间主张与输入识别
+
+真实过去来源状态须有实际限定；current_state仍须由程序实际给出的system_facts支持。按句子和实际主张检查，不让一个“当时／截至”遮住同句或后句的额外当前、未来断言。窄义证据免责声明（如不能据本文证明用户当前状态）及明确被介绍的字段名称不等于状态事实，不强迫补造temporal_claim；真正的否定状态、转述旧状态和夹带事实仍需各自依据，不豁免整段。
+
+source-quality-v3不再只因单行普通笔记含逗号／分号而推定它是零行表格；不确定输入保留语义内容审核义务。可识别的日期／结构列、显式表格等合法CSV和空表继续按实际格式处理，BOM只在解析视图处理，原文字节、行号及版本不变。旧v1／v2画像和请求字节不重算。
+
+### 引用、问题列表与窄修补
+
+普通和batch均允许实际已提供行中的合法单行Lx-Lx或连续Lx-Ly；新固定Skill明确替代旧基础提示的batch单行限制。对象quote仍为所选范围内逐字短摘，quality引用仍遵守完整行规则；错来源／版本、未给fragment、错位和空白不匹配仍拒绝，不自动全库搜索或默改坐标。
+
+新受控验证可在首错details附有上限的`issues`及`issues_truncated`，每项提供实际对象／字段／引用定位及原错误，不把未完成检查记为通过。授权、来源绑定或结构不允许继续检查时保持原停止保护；问题列表不充当独立Review，也不证明列外绝无语义遗漏。原安全返回、实际物化稿、请求与audit绑定仍留私库，不公开到CLI摘要。
+
+只有程序确认当前失败稿仅需引用字段修订，并显式提供`extraction_feedback.repair_context.contract="reference-fields-repair-v1"`时，本次既有extract输出改为`{"reference_repairs":[{"field_path":"允许的引用路径","reference":{"source_id":"来源ID","source_version":"来源版本","locator":"Lx-Ly","quote":"对应原文逐字引文"}}]}`。数组恰好覆盖实际指定路径，各一次；每项仅field_path和reference，引用仍为原四字段。正文、ID、分类、quality及其他正确引用冻结；时间／正文／语义／混合问题不选该模式。程序不从同数字、同短句或相邻行猜证据，也不替模型生成事实。
+
+原始补丁与物化完整稿分别绑定，随后重新执行完整确定性校验及独立Review。补丁不是新加工阶段、零调用采纳或发布豁免；同work原计数、unknown、范围与版本条件保持，失败、截断／歧义问题和不适用上下文继续如实阻断。旧统计绑定冻结补丁使用自己的原合同，不混同普通引用修补。
+
+验收见[统一交接场景](scenarios-and-acceptance.md#stable-processing-acceptance)。这里只定义当前实现边界，不据此声称历史返回已恢复、真实模型已重验或M1通过。
 
 <a id="combined-incremental-contract"></a>
 
@@ -231,7 +255,7 @@ production将本次worker参数传到各实际调用，不向已有queue或账�
 
 原样最终候选真实Review退回后保留原意见。若需实质跨批修订而现有请求仍不能承载，后续返回`blocked_context`／`assembly_revision_required`及零新调用，不重复原样再审或刷新次数。正常可承载final、10/8草稿及答复续接仍按下文有限反馈返工。该安全回退不代表已经实现任意大规模跨批语义修订。
 
-来源及采集`0.1`、正式对象`0.2`保持；新15/13普通质量链为`0.22`，旧14/12为`0.21`、13/11为`0.20`、12/10为`0.18`、11/9为`0.15`、10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
+来源及采集`0.1`、正式对象`0.2`保持；新16/14普通质量链为`0.23`，旧15/13为`0.22`、14/12为`0.21`、13/11为`0.20`、12/10为`0.18`、11/9为`0.15`、10/8为`0.12`、9/7为`0.11`、更早为`0.10`，按各自kind合同核验，不批量迁移。`0.13`仅为专用已完成提取恢复门禁，`0.14`为原样最终候选；支持范围以实际程序`SUPPORTED_SCHEMA_VERSIONS`为准。分节dev标记说明引入时间，不代表切回旧默认。执行、检查与交付分别见[实现明细](implementation-details.md)、[场景验收](scenarios-and-acceptance.md)与[发布约定](release-and-rollback.md)。
 
 current 证据可显式指定正式 `object_paths`；主题自动包含 `metadata.records` 中精确版本的依赖。coverage 分开报告请求对象、实际提供对象、依赖对象及未选无关来源；所选对象齐全不代表读遍授权原文或全库。原文片段保留全局行号与未读范围，压缩视图不重复发送 `source.body`；旧证据和限定读取包形状保持。11/9继续引用`knowledge-context-v1`核来源、时间、范围和已提供关系，旧审核只证明其原版本。
 
@@ -344,13 +368,13 @@ V2预留契约为 `quality-known-completed-reservation-v2`；调用端显式用 
 
 <a id="skill-quality-contract"></a>
 
-## M1 Skill 引用与知识质量契约（15/13为 `0.22`，旧14/12为 `0.21`）
+## M1 Skill 引用与知识质量契约（16/14为 `0.23`，旧15/13为 `0.22`）
 
-显式bundle启用`quality_contract="skill-quality-v1"`，新15/13使用0.22、旧14/12使用0.21、13/11使用0.20、12/10使用0.18、11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。新返工检查和v2正文锚见[dev36合同](#revision-completeness-repair)。
+显式bundle启用`quality_contract="skill-quality-v1"`，新16/14使用0.23、旧15/13使用0.22、14/12使用0.21、13/11使用0.20、12/10使用0.18、11/9使用0.15、10/8使用0.12、9/7使用0.11、更早使用0.10；来源／采集0.1、正式知识0.2及历史运行不迁移。新返工检查和v2正文锚见[dev36合同](#revision-completeness-repair)。
 
 ### Skill 引用、展开与运行绑定
 
-CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@15／review@13，历史extract@1—@14与review@1—@12原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
+CLI分别提供`--extract-skill`、`--review-skill`，加载器为`resolve_skill_refs(extract_skill_ref=None, review_skill_ref=None)`；本批新默认extract@16／review@14，历史extract@1—@15与review@1—@13原字节保留。底层API的`None`继续旧合同，不能借此给新质量链降级。引用展开完整Skill、质量规范、输出合同和冻结基础提示词；来源正文不能改变引用或权限，未知版本、外部路径或未声明依赖不自动发现。
 
 `skill_bundle` 顶层为 `schema_version="skill-bundle-v1"`、`quality_contract`、`skills`、`shared_policy` 和 `sha256`。`skills.extract`／`skills.review` 各保存 `ref`、`role`、`version`、`manifest`、`files`、`base_prompt`；每个内容快照包含 `path`、`content`、`sha256`、`bytes`。manifest 和完整依赖按注册摘要核验，bundle摘要覆盖除其自身 `sha256` 外的规范JSON；角色和共享规范必须一致。设计阶段的 `skill_binding` 在实际格式中由完整bundle与请求绑定共同承担，不另存同名字段。
 
@@ -370,7 +394,7 @@ summarized 的 `record_ids` 为唯一 ID 集合；`body_evidence` 可为同一�
 | --- | --- | --- |
 | `quality_context.sources`／`targets` | profile以`evidence_id`绑定来源版本、`provided_locators`、实际片段、逐行摘要、`format`与`tables`；表格包含列名、结构列、日期范围、重复／无效日期、部分日和缺失标记；target用`source_scope_id`引用该范围，并保存角色、单位、计数和限制 | 完整实际片段在source profile中保存一次，原坐标与BOM不改；仅统计实际提供范围。结构列作为限定，观测／目标列形成指标target；文本形成需要独立语义核对的target，不宣称程序已找全主张 |
 | `extraction_output.quality.coverage_disposition` | 每项 `{target_id, status, record_ids, body_evidence:[{record_id,text}], reason}`，状态为 `summarized` 或 `deferred` | 精确覆盖target集合，记录与正文片段真实存在并引用对应来源；暂缓必须具体。结构完整仍需模型审核内容是否充分 |
-| `quality_context.statistics`／`quality.statistic_claims` | 程序统计绑定统计ID、指标、操作、字符串值、单位、有效样本、日期及原行范围、算法和缺失／部分日／重复政策；旧普通模型声明 `{stat_id, record_id, value, body_evidence, sources}`，新15/13仅返回 `{stat_id, record_id, body_evidence}`并由程序展开 | 结果按固定Decimal口径重算，声明值与程序值及正文一致、引文回到原行并属于对应record。禁止将派生值伪装成原报表列；未知单位不生成数值描述统计 |
+| `quality_context.statistics`／`quality.statistic_claims` | 程序统计绑定统计ID、指标、操作、字符串值、单位、有效样本、日期及原行范围、算法和缺失／部分日／重复政策；旧普通模型声明 `{stat_id, record_id, value, body_evidence, sources}`，15/13及新16/14仅返回 `{stat_id, record_id, body_evidence}`并由程序展开 | 结果按固定Decimal口径重算，声明值与程序值及正文一致、引文回到原行并属于对应record。禁止将派生值伪装成原报表列；未知单位不生成数值描述统计 |
 | `quality.temporal_claims` | 每项 `{record_id, statement, basis, source_refs, system_fact_id}`；basis为 `source_time`、`current_state`、`unknown` | 状态句须映射正文并有时间限定；当前状态须匹配已核定system fact。本版prepare默认`system_facts=[]`，不自动认证当前入库状态，不能凭旧导出说明写成当前事实 |
 | `required_checks`／Review `checks` | 程序生成必需项的`check_id`、`scope_sha256`、`object_paths`、`source_scope_ids`、`target_ids`、可用`evidence_ids`及指令；模型返回`{check_id, scope_sha256, result, reason, evidence_ids}` | 来源范围ID指向实际source profile，范围摘要仍绑定完整资料，不反复复制逐行fragment列表。精确覆盖预定检查项，缺项、重复、错范围或无依据拒绝；`verdict`按逐项结果归并，任何needs_revision优先，其次needs_confirmation，否则passed；保留`reasons` |
 
@@ -526,7 +550,7 @@ registry可保存不代表后继模型请求一定可执行：production完整�
 
 ### 已实现的写前 schema 兼容检查
 
-Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增15/13普通质量0.22门禁，分解审核／stage复用证明继续0.19，旧14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
+Foundation实际写入支持来自已安装程序`contracts.SUPPORTED_SCHEMA_VERSIONS`；本批新增16/14普通质量0.23门禁，分解审核／stage复用证明继续0.19，旧15/13继续0.22、14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15，0.13为专用恢复门禁、0.14为原样最终候选，旧程序以其固定提交能力为准，不批量迁移memory。不能仅改pyproject声明扩大兼容。每次写入前核受管元数据；未知格式拒写，不移除文件或改header绕过门禁。M0不认识0.3、dev1不认识0.4的历史拒写边界继续保留。
 
 受管范围为 `memory/sources/`、`staging/`、`records/`、`topics/`、`runs/` 与 `memory/pending.md`。Markdown 仅无缓冲、有界读取 JSON/YAML 文件头，最多64 KiB，不预读正文；受管目录中的 JSON 及其他不支持格式不打开正文，按无法确认处理。说明用 README／`.gitkeep` 跳过，个人概况与领域模板不在探测范围，不能把此检查称为全库事实或数据有效性验证。
 
