@@ -1,6 +1,18 @@
 # 数据规范
 
-当前开发为`0.2.0.dev39`，仅补未来失败诊断；沿用Skill15/13及普通质量候选0.22，分解审核plan／proof和受限stage复用sidecar继续使用0.19，旧writer不支持即拒写。来源0.1和正式知识0.2不迁移。旧14/12的0.21、13/11的0.20及更早合同保持；下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+当前开发为`0.2.0.dev40`，在原链路统一受控提取失败诊断、固定普通候选的混合复用顺序并补人工组合验收。沿用Skill15/13及普通质量候选0.22，分解审核plan／proof和受限stage复用sidecar继续0.19；来源0.1、正式知识0.2与旧合同不迁移。下文按dev标记保留引入时的合同，不将新字段回填到历史运行。
+
+<a id="combined-incremental-contract"></a>
+
+## dev40：组合验收、统一失败留存与普通组装顺序
+
+沿现有提取、程序校验、独立Review、发布与读取工作，不新增加工阶段、Skill或schema。新增组合验收使用人工旧四来源与新四来源、多指标和固定旧记录／主题，检查最终正文是否实际表达新增、同日变化与历史新指标，以及返工是否保留仍有效知识；来源相同、coverage自报summarized或审核替身返回passed都不能单独作为内容完成的断言。完整人工成功与返工后成功、准确提交CI、真实业务分别取证，见[验收](scenarios-and-acceptance.md#combined-incremental-acceptance)。
+
+普通增量提取混用完整对象和精确refs时，程序按已核验旧Wiki的成员顺序保留旧记录，再接其余已给旧记录的输入顺序，最后追加本轮新记录；不靠“先完整对象、后refs”改变成员次序。仍检查每条旧记录实际存在，不自动补回模型遗漏内容。
+
+新普通关联候选由程序固定`ordinary_record_order="related-wiki-v1"`并计入候选绑定，模型不输出或决定该字段。只适用于普通、增量、有related且不是冻结正文的quality_repair_context补丁；batch-v1继续使用显式record_ids，纯统计补丁继续使用原冻结对象。固定读回只在合法标记下重建新顺序，旧无标记候选保持旧算法；未知标记、batch或无related误用、与冻结补丁混用均拒绝。标记不是新的模型合同或发布权限，不迁移历史候选。
+
+已有提取阶段的受控失败共用私有诊断出口，包括输出／质量／片段引用、关联完整性、复用统计、分类和候选容量拒绝。保留原错误码、调用摘要形状和计数；后置领域／容量错误也可以交付可诊断返回。并发HEAD、版本／控制变化、原目标冲突和无效领域策略等原保护继续抛出，不为写诊断吞异常或使用失效快照；候选已固定后的失败可回查原stage，本次不扩到Review、I/O或原生隐藏流。具体安全边界见[失败诊断](#failed-extraction-diagnostics)。
 
 <a id="complete-task-statistic-input"></a>
 
@@ -128,9 +140,13 @@ Review10对最终候选中deferred的覆盖检查及相应全局完成度检查�
 
 ## 提取校验失败的私有诊断
 
+dev40在原提取阶段使用同一受控失败出口，补齐`invalid_domains`、`invalid_domain_reuse`及候选存储容量拒绝，并复用已有质量、关联和统计错误留存。分类错误可定位`record_id`、`object_path`和对象内的`field_path: /domains`，附实际domains；原样复用身份不符使用`failed_check: reused_content_identity`。候选容量诊断包含`field_path: /candidate`、candidate_path、candidate_bytes及原storage_error／storage_details，不能把未落盘候选当作stage。
+
+统一出口继续只保存可核验的安全五字段和不同的实际物化值，遵守下述工程根与容量边界，不改变failure.call原形状。HEAD、版本或控制变化等原保护不转成可续跑的内容失败；留存I/O本身失败仍传播，不宣称已保存。以下dev30／33／39段是各批引入范围，当前共用出口以本段为准，未知调用和历史缺失返回不补造。
+
 dev39在既有`related_records_omitted`、`related_identity_changed`、`correction_evidence_missing`和`required_related_context`专用catch接入同一私有`extraction_diagnostic`。原生安全五字段继续留存；实际被校验的物化输出不同则另存`validated_output`及准确`validation_target`，不把物化内容冒充模型原件。`related_records_omitted`的details提供排序后的`missing_record_paths`、`required_record_paths`和`returned_record_paths`，只报告实际已核定路径，不补写模型返回或放宽遗漏门禁。旧失败没有留存返回或这些详情时仍无法事后恢复，也不能判定当时具体缺哪篇知识或新指标是否完成；本补丁不重开耗尽工作、不增加调用或恢复入口。
 
-dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。除上文明示接入的旧记录／关联完整性分支外，其他独立失败仍不承诺保存返回。
+dev30接入普通提取的首轮输出校验路径：已取得合格调用元信息的可见返回，在`_objects`内含时态质量的检查或其后的片段引用检查抛出`CaptureError`时，现有`memory/runs/processes/<run>/failure.md`可增加`extraction_diagnostic`。dev33另将复用统计校验失败接入同一留存；`reuse_statistic_claims_missing`的内部details含`field_path: /quality/statistic_claims`及实际`missing_claims`，每项为`record_id/stat_id`，不补写模型声明。11/9失败文件仍沿用schema0.15；这是可选诊断字段，不新增候选格式、加工阶段、恢复入口或发布权限。旧失败不回填，不改变原错误码、规则判定、unknown与已用次数。这些是当时的分支范围；dev40统一入口的范围和明确排除项见本节开头。
 
 | 字段 | 含义 |
 | --- | --- |

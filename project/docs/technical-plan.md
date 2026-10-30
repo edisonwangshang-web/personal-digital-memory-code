@@ -2,7 +2,7 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-当前`0.2.0.dev39`仅补既有旧记录／关联完整性失败的未来私有诊断，不改变门禁、Skill、schema或阶段；没有历史原返回时仍不能恢复或定位原内容，不重开耗尽工作。dev39准确CI另验，字段见[失败诊断](data-conventions.md#failed-extraction-diagnostics)。以下为dev38引入并继续保留的能力：完整任务加工、普通统计声明与时间限定。新默认Skill15/13、普通质量0.22，沿用source-quality-v2和现有阶段；模型给统计身份、记录与准确正文锚，程序展开固定数值和根来源，再独立审核语义与完整覆盖，原生和展开结果分别保留。返工带当前quality、实际未解决意见和明确剩余目标，不能只整理说明而把可用正文全部暂缓。过去来源事件的明确日期限定可按规则核验，当前或将来状态仍需各自依据。完整请求448000、planning／读取包各256000保持；旧合同、来源与正式知识不迁移，同工作次数与unknown不重置。工程检查、准确CI与真实业务分别取证，不新增阶段、索引或服务，见[dev38合同](data-conventions.md#complete-task-statistic-input)。
+当前`0.2.0.dev40`只修既有链路：受控提取失败共用安全私有诊断，普通增量按已核验旧Wiki顺序组装完整对象与精确refs，并用人工多来源组合验证新增、变化、历史指标补录及返工后的正式正文和读取。旧无顺序标记候选按旧逻辑重建，batch显式record_ids保持；并发HEAD、控制、版本变化与其他原有保护不因留存被吞掉。不新增阶段、Skill或schema，不恢复历史丢失返回或重开耗尽工作；工程检查、准确CI与真实业务分别取证，见[本批合同](data-conventions.md#combined-incremental-contract)和[验收](scenarios-and-acceptance.md#combined-incremental-acceptance)。
 
 dev35修复整体审核材料超容量：新分解计划按完整表格来源覆盖，附完整说明／字典，global汇总全部来源范围和关系；旧v1请求字节保持。受限已完成stage仅在原Review未启动、同work未耗尽及Git／audit完整核验后零新extract续接，再重做程序校验和独立Review；不是通用跨版本迁移。新plan／proof及sidecar为0.19，普通12/10候选为0.18，工程与真实结果分别取证，详见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。
 

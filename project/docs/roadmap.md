@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前批次为`0.2.0.dev39`，仅为既有旧记录／关联完整性失败补齐未来私有诊断和准确缺失路径，不改变拒绝条件、阶段或加工规则。Skill15/13、普通质量0.22、source-quality-v2及来源／正式知识／证明格式保持；不恢复过去丢失返回，不声称原内容已经修好，不重开耗尽工作。人工检查和dev39准确CI另取证，当前不预填通过，两个master不更新。字段见[失败诊断](data-conventions.md#failed-extraction-diagnostics)，检查见[dev39场景](scenarios-and-acceptance.md#related-failure-diagnostic-acceptance)。
+当前批次为`0.2.0.dev40`，只补统一提取失败留存、普通增量混合复用顺序及人工多来源组合验收。人工样本同时覆盖新增日期、同日后续快照、历史新指标、旧知识保留和审核返工，检查最终正文与读取内容，不以字段齐全或全部模拟passed替代业务断言。Skill15/13、普通质量0.22、source-quality-v2和其余格式／阶段／次数不变；不恢复旧原返回、不重开耗尽工作或新增真实调用，两个master不更新。准确提交检查和CI另取证，真实增量和M1仍待验收。见[合同](data-conventions.md#combined-incremental-contract)与[场景](scenarios-and-acceptance.md#combined-incremental-acceptance)。
 
 dev38准确提交`43a16baa88c58bca2fa98ff9b0eed00580903064`的[CI40917650566](https://github.com/edisonwangshang-web/personal-digital-memory-code/actions/runs/40917650566)八任务已通过，仅证明该固定工程版本，不能代替dev39检查或真实内容验收；下面保留其能力范围。
 

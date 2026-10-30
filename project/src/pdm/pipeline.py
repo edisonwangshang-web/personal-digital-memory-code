@@ -33,6 +33,7 @@ SAFE_REVIEW_PRELAUNCH_ERRORS = frozenset({
 })
 REVIEW_STRATEGIES = frozenset({"legacy-v1", "auto", "decomposed-v1"})
 CURRENT_DRAFT_REVIEW_CONTRACT = "current-draft-v1"
+ORDINARY_RECORD_ORDER_CONTRACT = "related-wiki-v1"
 
 
 def _error(code="invalid_pipeline_data", *, details=None):
@@ -443,8 +444,38 @@ def _reuse_quality_output(output, reused):
               if obj["metadata"]["type"] != "wiki"]]}
 
 
+def _ordinary_record_order(candidate):
+    """Old fixed candidates retain the original complete-then-ref ordering."""
+    if "ordinary_record_order" not in candidate:
+        return False
+    if (candidate["ordinary_record_order"] != ORDINARY_RECORD_ORDER_CONTRACT
+            or "batch_context" in candidate or candidate.get("mode") != "incremental"
+            or not candidate.get("related") or "quality_repair_context" in candidate):
+        _error("invalid_record_order_contract")
+    return True
+
+
+def _ordered_ordinary_records(objects, related):
+    """Order only returned records; never supply an omitted old record."""
+    by_id = {obj["metadata"]["id"]: obj for obj in objects}
+    ordered = []
+    for item in related:
+        for document in item["documents"]:
+            if document["metadata"]["type"] == "wiki":
+                ordered.extend(ref["id"] for ref in document["metadata"]["records"])
+    ordered.extend(document["metadata"]["id"] for item in related for document in item["documents"]
+                   if document["path"].startswith("memory/records/"))
+    ordered.extend(by_id)
+    result, seen = [], set()
+    for identifier in ordered:
+        if identifier in by_id and identifier not in seen:
+            seen.add(identifier)
+            result.append(by_id[identifier])
+    return result
+
+
 def _objects(output, sources, run_id, response, versions, created, *, batch=False, quality_context=None,
-             related=(), skill_bundle=None):
+             related=(), skill_bundle=None, ordinary_record_order=False):
     fields = {"objects", "wikis"} if batch else {"objects", "wiki"}
     reuse_enabled = _reuse_refs_enabled(skill_bundle)
     if reuse_enabled:
@@ -492,6 +523,8 @@ def _objects(output, sources, run_id, response, versions, created, *, batch=Fals
         material = {key: value[key] for key in value if key != "body"}
         result.append(_object(material, value["body"], "records", sources, ids, run_id, response, versions, created))
     result.extend(reused_records)
+    if ordinary_record_order and not batch:
+        result = _ordered_ordinary_records(result, related)
     wikis = output["wikis"] if batch else ([] if reuse_enabled and output["wiki"] is None else [output["wiki"]])
     if (not isinstance(wikis, list) or not 1 <= len(wikis) + len(reused_wikis) <= (20 if batch else 1)):
         _error("invalid_model_output")
@@ -581,13 +614,15 @@ def _validate_domains(objects, related, operations, versions):
                     or metadata["content_version"] != old["content_version"]
                     or {key: value for key, value in metadata.items() if key not in generated}
                        != {key: value for key, value in old["metadata"].items() if key not in generated}):
-                _error("invalid_domain_reuse")
+                _error("invalid_domain_reuse", details={"record_id": metadata.get("id"),
+                    "object_path": obj["path"], "failed_check": "reused_content_identity"})
             continue
         if metadata["type"] == "wiki":
             continue
         labels = metadata["domains"]
         if len(labels) != len(set(labels)) or any(label not in DOMAIN_LABELS for label in labels):
-            _error("invalid_domains")
+            _error("invalid_domains", details={"record_id": metadata["id"],
+                "object_path": obj["path"], "field_path": "/domains", "domains": copy.deepcopy(labels)})
 
 
 def _call_metadata(response):
@@ -2009,6 +2044,27 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
             context_fields.update(attempt_path=started_path, attempt_sha256=_hash(started_bytes))
         response = None
         materialized_output = None
+
+        def extraction_failure(error, *, call=None, code=None):
+            """One private diagnostic boundary for pre-candidate failures.
+
+            Snapshot/control conflicts deliberately remain outside this helper.
+            A completed response is evidence for diagnosis, never a candidate
+            or permission to replay its provider operation.
+            """
+            git.check(head)
+            if code is not None:
+                error = CaptureError(code, str(error), details=getattr(error, "details", None))
+            from .extraction_feedback import failure_context
+            diagnostic = _extraction_diagnostic(git, error, response,
+                context_fields.get("extraction_request_binding"), materialized_output,
+                failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call)
+                if response is not None else None)
+            return _failure(git, run_id, "extract", error.code, head,
+                _failure_call(error, response) if call is None else call, schema_version, current_call_count(),
+                failure_name="revalidation-failure" if _revalidate_completed is not None else "failure",
+                extraction_diagnostic=diagnostic)
+
         try:
             if skill_bundle is not None:
                 original_payload = _revalidate_completed["original_payload"] if _revalidate_completed is not None else payload
@@ -2061,9 +2117,10 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                         if reused_stage_material is None:
                             context_fields["raw_extraction_output"] = copy.deepcopy(response["output"])
                         context_fields["reuse_statistic_inheritance"] = inherited
+            ordinary_record_order = not batch and bool(related) and "quality_repair_context" not in context_fields
             objects = _objects(materialized_output, sources, run_id, response, versions, created, batch=batch,
                                quality_context=context_fields.get("quality_context"),
-                               related=related, skill_bundle=skill_bundle)
+                               related=related, skill_bundle=skill_bundle, ordinary_record_order=ordinary_record_order)
             if "quality_repair_context" in context_fields:
                 # The actual new model call repaired metadata only. Keep the
                 # original, independently re-reviewed generator and all text.
@@ -2074,22 +2131,12 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 for obj in objects:
                     assert_fragment_refs(obj["metadata"]["sources"], source_views)
         except (ModelCallError, CaptureError) as error:
-            git.check(head)
-            from .extraction_feedback import failure_context
-            diagnostic = _extraction_diagnostic(git, error, response,
-                context_fields.get("extraction_request_binding"), materialized_output,
-                failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call) if response is not None else None)
-            if _revalidate_completed is not None:
-                if rebuild_revalidation:
-                    return _failure(git, run_id, "extract", error.code, head,
-                        _failure_call(error, response), schema_version, current_call_count(),
-                        failure_name="revalidation-failure", extraction_diagnostic=diagnostic)
+            if _revalidate_completed is not None and not rebuild_revalidation:
+                git.check(head)
                 return {"run_id": run_id, "status": "failed", "error": error.code,
                         "failure_path": _run_path(run_id, "failure"), "head": head,
                         "attempted_calls": 0, "model_calls": 0, "extract_calls": 0}
-            return _failure(git, run_id, "extract", getattr(error, "code", "model_failed"), head,
-                            _failure_call(error, response), schema_version, current_call_count(),
-                            extraction_diagnostic=diagnostic)
+            return extraction_failure(error)
         git.check(head)
         if execution_versions(git) != versions or _source_fields(_load_sources(repo, source_paths, allow_versions=incremental,
                 purpose="history" if incremental else "current", max_sources=source_limit)) != source_fields:
@@ -2107,14 +2154,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                 if error.code not in {"related_records_omitted", "related_identity_changed",
                                       "correction_evidence_missing", "required_related_context"}:
                     raise
-                git.check(head)
-                from .extraction_feedback import failure_context
-                diagnostic = _extraction_diagnostic(git, error, response,
-                    context_fields.get("extraction_request_binding"), materialized_output,
-                    failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call))
-                return _failure(git, run_id, "extract", error.code, head, extraction, schema_version, current_call_count(),
-                    failure_name="revalidation-failure" if _revalidate_completed is not None else "failure",
-                    extraction_diagnostic=diagnostic)
+                return extraction_failure(error, call=extraction)
         else:
             _targets_clear(git, objects, rebuild_context)
         if _feedback_quality_enabled(skill_bundle):
@@ -2125,28 +2165,20 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
                                        _reuse_quality_output(materialized_output,
                                            _reuse_objects(materialized_output.get("reuse_refs"), related, sources)))
             except CaptureError as error:
-                git.check(head)
-                from .extraction_feedback import failure_context
-                diagnostic = _extraction_diagnostic(git, error, response,
-                    context_fields.get("extraction_request_binding"), materialized_output,
-                    failure_context(git, payload, versions, context_fields.get("processing_key"), run_id, model_call))
-                return _failure(git, run_id, "extract", error.code, head, extraction, schema_version,
-                                current_call_count(),
-                                failure_name="revalidation-failure" if _revalidate_completed is not None else "failure",
-                                extraction_diagnostic=diagnostic)
+                return extraction_failure(error, call=extraction)
         try:
             _validate_domains(objects, related, context_fields.get("operations", {}), versions)
         except CaptureError as error:
             if error.code not in {"invalid_domains", "invalid_domain_reuse"}:
                 raise
-            git.check(head)
-            return _failure(git, run_id, "extract", error.code, head, extraction, schema_version, current_call_count(),
-                    failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
+            return extraction_failure(error, call=extraction)
         candidate = {"run_id": run_id, "base_head": head, **source_fields, "versions": versions,
                      "related": related, "objects": objects, "extraction": extraction, "extraction_output": materialized_output, "created_at": created,
                      **context_fields}
         if skill_bundle is not None:
             candidate["review_request_contract"] = CURRENT_DRAFT_REVIEW_CONTRACT
+        if ordinary_record_order:
+            candidate["ordinary_record_order"] = ORDINARY_RECORD_ORDER_CONTRACT
         stage_files = {}
         if _revalidate_completed is not None:
             from .quality_completed_extraction import CONTRACTS, RESPONSE_PROVENANCE, SCHEMA
@@ -2166,10 +2198,11 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         from .storage_limits import validate_file_bytes
         try:
             validate_file_bytes(stage_path, stage_bytes)
-        except CaptureError:
-            return _failure(git, run_id, "extract", "candidate_too_large", head, _failure_call(None, response), schema_version,
-                            current_call_count(),
-                            failure_name="revalidation-failure" if _revalidate_completed is not None else "failure")
+        except CaptureError as error:
+            error.details = {"field_path": "/candidate", "candidate_path": stage_path,
+                "candidate_bytes": len(stage_bytes), "storage_error": error.code,
+                "storage_details": copy.deepcopy(error.details)}
+            return extraction_failure(error, code="candidate_too_large")
         stage_files[stage_path] = stage_bytes
         head = git.write_files(stage_files, head, "process: preserve fixed candidate")
         stage_commit = head
@@ -2312,6 +2345,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     if candidate.get("run_id") != run_id or candidate.get("binding") != _candidate_binding(candidate):
         _error("candidate_mismatch")
     _current_draft_review(candidate)
+    ordinary_record_order = _ordinary_record_order(candidate)
     if "assembly" in candidate:
         from .assembly_final import read_assembled_candidate
         return read_assembled_candidate(git, run_id, candidate, stage_bytes, source_paths=source_paths,
@@ -2525,7 +2559,7 @@ def _read_fixed_candidate(git, run_id, *, source_paths=None, historical=False, v
     _validate_candidate_quality(git, candidate, sources)
     expected_objects = _objects(candidate["extraction_output"], sources, run_id, extraction, candidate["versions"], candidate["created_at"],
                                 batch=batch, quality_context=candidate.get("quality_context"),
-                                related=related, skill_bundle=candidate.get("skill_bundle"))
+                                related=related, skill_bundle=candidate.get("skill_bundle"), ordinary_record_order=ordinary_record_order)
     if repair_mode:
         from .statistic_repairs import build_repair_context, is_enabled, materialize_patch
         if not is_enabled(candidate.get("skill_bundle")):

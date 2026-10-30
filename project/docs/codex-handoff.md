@@ -4,7 +4,9 @@
 
 ## 目标与当前范围
 
-当前开发版`0.2.0.dev35`针对整体coverage请求超容量，采用完整表格来源＋完整说明／字典的v2审核布局，global汇总全部范围和关系。新plan／proof及受限stage复用sidecar为0.19，普通12/10候选仍0.18，旧v1计划及请求字节保持。只有原提取completed且固定、Review从未启动、decomposed_input_limit阻塞与同work未耗尽都可核验时，才在下一attempt以原Git／audit观察零新extract复用，再重新程序校验和独立Review。不是通用跨版本迁移；旧失败、unknown、消费及四次上限不变。当前工程、新CI与真实Review／发布／读取待取证，不标M1完成；两个master不动。见[合同](data-conventions.md#review-material-recovery)及[验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
+当前开发版`0.2.0.dev40`只补统一受控提取失败诊断、普通增量混合复用顺序和人工多来源组合验收。程序固定新普通候选顺序标记，旧无标记及batch行为保持；Skill15/13、普通质量0.22和全部既有schema／次数不变。不新增阶段、真实模型调用或master变更，不重开耗尽工作；准确工程检查、真实业务及目标runner分别核验，详见[Roadmap](roadmap.md)及[本批合同](data-conventions.md#combined-incremental-contract)。
+
+历史dev35批次针对整体coverage请求超容量，采用完整表格来源＋完整说明／字典的v2审核布局，global汇总全部范围和关系。新plan／proof及受限stage复用sidecar为0.19，普通12/10候选仍0.18，旧v1计划及请求字节保持。只有原提取completed且固定、Review从未启动、decomposed_input_limit阻塞与同work未耗尽都可核验时，才在下一attempt以原Git／audit观察零新extract复用，再重新程序校验和独立Review。不是通用跨版本迁移；旧失败、unknown、消费及四次上限不变。当前工程、新CI与真实Review／发布／读取待取证，不标M1完成；两个master不动。见[合同](data-conventions.md#review-material-recovery)及[验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
 
 dev35后续只将应用完整请求门槛调为320000字节，原文planning／便携读取包各256000及存储、Skill、schema、旧请求字节不变；字节不等于token，服务接收仍需真实证据。已采用stage的后继被退回后沿正常反馈返工，不重复采用旧源；新CI和业务结果分别取证，见[容量规范](data-conventions.md#model-request-capacity)。
 
