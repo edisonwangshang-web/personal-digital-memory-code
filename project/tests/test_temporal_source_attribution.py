@@ -225,6 +225,82 @@ class TemporalSourceAttributionTests(unittest.TestCase):
         previous = resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")
         self.invalid("不能据此宣称用户已经康复。", "quality_temporal_missing", bundle=previous)
 
+    def test_bounded_material_reference_disclaimers_across_three_domains(self):
+        for prefix in (
+            "不能由这段历史说明判断", "无法从该份资料推断", "不能根据上述报告证明",
+            "无法依据原文认定", "不能仅凭这些原始记录宣称", "无法只根据前述材料声称",
+            "不能单由本次提供的文本确认", "无法凭该页相关说明确定", "不能从那一篇文档来断言",
+        ):
+            for state in ("用户当前已经康复", "系统当前已经上线", "用户目前已经掌握课程"):
+                for basis in (None, "unknown"):
+                    with self.subTest(prefix=prefix, state=state, basis=basis):
+                        self.valid(prefix + state + "。", basis=basis)
+
+    def test_material_reference_disclaimers_preserve_actual_assertions(self):
+        for body in (
+            "当前已经康复，不能由这份资料判断恢复程度。",
+            "不能从该份资料推断当前状态，系统已经上线。",
+            "无法依据原文认定已经学会；用户当前已经掌握课程。",
+            "不能根据上述报告判断当前状态但明天将会完成。",
+            "不能凭该记录证明当前状态且系统已经上线。",
+            "“不能由这份资料判断”三个字已经加入备注。",
+            "“无法依据原文认定”将会加入课程词表。",
+            "材料写道“不能从原文判断已经完成”但当前已经完成。",
+            "并非不能由这份资料判断用户已经康复。",
+            "不是无法根据上述报告推断系统已经上线。",
+            "并不是不能凭原文认定用户已经学会。",
+            "并非 不能由这份资料判断用户已经康复。",
+            "不是 无法根据上述报告推断系统已经上线。",
+            "否认不能凭原文认定用户已经学会。",
+            "不可能无法由该报告判断用户当前状态。",
+            "不能不根据该资料判断当前状态。",
+            "不能根据这份已经发布的报告判断系统当前状态。",
+            "无法由该说明系统已经上线判断当前状态。",
+            "不能凭某些随意的字词判断当前状态。",
+            "不能由这段历史说明，判断当前状态。",
+            "不能由这段\n历史说明判断当前状态。",
+            "不能由这份资料判断当前状态可是系统已经上线。",
+            "不能由这份资料判断当前状态却已经上线。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_material_reference_does_not_cover_adversative_unknown_claims(self):
+        for body in ("不能由这份资料判断当前状态可是系统已经上线。",
+                     "不能由这份资料判断当前状态却已经上线。"):
+            with self.subTest(body=body):
+                self.invalid(body, basis="unknown")
+
+    def test_denied_material_reference_does_not_count_as_an_unknown_disclaimer(self):
+        for body in ("并非 不能由这份资料判断当前状态。", "否认不能从资料推断。"):
+            for basis in ("unknown", "source_time"):
+                with self.subTest(body=body, basis=basis):
+                    self.invalid(body, basis=basis)
+
+    def test_material_reference_disclaimer_does_not_bypass_source_validation(self):
+        for field, value, code in (
+            ("source_id", "src-outside-selected-material", "quality_source_reference_mismatch"),
+            ("quote", "人工但不是所引原文。", "quality_source_reference_mismatch"),
+            ("locator", "L999-L999", "quality_source_reference_mismatch"),
+            ("source_version", None, "invalid_quality_output"),
+        ):
+            output, context = self.material("不能由这份资料判断当前恢复状态。", basis="unknown")
+            output["quality"]["temporal_claims"][0]["source_refs"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(CaptureError) as caught:
+                validate_quality_output(output, context)
+            self.assertEqual(caught.exception.code, code)
+
+    def test_material_reference_disclaimer_still_needs_current_system_fact_authority(self):
+        self.invalid("不能由这份资料判断当前状态。当前已经上线。",
+            "quality_current_state_unverified", basis="current_state")
+
+    def test_legacy_v1_and_v2_do_not_gain_material_reference_disclaimers(self):
+        for extract, review in (("knowledge-extract@11", "knowledge-review@9"),
+                                ("knowledge-extract@15", "knowledge-review@13")):
+            with self.subTest(extract=extract):
+                self.invalid("不能由这份资料判断当前恢复状态。", "quality_temporal_missing",
+                    bundle=resolve_skill_refs(extract, review))
+
     def test_explicitly_historical_quoted_labels_are_metadata(self):
         for body in (
             "以下“当前负荷”“正在调整”均指报告当时。",

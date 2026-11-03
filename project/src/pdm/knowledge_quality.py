@@ -777,13 +777,24 @@ _V3_LITERAL = re.compile(
     r'(?P<prefix>“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
     r'|(?P<suffix>“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
     r'\s*(?:是|为)?\s*(?:字段|列名|属性|枚举|标签|标题|变量)')
-_V3_DISCLAIMER = re.compile(
+_V3_MATERIAL_REFERENCE = (
+    r'(?:(?:这些|那些|这|那|该|此)(?:一)?(?:段|份|则|条|篇|批|组|张|页)?|'
+    r'(?:上述|前述|本次|此次|该次))?'
+    r'(?:历史|原始|既有|相关|所述|提供的|选定的|导出的){0,2}'
+    r'(?:原文|来源|资料|材料|说明|报告|记录|文档|文本|内容|证据|数据|图表)')
+_V3_MATERIAL_DISCLAIMER = (
+    r'(?<![非不])(?<!不是)(?:不能|无法)(?:仅|只|单)?(?:从|由|根据|依据|凭)[ \t]{0,4}'
+    + _V3_MATERIAL_REFERENCE + r'[ \t]{0,4}(?:来)?'
+    r'(?:判断|推断|断言|证明|宣称|声称|认定|确认|确定)')
+_V3_DISCLAIMER = re.compile(_V3_MATERIAL_DISCLAIMER + r'|' +
     r'不(?:能)?(?:据此|由此)?(?:证明|代表)|不足以(?:证明|代表)|'
     r'不能(?:据此|由此)(?:断言|判断|推断)|'
     r'(?<![非不])(?<!不是)不能(?:据此|由此)(?:宣称|声称|认定)|'
     r'无法(?:据此|由此)?(?:证明|判断|确认|确定)|'
     r'不等于|不能(?:被)?(?:作为|用作|外推为)|'
     r'(?:不构成|不能(?:被)?(?:作为|用作))[^。！？!?；;，,\n]*?(?:证据|依据)')
+_V3_MATERIAL_DENIAL = re.compile(r'(?:非|不是|否认|不可能)[ \t]{0,4}$')
+_V3_MATERIAL_CLAUSE_END = re.compile(r'可是|却')
 _V3_SOURCE_QUALIFIER = re.compile(
     r'当时|导出时|来源时间|(?:该次|当次|那次|上次|前次)(?:导出|采集|读取)|'
     r'at (?:export|source) time', re.I)
@@ -881,12 +892,22 @@ def _v3_state_matches(part):
     # The cue governs only the rest of this clause. Earlier actual assertions
     # and later comma/adversative clauses retain their independent checks.
     quoted = [match.span() for match in _V3_ALL_QUOTES.finditer(part)]
-    for match in _V3_DISCLAIMER.finditer(part):
+    for match in _v3_disclaimers(part):
         quote_end = next((end for start, end in quoted
                           if start <= match.start() and match.end() <= end), len(part))
+        if re.fullmatch(_V3_MATERIAL_DISCLAIMER, match.group()):
+            boundary = _V3_MATERIAL_CLAUSE_END.search(part, match.end(), quote_end)
+            if boundary is not None:
+                quote_end = boundary.start()
         excluded.append((match.start(), quote_end))
     return [match for match in _V3_WORDS.finditer(part)
             if not any(start <= match.start() and match.end() <= end for start, end in excluded)]
+
+
+def _v3_disclaimers(text):
+    return [match for match in _V3_DISCLAIMER.finditer(text)
+            if not (re.fullmatch(_V3_MATERIAL_DISCLAIMER, match.group())
+                    and _V3_MATERIAL_DENIAL.search(text[:match.start()]))]
 
 
 def _v3_source_prefix(statement, start):
@@ -977,7 +998,7 @@ def collect_temporal_diagnostics(output, context):
                                     record["body"].index(statement) + end)
                         _error("quality_temporal_mismatch", "未知声明不能覆盖同句或后句的实际当前／未来状态")
                 if not state_parts and not (_UNKNOWN_TIME_WORDS.search(statement)
-                        or _V3_DISCLAIMER.search(statement) or _v3_literal_spans(statement)):
+                        or _v3_disclaimers(statement) or _v3_literal_spans(statement)):
                     _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
             elif basis == "source_time":
                 for start, end, part, matches in state_parts:
@@ -1003,7 +1024,7 @@ def collect_temporal_diagnostics(output, context):
                         or _source_date_qualified(statement, refs)
                         or _v3_source_year_qualified(statement, refs)
                         or _v3_source_period_qualified(statement)
-                        or _V3_DISCLAIMER.search(statement) or _v3_literal_spans(statement)):
+                        or _v3_disclaimers(statement) or _v3_literal_spans(statement)):
                     _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
         except CaptureError as error:
             remember(error, index=index, record_id=record_id, statement=statement,
