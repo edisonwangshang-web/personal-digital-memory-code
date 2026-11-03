@@ -1,6 +1,34 @@
 # 数据规范
 
-当前开发为`0.2.0.dev41`，新不可变Skill16/14与knowledge-quality-v3采用普通质量0.23及source-quality-v3。仅新固定pair／policy启用本批时间、引用与返工边界，旧15/13／0.22／v2及历史资产不迁移。来源0.1、正式知识0.2和分解plan／proof／stage复用sidecar0.19保持；下文dev标记区分引入批次，不向历史运行回填新字段。
+当前开发为`0.2.0.dev42`，沿用不可变Skill16/14与knowledge-quality-v3采用普通质量0.23及source-quality-v3。仅新固定pair／policy启用本批时间、引用与返工边界，旧15/13／0.22／v2及历史资产不迁移。来源0.1、正式知识0.2和分解plan／proof／stage复用sidecar0.19保持；下文dev标记区分引入批次，不向历史运行回填新字段。
+
+<a id="program-only-continuation"></a>
+
+## dev42：同资料的程序升级续接
+
+程序修复不能让同一批资料失去已有进度，也不能自动改变模型规则或重置次数。续接使用现有`production prepare`的显式`--refresh-program`，并提供原`--budget-ledger`与`--operation-id`；它只更新可核验的程序／plan交接，不执行、预约模型调用或发布。默认不刷新，仍拒绝旧plan与当前程序版本不符。
+
+仅支持相同16/14、相同完整Skill／policy、单批完整来源的队列。原source版本与fragment、related、控制及必要上下文必须保持。未启动的ready队列可重规划；已有提取失败时，须有原完整可见返回、准确旧程序／请求绑定和同一audit中的completed调用，原Review与stage均未开始，工作尚有剩余次数。unknown、耗尽、已产生候选／Review或任何真实范围变化不适用。
+
+当前queue以`program_refresh`见证关联原state／plan与新程序版本，原快照保留精确Git引用；同一work、counter路径、全部attempt行及原audit／pool保持。重放不得重复刷新或增加调用。失败反馈按原engine、原plan和原控制快照核验后，再用于当前程序的正常剩余尝试；不能只改wrapper的代码SHA、丢掉旧草稿或借新队列清零。
+
+`program_refresh`仅含以下字段：
+
+| 字段 | 约束 |
+| --- | --- |
+| `contract` | 固定`same-skill-program-refresh-v1` |
+| `previous_queue` | 原state的`path`／`commit_sha`／`sha256`，路径必须为同queue；固定blob及Git祖先关系核验 |
+| `work_id` | 原单批完整fragment、阶段与上下文的稳定身份 |
+| `counter_path` | 同work的既有counter路径；不另建工作计数 |
+| `counter_sha256` | 刷新时原counter完整字节摘要；此前未建counter才为null |
+
+刷新只改变plan、state修订号及该见证，不改变`status`、`last_result`、`active_run_id`或原audit绑定。成功返回`program_refreshed=true`；同程序重放返回`reused=true`／`program_refreshed=false`，不写入。显式刷新命令成功退出0，即使原工作仍为`failed`，这只表示版本交接成功，不表示知识加工已通过。
+
+跨程序的失败反馈引用携带另一个三键`program_refresh`，固定刷新后的state提交；验证从该不可变快照重建原plan、batch、控制及真实反馈，并核原scope／payload／request绑定。后续counter正常增长不改变刷新时的历史证明，也不能删除或修改旧attempt。
+
+后续仍由模型修订，按实际新程序保存新请求／返回，完整校验和独立Review通过才可发布。这不是旧失败稿的零提取恢复，也不是通用跨Skill迁移；精确入口与支持边界以对应程序检查结果为准。
+
+同批时间修复只完善v3对真正状态断言的识别：明确来源历史、引述和推断排除不自动变成当前状态；未知限定只管其实际期间，否定词、引号和历史年份不能遮住独立主体的当前／未来事实。旧v1／v2及不可变Skill资产保持。
 
 <a id="stable-processing-contract"></a>
 

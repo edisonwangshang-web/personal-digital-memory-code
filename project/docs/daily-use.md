@@ -84,6 +84,16 @@ python -P -B -m pdm rebuild-prepare --repo "$PDM_DATA_REPO" \
 
 ## 配置调用记录
 
+程序修复后，旧队列不能仅更换本地代码SHA继续。先核对新准确CI及同名双仓，再用原来源和原账本显式刷新受限plan；以下均为占位变量：
+
+```bash
+python -P -B -m pdm production prepare --repo "$PDM_DATA_REPO" \
+  --id "$queue_id" --source "$source_path" --refresh-program \
+  --budget-ledger "$audit_ledger" --operation-id "$queue_id"
+```
+
+只接相同16/14、单批完整来源和未变化的规则／控制／上下文；已启动Review、已有stage、unknown或耗尽工作停止。刷新不调用模型或清零，随后仍用同queue、同audit和原剩余次数执行`production run`。详见[受限续接](data-conventions.md#program-only-continuation)。
+
 `process`、`ask`、`production run` 和日程执行入口显式接收 `--budget-ledger` 与稳定的 `--operation-id`。调用记录放在仓库外的私有持久目录；同一授权范围共用原记录，恢复时核对原操作身份，不新建空记录或换 ID 重放未知调用。
 
 日常审计模式记录调用，不设置每日或历史累计次数硬上限；容量、有限重试、并发、速率和实际服务范围仍约束执行。创建时按实际已有用量填写，不默认从零开始：

@@ -2,9 +2,18 @@
 
 [总体方案](overall-plan.md) → [技术方案](technical-plan.md) → 实现明细
 
-本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev41`在原流程统一输入识别、时间／引用校验与准确返工；新Skill16/14、普通质量0.23和source-quality-v3，旧15/13及原证明按原规则核验。主路径仍为 **source → staging → record／topic**，纯引用修补仍是既有extract阶段，不增加模型调用角色或免除独立Review。来源0.1／正式知识0.2不迁移；只dev，不调用真实模型、不重开耗尽工作或更新master，准确检查见[Roadmap](roadmap.md)。
+本文说明明确提交的资料如何保存、加工、审核、发布与使用，以及纠正、删除、持续编排和失败恢复。当前`0.2.0.dev42`在原流程统一输入识别、时间／引用校验与准确返工；新Skill16/14、普通质量0.23和source-quality-v3，旧15/13及原证明按原规则核验。主路径仍为 **source → staging → record／topic**，纯引用修补仍是既有extract阶段，不增加模型调用角色或免除独立Review。来源0.1／正式知识0.2不迁移；只dev，工程检查不用真实模型、不重开耗尽工作或更新master，准确检查见[Roadmap](roadmap.md)。
 
 新默认为`knowledge-extract@16`／`knowledge-review@14`、普通质量链0.23，plan／proof／stage复用sidecar继续0.19。旧15/13继续0.22、14/12继续0.21、13/11继续0.20、12/10继续0.18、11/9继续0.15；基础提示词资产和旧Skill不原地修改。旧运行不因默认变化升级或重跑；字段统一见[数据规范](data-conventions.md)，memory路径均指私有资料库。
+
+## dev42：程序修复后的同工作续接
+
+1. 修复工程并核对其准确成功CI，再重新核对公库dev与私库dev；原队列及资料不删除。
+2. 通过`production prepare --refresh-program`并提供原`--budget-ledger`及`--operation-id`，显式核对同一来源、fragment、规则、控制与原audit。只接单批完整来源的未启动队列或有可核completed提取失败、无stage／Review且未耗尽的工作。
+3. 在原队列保存原新state／plan与程序关联，核work和全部counter行未变；重放不重新预约或调用模型。
+4. 继续原`production run`，用当前失败稿和真实反馈完成正常剩余尝试。原失败不改写，完整校验和独立Review仍必需；unknown或真实范围变化立即停止。
+
+具体持久字段、拒绝条件与回退边界见[程序升级续接合同](data-conventions.md#program-only-continuation)。不增加提取、审核或发布之外的新阶段。
 
 ## dev41：准确反馈与引用字段修补
 

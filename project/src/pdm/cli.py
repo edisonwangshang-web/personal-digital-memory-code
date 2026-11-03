@@ -381,6 +381,9 @@ def parser() -> argparse.ArgumentParser:
         action.add_argument("--id", required=True)
         if name == "prepare":
             _skill_arguments(action)
+            action.add_argument("--refresh-program", action="store_true",
+                                help="显式续接同Skill与输入的程序更新；保留原队列、尝试及失败证明，不调用模型")
+            _budget_arguments(action)
             action.add_argument("--source", action="append", required=True)
             action.add_argument("--allowed-source", action="append")
             action.add_argument("--allowed-run", action="append", default=[])
@@ -667,8 +670,10 @@ def main(argv: list[str] | None = None) -> int:
                     max_input_bytes=args.max_input_bytes, payload_overhead_bytes=args.payload_overhead,
                     skill_bundle=_selected_skills(args), use_default_skills=True,
                     **({"review_strategy": args.review_strategy} if args.review_strategy is not None else {}),
-                    **({"rebuild_context": rebuild} if rebuild is not None else {}))
-                exit_code = 0 if result["status"] in {"ready", "published"} else 4
+                    **({"rebuild_context": rebuild} if rebuild is not None else {}),
+                    **({"refresh_program": True, "model_call": _model_budget(args)} if args.refresh_program else {}))
+                refreshed = args.refresh_program and type(result.get("program_refreshed")) is bool
+                exit_code = 0 if refreshed or result["status"] in {"ready", "published"} else 4
             elif args.production_command == "status":
                 result = production_status(args.repo, args.id)
                 exit_code = 0

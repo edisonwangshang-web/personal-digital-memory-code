@@ -2,7 +2,9 @@
 
 [总体方案](overall-plan.md) · [实现明细](implementation-details.md) · [Roadmap](roadmap.md)
 
-当前`0.2.0.dev41`在原提取、校验、独立Review和发布内统一时间、引用与返工交接。新不可变Skill16/14和普通质量0.23使用knowledge-quality-v3／source-quality-v3：分清证据免责声明与真实状态主张，准确反馈可安全检查的问题；只有明确纯引用错误才用正文冻结的窄补丁，完整重检和独立审核保持。合法单行与连续区间统一，普通标点笔记不因首行分隔符丢掉语义义务。旧15/13／0.22／v2及历史证明不迁移，不增加阶段、服务或索引；准确CI、人工组合与真实业务分别核验，见[本批合同](data-conventions.md#stable-processing-contract)与[验收](scenarios-and-acceptance.md#stable-processing-acceptance)。
+当前开发版为`0.2.0.dev42`。沿现有v3时间合同修正来源历史区间、引述标签和否定推断的误拦，真实无依据的当前／未来状态继续拒绝；同时补齐相同资料在程序修复后的受限队列续接，保留原工作身份、失败证据和次数。两个模型角色、不可变Skill16/14及既有加工阶段保持；不扩大为跨规则迁移或失败稿直接发布。字段与边界见[数据规范](data-conventions.md#program-only-continuation)，实际检查与业务结果分别记录。
+
+前批`0.2.0.dev41`在原提取、校验、独立Review和发布内统一时间、引用与返工交接。新不可变Skill16/14和普通质量0.23使用knowledge-quality-v3／source-quality-v3：分清证据免责声明与真实状态主张，准确反馈可安全检查的问题；只有明确纯引用错误才用正文冻结的窄补丁，完整重检和独立审核保持。合法单行与连续区间统一，普通标点笔记不因首行分隔符丢掉语义义务。旧15/13／0.22／v2及历史证明不迁移，不增加阶段、服务或索引；准确CI、人工组合与真实业务分别核验，见[本批合同](data-conventions.md#stable-processing-contract)与[验收](scenarios-and-acceptance.md#stable-processing-acceptance)。
 
 dev35修复整体审核材料超容量：新分解计划按完整表格来源覆盖，附完整说明／字典，global汇总全部来源范围和关系；旧v1请求字节保持。受限已完成stage仅在原Review未启动、同work未耗尽及Git／audit完整核验后零新extract续接，再重做程序校验和独立Review；不是通用跨版本迁移。新plan／proof及sidecar为0.19，普通12/10候选为0.18，工程与真实结果分别取证，详见[审核材料与受限恢复](data-conventions.md#review-material-recovery)。
 

@@ -118,6 +118,8 @@ def _checked_failure(git, ref, *, _seen=()):
     from .pipeline import _call_metadata, _load, _run_path
     fields = {"contract", "source_run_id", "failure", "started", "engine",
               "scope_sha256", "audit_pool", "operation_id", "completed_extract"}
+    if isinstance(ref, dict) and "program_refresh" in ref:
+        fields.add("program_refresh")
     if (not isinstance(ref, dict) or set(ref) != fields or ref["contract"] != CONTRACT
             or not isinstance(ref["source_run_id"], str) or _RUN.fullmatch(ref["source_run_id"]) is None):
         _fail()
@@ -227,6 +229,68 @@ def prepare_feedback(git, failed_attempt, model_call):
             or operation["calls"]["extract"] != context["completed_extract"]):
         _fail("extraction_feedback_audit_mismatch")
     return ref
+
+
+def _program_predecessor_payload(git, ref, payload, versions, context):
+    """Rebuild the original audited request through an explicit queue refresh.
+
+    Only the program snapshot and its plan identifiers may change. The saved
+    draft remains unapproved feedback for a new ordinary extraction, never a
+    recovered candidate or a substitute for independent Review.
+    """
+    from .batching import _context
+    from .model_calls import request_binding
+    from .pipeline import _load, _run_path
+    from .production import program_refresh_material
+    from .skill_support import resolve_skill_refs
+    try:
+        old, current, counter = program_refresh_material(git, ref["program_refresh"])
+        if (counter is None or not counter.get("attempts")
+                or old["active_run_id"] != ref["source_run_id"]
+                or counter["attempts"][-1]["run_id"] != ref["source_run_id"]
+                or context["versions"] != old["plan"]["snapshot"]["versions"]
+                or versions != current["plan"]["snapshot"]["versions"]
+                or payload.get("rules_version") != versions["rules_version"]
+                or payload.get("skill_bundle") != resolve_skill_refs("knowledge-extract@16", "knowledge-review@14")
+                or payload.get("processing_mode") != "incremental"
+                or payload.get("output_contract") != "batch-v1"
+                or payload.get("quality_context", {}).get("policy_version") != "source-quality-v3"):
+            _fail("extraction_feedback_scope_changed")
+        def batch_context(plan):
+            batch = plan["batches"][0]
+            fragments = [item for item in plan["fragments"] if item["fragment_id"] in batch["fragment_ids"]]
+            return _context(plan["plan_id"], batch["batch_id"], fragments)
+        if payload.get("batch_context") != batch_context(current["plan"]):
+            _fail("extraction_feedback_scope_changed")
+        original = deepcopy(payload)
+        original.pop("extraction_feedback", None)
+        original["batch_context"] = batch_context(old["plan"])
+        original["controls"]["head"] = ref["started"]["commit_sha"]
+        rows = counter["attempts"]
+        if len(rows) > 1:
+            prior = rows[-2]
+            failure = _load(_read_snapshot(git, _snapshot(git, _run_path(prior["run_id"], "failure")),
+                                            _run_path(prior["run_id"], "failure")), "failure")
+            prior_context = failure.get("extraction_diagnostic", {}).get("validation_context", {})
+            started = _snapshot(git, _run_path(prior["run_id"], "started"))
+            prior_ref = {"contract": CONTRACT, "source_run_id": prior["run_id"],
+                         "failure": _snapshot(git, _run_path(prior["run_id"], "failure")), "started": started,
+                         "engine": _snapshot(git, _run_path(prior["run_id"], "engine"), started["commit_sha"]),
+                         **{key: deepcopy(prior_context.get(key)) for key in
+                            ("scope_sha256", "audit_pool", "operation_id", "completed_extract")}}
+            _, prior_diagnostic, prior_context = _checked_failure(git, prior_ref)
+            original["extraction_feedback"] = _model_view(prior_diagnostic, prior["run_id"], complete=True, stable=True)
+            if prior_context["versions"] != context["versions"]:
+                original["extraction_feedback"].pop("repair_context", None)
+        if (context["scope_sha256"] != _scope(original)
+                or context["payload_sha256"] != hashlib.sha256(_raw(original)).hexdigest()
+                or context["request_binding"] != request_binding("extract", original)):
+            _fail("extraction_feedback_scope_changed")
+        return original
+    except CaptureError:
+        raise
+    except (KeyError, TypeError, ValueError, AttributeError):
+        _fail("extraction_feedback_scope_changed")
 
 
 def _model_view(diagnostic, run, *, complete=False, stable=False):
@@ -356,15 +420,20 @@ def load_feedback(git, ref, payload, versions):
     if not enabled(payload.get("skill_bundle")):
         _fail("extraction_feedback_contract_required")
     _, diagnostic, context = _checked_failure(git, ref)
-    if context["versions"] != versions or context["scope_sha256"] != _scope(payload):
+    if "program_refresh" in ref:
+        _program_predecessor_payload(git, ref, payload, versions, context)
+    elif context["versions"] != versions or context["scope_sha256"] != _scope(payload):
         _completed_predecessor_payload(git, ref, payload, versions, context)
     from .skill_support import complete_feedback_enabled, stable_processing_enabled
     if stable_processing_enabled(payload.get("skill_bundle")) and not context.get("generation_invocations"):
         _fail("extraction_feedback_unavailable")
-    return _model_view(diagnostic, ref["source_run_id"],
-                       complete=complete_feedback_enabled(payload.get("skill_bundle")),
-                       stable=(stable_processing_enabled(payload.get("skill_bundle"))
-                               and "quality_repair_context" not in payload))
+    view = _model_view(diagnostic, ref["source_run_id"],
+                      complete=complete_feedback_enabled(payload.get("skill_bundle")),
+                      stable=(stable_processing_enabled(payload.get("skill_bundle"))
+                              and "quality_repair_context" not in payload))
+    if "program_refresh" in ref:
+        view.pop("repair_context", None)
+    return view
 
 
 def authority_refs(git, ref):

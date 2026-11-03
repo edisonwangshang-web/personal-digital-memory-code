@@ -177,10 +177,227 @@ def _save(git, path, value, kind, head):
     return git.write_changes({path: data}, {path: before}, head, "queue: persist " + kind)
 
 
+PROGRAM_REFRESH = "same-skill-program-refresh-v1"
+
+
+def _program_work_identity(state):
+    plan = state["plan"]
+    if (len(plan["batches"]) != 1 or not plan["coverage"]["complete"]
+            or set(plan["batches"][0]["fragment_ids"]) != {item["fragment_id"] for item in plan["fragments"]}):
+        _fail("program_refresh_scope_changed")
+    value = {"fragments": sorted(plan["batches"][0]["fragment_ids"]),
+             "phase": "final", "related_runs": state["related_runs"]}
+    for key in ("continuation_context", "rebuild_context"):
+        if state["request"].get(key) is not None:
+            value[key] = deepcopy(state["request"][key])
+    return value
+
+
+def _program_plan_inputs(plan):
+    value = deepcopy(plan)
+    value.pop("plan_id")
+    value["snapshot"].pop("head")
+    value["snapshot"].pop("versions")
+    for batch in value["batches"]:
+        batch.pop("batch_id")
+    return value
+
+
+def _program_versions(old, new):
+    return (isinstance(old, dict) and isinstance(new, dict) and set(old) == set(new)
+            and old != new and all(old[key] == new[key] for key in old
+                                   if key not in {"program_commit", "program_sha256"}))
+
+
+def _refresh_snapshot(git, ref):
+    from .pipeline import _load
+    if (not isinstance(ref, dict) or set(ref) != {"path", "commit_sha", "sha256"}
+            or not isinstance(ref["path"], str)
+            or re.fullmatch(re.escape(ROOT) + r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}/state\.md", ref["path"]) is None
+            or not isinstance(ref["commit_sha"], str)
+            or re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", ref["commit_sha"]) is None):
+        _fail("program_refresh_proof_changed")
+    git.run("merge-base", "--is-ancestor", ref["commit_sha"], git.head())
+    raw = git._storage_blob(ref["commit_sha"], ref["path"])
+    if ref["sha256"] != "sha256-" + hashlib.sha256(raw).hexdigest():
+        _fail("program_refresh_proof_changed")
+    return _load(raw, "production_queue")
+
+
+def _refresh_counter_snapshot(git, witness, revision):
+    from .pipeline import _load
+    path = witness["counter_path"]
+    raw = (git._storage_blob(revision, path) if git.run("ls-tree", "-z", revision, "--", path) else None)
+    digest = None if raw is None else "sha256-" + hashlib.sha256(raw).hexdigest()
+    if digest != witness["counter_sha256"]:
+        _fail("program_refresh_proof_changed")
+    return None if raw is None else _load(raw, "production_attempts")
+
+
+def _check_program_refresh_counter(git, state):
+    """Only append to the original counter prefix, before any worker write."""
+    witness = state.get("program_refresh")
+    if witness is None:
+        return
+    try:
+        old = _refresh_snapshot(git, witness["previous_queue"])
+        identity = _program_work_identity(old)
+        work_id = _hash(identity)
+        if (witness.get("contract") != PROGRAM_REFRESH or witness["work_id"] != work_id
+                or witness["counter_path"] != ATTEMPTS + work_id + ".md"
+                or _program_work_identity(state) != identity):
+            _fail("program_refresh_proof_changed")
+        fixed = _refresh_counter_snapshot(git, witness, witness["previous_queue"]["commit_sha"])
+        current = _read(git, witness["counter_path"], "production_attempts")
+        prefix = [] if fixed is None else fixed.get("attempts")
+        rows = [] if current is None else current.get("attempts")
+        if (not isinstance(prefix, list) or not isinstance(rows, list)
+                or fixed is not None and fixed.get("identity") != identity
+                or current is not None and current.get("identity") != identity
+                or len(rows) < len(prefix) or rows[:len(prefix)] != prefix):
+            _fail("program_refresh_proof_changed")
+    except (KeyError, TypeError, ValueError, AttributeError):
+        _fail("program_refresh_proof_changed")
+
+
+def program_refresh_material(git, ref):
+    """Read the fixed refresh revision; later queue progress never replaces it."""
+    from .pipeline import _load
+    from .skill_support import resolve_skill_refs
+    try:
+        state = _refresh_snapshot(git, ref)
+        witness = state.get("program_refresh")
+        fields = {"contract", "previous_queue", "work_id", "counter_path", "counter_sha256"}
+        if (not isinstance(witness, dict) or set(witness) != fields
+                or witness["contract"] != PROGRAM_REFRESH
+                or witness["previous_queue"].get("path") != ref["path"]):
+            _fail("program_refresh_proof_changed")
+        old = _refresh_snapshot(git, witness["previous_queue"])
+        git.run("merge-base", "--is-ancestor", witness["previous_queue"]["commit_sha"], ref["commit_sha"])
+        expected = deepcopy(old)
+        expected.update(plan=state["plan"], revision=old["revision"] + 1, program_refresh=witness)
+        if state != expected:
+            _fail("program_refresh_proof_changed")
+        identity = _program_work_identity(old)
+        work_id = _hash(identity)
+        if (state["queue_id"] != old["queue_id"] or state["request"] != old["request"]
+                or state["related_runs"] != old["related_runs"]
+                or state["request"].get("skill_bundle") != resolve_skill_refs("knowledge-extract@16", "knowledge-review@14")
+                or not _program_versions(old["plan"]["snapshot"]["versions"], state["plan"]["snapshot"]["versions"])
+                or _program_plan_inputs(old["plan"]) != _program_plan_inputs(state["plan"])
+                or _program_work_identity(state) != identity
+                or witness["work_id"] != work_id or witness["counter_path"] != ATTEMPTS + work_id + ".md"):
+            _fail("program_refresh_proof_changed")
+        raw = (git._storage_blob(ref["commit_sha"], witness["counter_path"])
+               if git.run("ls-tree", "-z", ref["commit_sha"], "--", witness["counter_path"]) else None)
+        digest = None if raw is None else "sha256-" + hashlib.sha256(raw).hexdigest()
+        if digest != witness["counter_sha256"]:
+            _fail("program_refresh_proof_changed")
+        attempts = None if raw is None else _load(raw, "production_attempts")
+        if attempts is not None and attempts.get("identity") != identity:
+            _fail("program_refresh_proof_changed")
+        return old, state, attempts
+    except (KeyError, TypeError, ValueError, AttributeError):
+        _fail("program_refresh_proof_changed")
+
+
+def _refresh_program(repo, git, path, state, model_call):
+    """Refresh only the program snapshot; never write a counter or call a model."""
+    from .batching import plan_batches, validate_plan
+    from .context import discover_context
+    from .extraction_feedback import prepare_feedback
+    from .pipeline import (_committed, _last_commit, _run_path, _stage_path,
+                           _validate_continuation_context, execution_versions)
+    from .skill_support import resolve_skill_refs
+    if (not isinstance(model_call, BudgetedModelCall)
+            or model_call.ledger.snapshot().get("mode") != "audit"):
+        _fail("program_refresh_audit_required")
+    if state["request"].get("skill_bundle") != resolve_skill_refs("knowledge-extract@16", "knowledge-review@14"):
+        _fail("program_refresh_skill_changed")
+    _check_program_refresh_counter(git, state)
+    versions = execution_versions(git)
+    if versions == state["plan"]["snapshot"]["versions"]:
+        return {"queue_id": state["queue_id"], "status": state["status"], "state_path": path,
+                "plan_id": state["plan"]["plan_id"], "head": git.head(), "reused": True, "program_refreshed": False}
+    if not _program_versions(state["plan"]["snapshot"]["versions"], versions):
+        _fail("program_refresh_rules_changed")
+    with _worker_lock(repo):
+        head = git.check()
+        if _read(git, path, "production_queue") != state:
+            _fail("queue_state_changed")
+        if (state["status"] not in {"ready", "failed"} or state["completed_batches"]
+                or state["final_run"] is not None or state["publication"] is not None):
+            _fail("program_refresh_state_blocked")
+        identity = _program_work_identity(state)
+        work_id = _hash(identity)
+        counter_path = ATTEMPTS + work_id + ".md"
+        counter = _read(git, counter_path, "production_attempts")
+        rows = counter.get("attempts", []) if counter is not None else []
+        if counter is not None and counter.get("identity") != identity:
+            _fail("queue_attempt_identity_conflict")
+        if len(rows) >= 4:
+            _fail("program_refresh_attempt_limit")
+        pool = model_call.ledger.snapshot()
+        binding = {key: pool[key] for key in ("pool_id", "authorization_sha256", "schema_version", "mode")}
+        if state["audit_pool"] is not None and state["audit_pool"] != binding:
+            _fail("program_refresh_audit_changed")
+        if (rows and (state["status"] != "failed" or state["active_run_id"] != rows[-1]["run_id"])
+                or not rows and (state["status"] != "ready" or state["active_run_id"] is not None
+                                 or state["last_result"] is not None)):
+            _fail("program_refresh_state_blocked")
+        for number, row in enumerate(rows, 1):
+            if (row.get("attempt") != number or row.get("status") != "failed"
+                    or row.get("operation_id") != "batch:" + work_id + ":" + str(number)
+                    or row.get("run_id") != "run-" + _hash({"work": work_id, "attempt": number})[:32]):
+                _fail("program_refresh_state_blocked")
+            if prepare_feedback(git, row, model_call.for_operation(row["operation_id"])) is None:
+                _fail("program_refresh_state_blocked")
+            forbidden = [_stage_path(row["run_id"]), *[_run_path(row["run_id"], name) for name in
+                         ("review", "manifest", "receipt", "pending", "pending-registration", "reused")]]
+            if any(git.path(item).is_file() or _last_commit(git, head, item) for item in forbidden):
+                _fail("program_refresh_state_blocked")
+        validate_plan(repo, state["plan"], source_paths=state["request"]["allowed_source_paths"],
+                      require_current_versions=False)
+        if state["request"].get("continuation_context") is not None:
+            _validate_continuation_context(git, state["request"]["continuation_context"],
+                                           state["plan"]["source_paths"], state["related_runs"])
+        context = discover_context(repo, state["request"]["source_paths"],
+                    allowed_source_paths=state["request"]["allowed_source_paths"],
+                    allowed_run_ids=state["request"]["allowed_run_ids"], max_sources=256, max_runs=256)
+        if not context["coverage"]["complete"] or context["related_runs"] != state["related_runs"]:
+            _fail("program_refresh_scope_changed")
+        options = {"rebuild_context": state["request"]["rebuild_context"]} if "rebuild_context" in state["request"] else {}
+        plan = plan_batches(repo, state["plan"]["source_paths"], max_input_bytes=state["plan"]["max_input_bytes"],
+                            payload_overhead_bytes=state["plan"]["payload_overhead_bytes"],
+                            max_sources=state["plan"]["max_sources"], expected_head=head,
+                            purpose=state["plan"]["purpose"], **options)
+        if _program_plan_inputs(plan) != _program_plan_inputs(state["plan"]):
+            _fail("program_refresh_scope_changed")
+        previous = {"path": path, "commit_sha": _last_commit(git, head, path),
+                    "sha256": "sha256-" + hashlib.sha256(_committed(git, path)).hexdigest()}
+        raw = git._existing(counter_path)
+        updated = deepcopy(state)
+        updated.update(plan=plan, revision=state["revision"] + 1,
+                       program_refresh={"contract": PROGRAM_REFRESH, "previous_queue": previous,
+                           "work_id": work_id, "counter_path": counter_path,
+                           "counter_sha256": None if raw is None else "sha256-" + hashlib.sha256(raw).hexdigest()})
+        _refresh_counter_snapshot(git, updated["program_refresh"], previous["commit_sha"])
+        with git.lock():
+            git.check(head)
+            if _read(git, path, "production_queue") != state:
+                _fail("queue_state_changed")
+            final = _save(git, path, updated, "production_queue", head)
+        return {"queue_id": state["queue_id"], "status": state["status"], "state_path": path,
+                "plan_id": plan["plan_id"], "previous_plan_id": state["plan"]["plan_id"],
+                "work_id": work_id, "counter_path": counter_path, "attempts_used": len(rows),
+                "head": final, "reused": False, "program_refreshed": True}
+
+
 def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=None,
                        allowed_run_ids=(), max_input_bytes=128000, payload_overhead_bytes=16000,
                        required_context_sources=(), continuation_context=None, review_strategy=None,
-                       skill_bundle=None, use_default_skills=False, rebuild_context=None):
+                       skill_bundle=None, use_default_skills=False, rebuild_context=None,
+                       refresh_program=False, model_call=None):
     """Persist one immutable plan; the stable caller key cannot be repurposed."""
     from .batching import plan_batches
     from .context import discover_context
@@ -216,6 +433,8 @@ def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=Non
         validate_rebuild_context(git, rebuild_context, source_paths=selected)
         request["rebuild_context"] = deepcopy(rebuild_context)
     existing = _read(git, path, "production_queue")
+    if type(refresh_program) is not bool or refresh_program and existing is None:
+        _fail("program_refresh_existing_queue_required")
     from .unknown_retry import POLICY
     if existing is None or "timeout_retry_policy" in existing["request"]:
         request["timeout_retry_policy"] = POLICY if existing is None else existing["request"]["timeout_retry_policy"]
@@ -243,6 +462,8 @@ def prepare_production(repo, queue_id, source_paths, *, allowed_source_paths=Non
     if existing is not None:
         if existing.get("request") != request:
             _fail("queue_identity_conflict")
+        if refresh_program:
+            return _refresh_program(repo, git, path, existing, model_call)
         return {"queue_id": queue_id, "status": existing["status"], "state_path": path,
                 "plan_id": existing["plan"]["plan_id"], "head": head, "reused": True}
     context = discover_context(repo, selected, allowed_source_paths=allowed,
@@ -685,6 +906,15 @@ def _attempt(repo, state, projection, work, model_call, *, draft, merge_runs=(),
                     _fail("queue_attempt_identity_conflict")
                 try:
                     validation_feedback = prepare_feedback(git, previous_failed, delegate)
+                    if validation_feedback is not None and state.get("program_refresh") is not None:
+                        from .extraction_feedback import _checked_failure
+                        _, _, previous_context = _checked_failure(git, validation_feedback)
+                        if previous_context["versions"] != plan["snapshot"]["versions"]:
+                            from .pipeline import _last_commit
+                            queue_path = _path(state["queue_id"])
+                            validation_feedback["program_refresh"] = {
+                                "path": queue_path, "commit_sha": _last_commit(git, git.head(), queue_path),
+                                "sha256": "sha256-" + hashlib.sha256(_committed(git, queue_path)).hexdigest()}
                 except CaptureError as error:
                     return {"status": "blocked_context", "error": error.code,
                             "attempted_calls": 0, "model_calls": 0}
@@ -875,6 +1105,7 @@ def _run_production(repo, queue_id, *, model_call, max_steps=8, require_binding=
     state = _read(git, path, "production_queue")
     if state is None:
         _fail("unknown_production_queue")
+    _check_program_refresh_counter(git, state)
     if state["request"].get("rebuild_context") != state["plan"]["snapshot"].get("rebuild_context"):
         _fail("queue_rebuild_plan_mismatch")
     rebuild_context = state["request"].get("rebuild_context")

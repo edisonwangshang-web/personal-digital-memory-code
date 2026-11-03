@@ -769,7 +769,7 @@ def _temporal_details(output, field_path, *, claim_index=None, record_id=None,
 
 
 _V3_BOUNDARY = re.compile(r"[。！？!?；;，,\n]|\.(?:\s+|$)|但是|然而|不过|并且|但|而|"
-    r"(?:且|并|同时)(?=当前|目前|现在|现已|已经|尚未|明天|未来|将会)")
+    r"(?:且|并|同时)(?=[^。！？!?；;，,\n]{0,16}(?:当前|目前|现在|现已|已经|尚未|明天|未来|将会))")
 _V3_FUTURE = re.compile(r"即将|明天|后天|未来|下(?:周|月|年)|将会|将要|\bwill\b|\btomorrow\b", re.I)
 _V3_WORDS = re.compile(_TEMPORAL_WORDS.pattern + r"|现在|正在|" + _V3_FUTURE.pattern, re.I)
 _V3_LITERAL = re.compile(
@@ -780,6 +780,7 @@ _V3_LITERAL = re.compile(
 _V3_DISCLAIMER = re.compile(
     r'不(?:能)?(?:据此|由此)?(?:证明|代表)|不足以(?:证明|代表)|'
     r'不能(?:据此|由此)(?:断言|判断|推断)|无法(?:据此|由此)?(?:证明|判断|确认|确定)|'
+    r'不等于|不能(?:被)?(?:作为|用作|外推为)|'
     r'(?:不构成|不能(?:被)?(?:作为|用作))[^。！？!?；;，,\n]*?(?:证据|依据)')
 _V3_SOURCE_QUALIFIER = re.compile(
     r'当时|导出时|来源时间|(?:该次|当次|那次|上次|前次)(?:导出|采集|读取)|'
@@ -788,11 +789,79 @@ _V3_REPORTED = re.compile(
     r'(?:来源|原文|文档|报告|材料|导出说明)[^。！？!?；;，,\n]{0,24}当时'
     r'[^。！？!?；;，,\n]{0,12}(?:称|写|记载|说明|描述|提出|规定)|'
     r'当时(?:的)?(?:来源|原文|文档|报告|材料)[^。！？!?；;，,\n]{0,12}(?:称|写|记载|说明|描述|提出|规定)')
+_V3_SOURCE_ATTRIBUTION = re.compile(
+    r'来源|原文|文档|报告|材料|资料|分享|讲者|说明|原表|源表|该页|该图|第[0-9]+页')
+_V3_SOURCE_PERIOD = re.compile(
+    r'(?:该|此|其)(?:页|图)?(?:所述|展示|显示|描述)(?:的)?(?:时间|时期|期间|区间)|'
+    r'(?:来源|原文|文档|报告|材料|资料|分享|讲者)(?:的)?(?:展示|所述|描述)(?:的)?(?:时期|期间|区间)')
+_V3_SOURCE_YEAR = re.compile(r'(?<![0-9])([0-9]{4})[ \t]*年')
+_V3_QUOTED_LABEL = r'(?:“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
+_V3_ALL_QUOTES = re.compile(r"""“[^”\n]*”|「[^」\n]*」|`[^`\n]*`|"[^"\n]*"|‘[^’\n]*’|'[^'\n]*'""")
+_V3_HISTORICAL_LABELS = re.compile(
+    r'(?P<labels>' + _V3_QUOTED_LABEL + r'(?:\s*(?:、|和|与|及)?\s*' + _V3_QUOTED_LABEL + r')*)'
+    r'\s*(?:均|都|皆)?(?:是指|指的是|指|表示|属于)'
+    r'(?:(?:来源|原文|文档|报告|材料|资料|分享|讲者|说明)(?:的)?当时|来源时间)')
+_V3_CUTOFF_PERIOD = re.compile(
+    r'截至[ \t]*(?P<period>Q[1-4]|H[12]|第?[一二三四1-4]季度|[上下]半年|(?:1[0-2]|0?[1-9])月)'
+    r'(?![A-Za-z0-9])', re.I)
+_V3_TIME_SENTENCE_BOUNDARY = re.compile(r'[。！？!?\n]|\.(?:\s+|$)')
+
+
+def _v3_literal_spans(text):
+    spans = [match.span(name) for match in _V3_LITERAL.finditer(text)
+             for name in ("prefix", "suffix") if match.group(name) is not None]
+    spans.extend(match.span("labels") for match in _V3_HISTORICAL_LABELS.finditer(text))
+    return spans
+
+
+def _v3_source_period_qualified(text):
+    return bool(_V3_SOURCE_ATTRIBUTION.search(text) and _V3_SOURCE_PERIOD.search(text))
+
+
+def _v3_source_year_qualified(text, refs):
+    """A literal cited year may date a reported event, never a current claim."""
+    if not _V3_SOURCE_ATTRIBUTION.search(text) or _CURRENT_TIME_WORDS.search(text):
+        return False
+    stated = set(_V3_SOURCE_YEAR.findall(text))
+    quoted = {year for ref in refs for year in _V3_SOURCE_YEAR.findall(ref["quote"])}
+    return bool(stated and stated <= quoted)
+
+
+def _v3_unknown_cutoff(statement, start, part, matches):
+    """Only the same named cutoff can borrow an explicit unknown year.
+
+    This does not qualify other current/future predicates or move a historical
+    prefix across a sentence. The caller still checks every other clause.
+    """
+    if any(match.group() != "截至" for match in matches):
+        return False
+    prefix = _v3_source_prefix(statement, start)
+    if not (_V3_SOURCE_QUALIFIER.search(prefix + part)
+            or _v3_source_period_qualified(prefix + part)):
+        return False
+    cutoffs = {match.start(): match for match in _V3_CUTOFF_PERIOD.finditer(part)}
+    if any(match.start() not in cutoffs for match in matches):
+        return False
+    # A following semicolon can identify the year of this cutoff. A separate
+    # sentence cannot retroactively date another assertion.
+    left, right = 0, len(statement)
+    for boundary in _V3_TIME_SENTENCE_BOUNDARY.finditer(statement):
+        if boundary.end() <= start:
+            left = boundary.end()
+        elif boundary.start() >= start:
+            right = boundary.start()
+            break
+    for match in matches:
+        period = cutoffs[match.start()]["period"]
+        unknown_period = re.compile(r'(?<![A-Za-z0-9])' + re.escape(period) +
+            r'(?:的)?(?:具体|所属|统计)?(?:年份|年)?(?:尚)?(?:未知|不明|未明确|未说明|无法确定)', re.I)
+        if not unknown_period.search(statement[left:right]):
+            return False
+    return True
 
 
 def _v3_parts(text):
-    literal = [match.span(name) for match in _V3_LITERAL.finditer(text)
-               for name in ("prefix", "suffix") if match.group(name) is not None]
+    literal = _v3_literal_spans(text)
     start = 0
     for boundary in _V3_BOUNDARY.finditer(text):
         if any(left <= boundary.start() and boundary.end() <= right for left, right in literal):
@@ -806,11 +875,14 @@ def _v3_parts(text):
 
 def _v3_state_matches(part):
     """Narrow metadiscourse exceptions, never a blanket negation exemption."""
-    excluded = [match.span(name) for match in _V3_LITERAL.finditer(part)
-                for name in ("prefix", "suffix") if match.group(name) is not None]
+    excluded = _v3_literal_spans(part)
     # The cue governs only the rest of this clause. Earlier actual assertions
     # and later comma/adversative clauses retain their independent checks.
-    excluded.extend((match.start(), len(part)) for match in _V3_DISCLAIMER.finditer(part))
+    quoted = [match.span() for match in _V3_ALL_QUOTES.finditer(part)]
+    for match in _V3_DISCLAIMER.finditer(part):
+        quote_end = next((end for start, end in quoted
+                          if start <= match.start() and match.end() <= end), len(part))
+        excluded.append((match.start(), quote_end))
     return [match for match in _V3_WORDS.finditer(part)
             if not any(start <= match.start() and match.end() <= end for start, end in excluded)]
 
@@ -895,13 +967,15 @@ def collect_temporal_diagnostics(output, context):
                     uncertain_question = bool(question and unknown and len(states) == 1
                         and question.start() < states[0].start()
                         and (unknown.start() < question.start() or unknown.start() > states[0].end()))
-                    if (not _UNKNOWN_TIME_WORDS.search(part) or _V3_FUTURE.search(part)
+                    if ((not _UNKNOWN_TIME_WORDS.search(part)
+                            and not _v3_unknown_cutoff(statement, start, part, matches))
+                            or _V3_FUTURE.search(part)
                             or states and not uncertain_question):
                         bad_span = (record["body"].index(statement) + start,
                                     record["body"].index(statement) + end)
                         _error("quality_temporal_mismatch", "未知声明不能覆盖同句或后句的实际当前／未来状态")
                 if not state_parts and not (_UNKNOWN_TIME_WORDS.search(statement)
-                        or _V3_DISCLAIMER.search(statement) or _V3_LITERAL.search(statement)):
+                        or _V3_DISCLAIMER.search(statement) or _v3_literal_spans(statement)):
                     _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
             elif basis == "source_time":
                 for start, end, part, matches in state_parts:
@@ -914,6 +988,8 @@ def collect_temporal_diagnostics(output, context):
                         _V3_REPORTED.fullmatch(prefix.strip(" \t\r,:：，")))
                     qualified = (_V3_SOURCE_QUALIFIER.search(part)
                         or _source_date_qualified(part, refs)
+                        or _v3_source_year_qualified(part, refs)
+                        or _v3_source_period_qualified(part)
                         or _V3_SOURCE_QUALIFIER.search(prefix)
                         or _source_date_qualified(prefix, refs))
                     if ((_CURRENT_TIME_WORDS.search(part) or _V3_FUTURE.search(part)) and not reported
@@ -923,7 +999,9 @@ def collect_temporal_diagnostics(output, context):
                         _error("quality_temporal_mismatch", "来源时间须限定每个实际状态断言，不能覆盖独立当前／未来事实")
                 if not state_parts and not (_V3_SOURCE_QUALIFIER.search(statement)
                         or _source_date_qualified(statement, refs)
-                        or _V3_DISCLAIMER.search(statement) or _V3_LITERAL.search(statement)):
+                        or _v3_source_year_qualified(statement, refs)
+                        or _v3_source_period_qualified(statement)
+                        or _V3_DISCLAIMER.search(statement) or _v3_literal_spans(statement)):
                     _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
         except CaptureError as error:
             remember(error, index=index, record_id=record_id, statement=statement,
