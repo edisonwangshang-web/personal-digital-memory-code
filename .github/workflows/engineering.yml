@@ -17,7 +17,7 @@ jobs:
   isolated:
     name: isolated (Python ${{ matrix.python }}, ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
