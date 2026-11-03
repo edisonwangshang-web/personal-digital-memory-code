@@ -7,6 +7,7 @@ No model role, reservation, counter or original Git artifact is written here.
 """
 
 from copy import deepcopy
+import ast
 import hashlib
 import os
 from pathlib import Path
@@ -92,7 +93,7 @@ def _cache(directory, operation_id, payload, response, native_binding, receipts)
 
 def _versions_at(git, revision):
     from .pipeline import _hash, _last_commit
-    from .domains import DOMAIN_POLICY_VERSION, domain_policy
+    from .domains import domain_policy
     paths = []
     for row in git.run("ls-tree", "-r", "-z", revision, "--", "project/src/pdm", "project/prompts", "project/skills").split(b"\0"):
         if not row:
@@ -111,9 +112,24 @@ def _versions_at(git, revision):
     prompts = {role: _hash(engineering_bytes("project/prompts/" + role + ".md")) for role in ("extract", "review")}
     skills = {path.removeprefix("project/skills/"): _hash(engineering_bytes(path))
               for path in paths if path.startswith("project/skills/")}
-    policy = _hash(domain_policy())
+    # Read only the literal version from the fixed historical source; never
+    # execute an old module or replace its policy with today's default.
+    policy_version = "three-domains-v1"
+    domain_path = "project/src/pdm/domains.py"
+    if domain_path in paths:
+        try:
+            tree = ast.parse(engineering_bytes(domain_path))
+            markers = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == "DOMAIN_POLICY_VERSION"
+                               for target in node.targets)]
+            if len(markers) != 1 or not isinstance(markers[0], ast.Constant) or not isinstance(markers[0].value, str):
+                _fail("quality_completed_program_snapshot_missing")
+            policy_version = markers[0].value
+        except (SyntaxError, UnicodeError, ValueError):
+            _fail("quality_completed_program_snapshot_missing")
+    policy = _hash(domain_policy(policy_version))
     return {"program_sha256": _hash(code), "rules_version": _hash({**prompts, "domain_policy": policy, "skills": skills}),
-            "domain_policy_version": DOMAIN_POLICY_VERSION, "domain_policy_sha256": policy,
+            "domain_policy_version": policy_version, "domain_policy_sha256": policy,
             "program_commit": git.text("log", "-1", "--format=%H", revision, "--", "project/src/pdm",
                                        "project/prompts", "project/skills", "pyproject.toml") or None}
 
@@ -130,7 +146,7 @@ def _snapshot(git, path):
 
 def _material(git, run_id, paths, runs, payload, response, *, historical=False, contract=CONTRACT):
     """Rebuild the original reservation and complete request before any reuse."""
-    from .domains import domain_policy
+    from .pipeline import _domain_policy_for_versions
     from .knowledge_quality import prepare_quality
     from .model_calls import MAX_INPUT_BYTES, _valid, output_schema, request_binding
     from .pipeline import (_ancestor, _call_metadata, _hash, _load, _load_sources, _merge_candidates,
@@ -194,7 +210,7 @@ def _material(git, run_id, paths, runs, payload, response, *, historical=False, 
     context = prepare_quality(sources, source_views=views, skill_bundle=bundle)
     expected = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                 "related": related, "controls": control_guard(git, head), "rules_version": versions["rules_version"],
-                "domain_policy": domain_policy(), "revision_context": revision_model_context(full),
+                "domain_policy": _domain_policy_for_versions(versions), "revision_context": revision_model_context(full),
                 "processing_mode": "incremental", "quality_contract": "skill-quality-v1",
                 "skill_bundle": bundle, "quality_context": context,
                 "reuse_quality_requirements": _reuse_requirements(git, related, sources, context)}

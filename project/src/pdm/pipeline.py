@@ -14,7 +14,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .contracts import CaptureError, ASSEMBLY_SCHEMA_VERSION, CONTINUOUS_SCHEMA_VERSION, DECOMPOSED_SCHEMA_VERSION, M1_SCHEMA_VERSION, MULTISOURCE_PIPELINE_SCHEMA_VERSION, ORCHESTRATED_SCHEMA_VERSION, REVISION_SCHEMA_VERSION, REUSE_SCHEMA_VERSION, QUALITY_SCHEMA_VERSIONS, PIPELINE_SCHEMA_VERSION, canonical, markdown, parse_markdown, quality_schema_version, source_contract, timestamp
-from .domains import DOMAIN_LABELS, DOMAIN_POLICY_VERSION, domain_policy
+from .domains import DOMAIN_LABELS, DOMAIN_POLICY_VERSIONS, domain_policy
 from .model_calls import ModelCallError, USAGE_FIELDS, call_model
 from .transaction import PipelineGit
 
@@ -300,25 +300,30 @@ def _candidate_sources(git, candidate, *, historical=False):
     return sources
 
 
-def execution_versions(git):
-    """Bind actual loaded program/rules bytes, separately from evolving data HEAD."""
-    from .engine_provenance import program_commit
+def _rules_version_for_domain_policy(version):
+    """Fingerprint actual rules with only the registered policy selected."""
     package = Path(__file__).resolve().parent
     project = package.parents[1]
-    code = {}
-    for path in sorted(package.glob("*.py")):
-        code["pdm/" + path.name] = _hash(path.read_bytes())
     prompts = {}
     for role in ("extract", "review"):
         path = project / "prompts" / (role + ".md")
         if not path.is_file() or path.is_symlink():
             _error("missing_rules")
         prompts[role] = _hash(path.read_bytes())
-    policy_digest = _hash(domain_policy())
     skills = {path.relative_to(project / "skills").as_posix(): _hash(path.read_bytes())
               for path in sorted((project / "skills").rglob("*")) if path.is_file() and not path.is_symlink()}
-    return {"program_sha256": _hash(code), "rules_version": _hash({**prompts, "domain_policy": policy_digest, "skills": skills}),
-            "domain_policy_version": DOMAIN_POLICY_VERSION, "domain_policy_sha256": policy_digest,
+    return _hash({**prompts, "domain_policy": _hash(domain_policy(version)), "skills": skills})
+
+
+def execution_versions(git):
+    """Bind actual loaded program/rules bytes, separately from evolving data HEAD."""
+    from .engine_provenance import program_commit
+    package = Path(__file__).resolve().parent
+    code = {"pdm/" + path.name: _hash(path.read_bytes()) for path in sorted(package.glob("*.py"))}
+    policy = domain_policy()
+    policy_digest = _hash(policy)
+    return {"program_sha256": _hash(code), "rules_version": _rules_version_for_domain_policy(policy["version"]),
+            "domain_policy_version": policy["version"], "domain_policy_sha256": policy_digest,
             "program_commit": program_commit()}
 
 
@@ -614,10 +619,17 @@ def _validate_domain_policy(versions):
     """Old candidates retain their original free-label contract."""
     if "domain_policy_version" not in versions and "domain_policy_sha256" not in versions:
         return False
-    if (versions.get("domain_policy_version") != DOMAIN_POLICY_VERSION
-            or versions.get("domain_policy_sha256") != _hash(domain_policy())):
+    version = versions.get("domain_policy_version")
+    if (version not in DOMAIN_POLICY_VERSIONS
+            or versions.get("domain_policy_sha256") != _hash(domain_policy(version))):
         _error("invalid_domain_policy")
     return True
+
+
+def _domain_policy_for_versions(versions):
+    """Historical requests retain their exact policy, including legacy v1."""
+    registered = _validate_domain_policy(versions)
+    return domain_policy(versions["domain_policy_version"] if registered else "three-domains-v1")
 
 
 def _validate_domains(objects, related, operations, versions):
@@ -1359,7 +1371,7 @@ def _candidate_payload(git, candidate, sources):
     """Rebuild the exact tool-free Review input from immutable candidate data."""
     payload = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                "related": [], "controls": {}, "rules_version": candidate["versions"]["rules_version"],
-               "domain_policy": domain_policy()}
+               "domain_policy": _domain_policy_for_versions(candidate["versions"])}
     if "rebuild_context" in candidate:
         payload["rebuild_context"] = copy.deepcopy(candidate["rebuild_context"])
     if "continuation_context" in candidate:
@@ -1887,7 +1899,7 @@ def process_sources(repo, source_paths, expected_head=None, *, model_call=call_m
         versions = execution_versions(git)
         payload = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
                    "related": [], "controls": {}, "rules_version": versions["rules_version"],
-                   "domain_policy": domain_policy()}
+                   "domain_policy": _domain_policy_for_versions(versions)}
         related, context_fields = [], {}
         if timeout_retry_ref is not None:
             context_fields["timeout_retry_ref"] = copy.deepcopy(timeout_retry_ref)

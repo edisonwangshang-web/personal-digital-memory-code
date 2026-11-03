@@ -74,7 +74,7 @@ def _original(git, run_id, value, payload, response, resume, source_paths, relat
         _load_sources, _related_context, _related_run_ids, _run_path, _stage_path, control_guard, normalize_source_paths)
     from .revision_context import build_revision_context, revision_model_context
     from .revision_resume import _legacy_quality_guard, _reservation, _scope
-    from .domains import domain_policy
+    from .pipeline import _domain_policy_for_versions
 
     _legacy_quality_guard(payload)
     if not isinstance(response, dict) or set(response) != {"output", "invocation_id", "model", "elapsed_seconds", "usage"}:
@@ -132,7 +132,8 @@ def _original(git, run_id, value, payload, response, resume, source_paths, relat
     expected = {"sources": [{"path": source["path"], "metadata": source["metadata"], "body": source["body"]} for source in sources],
         "related": _related_context(git, related, sources, at_commit=reservation["head"], max_runs=maximum),
         "controls": control_guard(git, reservation["head"]),
-        "rules_version": value["original_extraction_versions"]["rules_version"], "domain_policy": domain_policy(),
+        "rules_version": value["original_extraction_versions"]["rules_version"],
+        "domain_policy": _domain_policy_for_versions(value["original_extraction_versions"]),
         "revision_context": revision_model_context(full), "processing_mode": "incremental"}
     if batch:
         from .batching import validate_source_views

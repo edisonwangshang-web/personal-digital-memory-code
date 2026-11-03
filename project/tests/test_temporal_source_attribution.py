@@ -192,6 +192,39 @@ class TemporalSourceAttributionTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.invalid(body, "quality_temporal_missing")
 
+    def test_negative_inference_predicates_across_three_domains(self):
+        for verb in ("宣称", "声称", "认定"):
+            for statement in ("用户已经康复", "系统已经上线或用户已经采用方案", "用户已经掌握课程"):
+                body = "不能据此" + verb + statement + "。"
+                for basis in (None, "unknown"):
+                    with self.subTest(verb=verb, statement=statement, basis=basis):
+                        self.valid(body, basis=basis)
+
+    def test_negative_inference_predicates_preserve_quote_and_clause_boundaries(self):
+        for body in (
+            "“不能据此宣称”三个字已经加入术语表。",
+            "“不能据此声称”已经成为关键词。",
+            "“不能由此认定”已经加入课程词表。",
+            "材料写道“不能据此认定已经完成”但当前已经完成。",
+            "当前已经上线，不能据此宣称下一阶段完成。",
+            "不能据此声称已经上线，当前已经上线。",
+            "不能据此认定已经康复且用户当前已经康复。",
+            "不能据此宣称已经学会。明天将会完成。",
+            "并非不能据此宣称用户已经康复。",
+            "不是不能据此声称当前已经上线。",
+            "并不是不能由此认定用户已经学会。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_negative_inference_does_not_authorize_an_actual_current_system_fact(self):
+        self.invalid("不能据此宣称已经完成。当前已经上线。",
+            "quality_current_state_unverified", basis="current_state")
+
+    def test_legacy_v2_does_not_gain_negative_inference_predicates(self):
+        previous = resolve_skill_refs("knowledge-extract@15", "knowledge-review@13")
+        self.invalid("不能据此宣称用户已经康复。", "quality_temporal_missing", bundle=previous)
+
     def test_explicitly_historical_quoted_labels_are_metadata(self):
         for body in (
             "以下“当前负荷”“正在调整”均指报告当时。",

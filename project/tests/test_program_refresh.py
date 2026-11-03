@@ -459,6 +459,235 @@ class ProgramRefreshTests(unittest.TestCase):
         self.reject_refresh()
         self.assertEqual(self.roles, ["extract"] * 4)
 
+    def legacy_domain_failure(self, count=1):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            return self.failed(count)
+
+    def test_registered_domain_upgrade_keeps_failed_request_and_counter_then_publishes(self):
+        old_rows = self.legacy_domain_failure()
+        old_queue = deepcopy(self.state(self.queue))
+        old_counter, old_audit = self.counter_files(), self.ledger.path.read_bytes()
+        old_operations = deepcopy(self.ledger.snapshot()["operations"])
+        failure_path = "memory/runs/processes/" + old_rows[0]["run_id"] + "/failure.md"
+        old_failure = (self.repo / failure_path).read_bytes()
+        self.assertEqual(self.payloads[0][1]["domain_policy"]["version"], "three-domains-v1")
+        advance_engine(self.engine)
+        refreshed = self.prepare(refresh=True)
+        state = self.state(self.queue)
+        self.assertEqual(state["program_refresh"]["contract"], "same-sources-domain-policy-refresh-v1")
+        self.assertEqual(state["request"], old_queue["request"])
+        self.assertEqual(refreshed["attempts_used"], 1)
+        self.assertEqual(self.counter_files(), old_counter)
+        self.assertEqual(self.ledger.path.read_bytes(), old_audit)
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        rows = self.attempts()[0]["attempts"]
+        self.assertEqual(rows[:1], old_rows)
+        self.assertEqual([r["attempt"] for r in rows], [1, 2])
+        self.assertEqual(len(self.counter_files()), 1)
+        self.assertEqual(self.roles, ["extract", "extract", "review"])
+        self.assertEqual(self.payloads[-2][1]["domain_policy"]["version"], "three-domains-v2")
+        self.assertEqual(self.payloads[-1][1]["domain_policy"]["version"], "three-domains-v2")
+        self.assertEqual((self.repo / failure_path).read_bytes(), old_failure)
+        for key, value in old_operations.items():
+            self.assertEqual(self.ledger.snapshot()["operations"][key], value)
+        candidate, _, _ = _read_reviewed(PipelineGit(self.repo), result["final_run"])
+        self.assertEqual(candidate["versions"]["domain_policy_version"], "three-domains-v2")
+        proof = verify_group_publication(self.repo, result["publication"]["run_id"], source_paths=self.paths)
+        self.assertEqual(verify_group_publication(self.repo, proof["run_id"], historical=True)["commit_sha"], proof["commit_sha"])
+        before = self.checkpoint()
+        self.assertEqual(self.run_slice()["status"], "published")
+        self.assertEqual(self.checkpoint(), before)
+
+    def test_unstarted_domain_upgrade_preserves_zero_attempts_and_is_idempotent(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+        before_calls, before_audit = self.number, self.ledger.path.read_bytes()
+        advance_engine(self.engine)
+        refreshed = self.prepare(refresh=True)
+        self.assertEqual(refreshed["attempts_used"], 0)
+        self.assertEqual(self.state(self.queue)["program_refresh"]["contract"], "same-sources-domain-policy-refresh-v1")
+        self.assertEqual(self.counter_files(), {})
+        self.assertEqual(self.number, before_calls)
+        self.assertEqual(self.ledger.path.read_bytes(), before_audit)
+        before = self.checkpoint()
+        self.assertFalse(self.prepare(refresh=True)["program_refreshed"])
+        self.assertEqual(self.checkpoint(), before)
+
+    def test_domain_upgrade_requires_explicit_refresh(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+        advance_engine(self.engine)
+        before = self.checkpoint()
+        with self.assertRaises(CaptureError) as caught:
+            self.run_slice()
+        self.assertEqual(caught.exception.code, "batch_snapshot_changed")
+        self.assertEqual(self.checkpoint(), before)
+
+    def test_domain_upgrade_rejects_changed_current_policy_sha_before_a_call(self):
+        self.legacy_domain_failure()
+        advance_engine(self.engine)
+        from pdm.pipeline import execution_versions
+        def changed(git):
+            value = execution_versions(git)
+            value["domain_policy_sha256"] = "sha256-" + "0" * 64
+            return value
+        with patch("pdm.pipeline.execution_versions", side_effect=changed):
+            self.assertEqual(self.reject_refresh(), "program_refresh_rules_changed")
+
+    def test_domain_upgrade_rejects_changed_previous_policy_sha(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+        state = deepcopy(self.state(self.queue))
+        state["plan"]["snapshot"]["versions"]["domain_policy_sha256"] = "sha256-" + "0" * 64
+        self.write_queue_state(state)
+        advance_engine(self.engine)
+        self.assertEqual(self.reject_refresh(), "program_refresh_rules_changed")
+
+    def test_domain_upgrade_rejects_an_unknown_policy_transition(self):
+        self.legacy_domain_failure()
+        advance_engine(self.engine)
+        from pdm.pipeline import execution_versions
+        def changed(git):
+            value = execution_versions(git)
+            value["domain_policy_version"] = "three-domains-v3"
+            return value
+        with patch("pdm.pipeline.execution_versions", side_effect=changed):
+            self.assertEqual(self.reject_refresh(), "program_refresh_rules_changed")
+
+    def test_domain_upgrade_cannot_hide_an_unrelated_prompt_change(self):
+        self.legacy_domain_failure()
+        advance_engine(self.engine)
+        path = self.engine / "project/prompts/extract.md"
+        path.write_text(path.read_text() + "\nArtificial extra rule outside the domain policy.\n")
+        git(self.engine, "add", str(path.relative_to(self.engine)))
+        git(self.engine, "commit", "-m", "artificial unrelated prompt change")
+        self.assertEqual(self.reject_refresh(), "program_refresh_rules_changed")
+
+    def add_unrelated_skill_asset(self):
+        path = self.engine / "project/skills/artificial-unrelated-note.txt"
+        path.write_text("Artificial unrelated future Skill asset.\n")
+        git(self.engine, "add", str(path.relative_to(self.engine)))
+        git(self.engine, "commit", "-m", "artificial unrelated future Skill registration")
+
+    def test_published_domain_refresh_history_survives_an_unrelated_skill_addition(self):
+        self.legacy_domain_failure()
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        group = result["publication"]["run_id"]
+        proof = verify_group_publication(self.repo, group, historical=True)
+        self.add_unrelated_skill_asset()
+        before = self.checkpoint()
+        self.assertEqual(verify_group_publication(self.repo, group, historical=True)["commit_sha"], proof["commit_sha"])
+        self.assertEqual(self.checkpoint(), before)
+
+    def test_a_new_domain_refresh_rejects_an_unregistered_skill_tree_before_calls(self):
+        self.legacy_domain_failure()
+        self.add_unrelated_skill_asset()
+        self.assertEqual(self.reject_refresh(), "program_refresh_rules_changed")
+        self.assertEqual(self.roles, ["extract"])
+
+    def test_domain_upgrade_rejects_a_downgrade_to_v1(self):
+        self.prepare()
+        advance_engine(self.engine)
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.assertEqual(self.reject_refresh(), "program_refresh_rules_changed")
+
+    def test_domain_upgrade_rejects_a_changed_source(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+        replacement = capture(self.repo, {"source_key": "quality:note:0", "source_type": "note",
+            "acquisition_status": "full_text", "body": "Changed artificial work source.\n"})["path"]
+        advance_engine(self.engine)
+        self.reject_refresh(paths=[replacement])
+
+    def test_domain_upgrade_rejects_a_control_change_with_unchanged_sources(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+        advance_engine(self.engine)
+        unrelated = capture(self.repo, {"source_key": "domain:unrelated", "source_type": "note",
+            "acquisition_status": "full_text", "body": "Unrelated artificial source.\n"})["path"]
+        record_control(self.repo, {"request_key": "domain:delete-control", "action": "delete", "source_paths": [unrelated]})
+        self.reject_refresh()
+
+    def test_domain_upgrade_rejects_unknown_attempts_and_keeps_them_unknown(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+            self.failure_mode = "unknown"
+            self.assertEqual(self.run_slice()["status"], "unknown")
+        advance_engine(self.engine)
+        self.reject_refresh()
+        self.assertEqual(self.roles, ["extract"])
+        self.assertEqual(self.attempts()[0]["attempts"][0]["status"], "unknown")
+
+    def test_domain_upgrade_cannot_reopen_an_exhausted_work(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+            self.failure_mode = "temporal"
+            self.assertEqual(self.run_slice(steps=8)["status"], "attempt_limit")
+        self.failure_mode = None
+        advance_engine(self.engine)
+        self.reject_refresh()
+        self.assertEqual(len(self.attempts()[0]["attempts"]), 4)
+        self.assertEqual(self.roles, ["extract"] * 4)
+
+    def test_domain_upgrade_rejects_a_started_independent_review(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            self.prepare()
+            self.assertEqual(self.run_slice()["status"], "ready")
+        advance_engine(self.engine)
+        self.reject_refresh()
+        self.assertEqual(self.roles, ["extract", "review"])
+
+    def test_domain_change_cannot_claim_the_unchanged_program_only_contract(self):
+        self.legacy_domain_failure()
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        state = deepcopy(self.state(self.queue))
+        state["program_refresh"]["contract"] = "same-skill-program-refresh-v1"
+        self.write_queue_state(state)
+        before = self.checkpoint()
+        with self.assertRaises(CaptureError) as caught:
+            self.run_slice()
+        self.assertEqual(caught.exception.code, "program_refresh_proof_changed")
+        self.assertEqual(self.checkpoint(), before)
+        self.assertEqual(self.roles, ["extract"])
+
+    def test_program_then_domain_then_program_refresh_keeps_the_old_request(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            old_rows = self.failed()
+            advance_engine(self.engine)
+            self.prepare(refresh=True)
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        self.assertEqual(self.attempts()[0]["attempts"][:1], old_rows)
+        self.assertEqual(self.roles, ["extract", "extract", "review"])
+        proof = verify_group_publication(self.repo, result["publication"]["run_id"], source_paths=self.paths)
+        self.assertEqual(verify_group_publication(self.repo, proof["run_id"], historical=True)["commit_sha"], proof["commit_sha"])
+
+    def test_domain_refresh_after_an_intervening_failure_keeps_earlier_program_witness(self):
+        with patch("pdm.domains.DOMAIN_POLICY_VERSION", "three-domains-v1"):
+            old_rows = self.failed()
+            advance_engine(self.engine)
+            self.prepare(refresh=True)
+            self.failure_mode = "temporal"
+            self.assertEqual(self.run_slice()["status"], "failed")
+            self.failure_mode = None
+        previous = deepcopy(self.attempts()[0]["attempts"])
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        self.assertEqual(self.attempts()[0]["attempts"][:2], previous)
+        self.assertEqual(self.attempts()[0]["attempts"][:1], old_rows)
+        self.assertEqual(self.roles, ["extract", "extract", "extract", "review"])
+
 
 if __name__ == "__main__":
     unittest.main()

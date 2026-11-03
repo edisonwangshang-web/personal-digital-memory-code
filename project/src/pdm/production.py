@@ -178,6 +178,17 @@ def _save(git, path, value, kind, head):
 
 
 PROGRAM_REFRESH = "same-skill-program-refresh-v1"
+DOMAIN_POLICY_REFRESH = "same-sources-domain-policy-refresh-v1"
+# This one registered upgrade keeps the existing 16/14 prompts and Skill tree.
+# Historical proof must not start depending on future, unrelated Skill files.
+_DOMAIN_POLICY_REFRESH_BINDINGS = {
+    "three-domains-v1": {
+        "domain_policy_sha256": "sha256-630587eb95be41d7effcdbe5d6e90b47b5921bf9341c8a17c91f1991dd1892eb",
+        "rules_version": "sha256-79f0e45de05f2af7b17758607aadced30c9cd480ad49a08204f1b1aa29334b6a"},
+    "three-domains-v2": {
+        "domain_policy_sha256": "sha256-543a6f0a19d0058013c46e3d391e9a163c2092aa0ad8d7b1a7d69718f4798caf",
+        "rules_version": "sha256-398f896124e21e3cc402cfef3f193937a4ca319f4667e5dded96e6afa62cb50a"},
+}
 
 
 def _program_work_identity(state):
@@ -209,6 +220,31 @@ def _program_versions(old, new):
                                    if key not in {"program_commit", "program_sha256"}))
 
 
+def _domain_policy_versions(old, new, *, admission=False):
+    """The single registered v1-to-v2 policy upgrade, never an arbitrary rule change."""
+    if not isinstance(old, dict) or not isinstance(new, dict) or set(old) != set(new):
+        return False
+    from .domains import domain_policy
+    from .pipeline import _hash as policy_hash, _rules_version_for_domain_policy
+    for value, version in ((old, "three-domains-v1"), (new, "three-domains-v2")):
+        fixed = _DOMAIN_POLICY_REFRESH_BINDINGS[version]
+        if (value.get("domain_policy_version") != version
+                or any(value.get(key) != digest for key, digest in fixed.items())
+                or policy_hash(domain_policy(version)) != fixed["domain_policy_sha256"]
+                or admission and _rules_version_for_domain_policy(version) != fixed["rules_version"]):
+            return False
+    changed = {"program_commit", "program_sha256", "domain_policy_version", "domain_policy_sha256", "rules_version"}
+    return all(old[key] == new[key] for key in old if key not in changed)
+
+
+def _refresh_versions(contract, old, new):
+    if contract == PROGRAM_REFRESH:
+        return _program_versions(old, new)
+    if contract == DOMAIN_POLICY_REFRESH:
+        return _domain_policy_versions(old, new)
+    return False
+
+
 def _refresh_snapshot(git, ref):
     from .pipeline import _load
     if (not isinstance(ref, dict) or set(ref) != {"path", "commit_sha", "sha256"}
@@ -235,27 +271,48 @@ def _refresh_counter_snapshot(git, witness, revision):
 
 
 def _check_program_refresh_counter(git, state):
-    """Only append to the original counter prefix, before any worker write."""
-    witness = state.get("program_refresh")
-    if witness is None:
-        return
+    """Validate every fixed hop and only append to original counter prefixes."""
+    from .skill_support import resolve_skill_refs
+    fields = {"contract", "previous_queue", "work_id", "counter_path", "counter_sha256"}
+    seen = set()
     try:
-        old = _refresh_snapshot(git, witness["previous_queue"])
-        identity = _program_work_identity(old)
-        work_id = _hash(identity)
-        if (witness.get("contract") != PROGRAM_REFRESH or witness["work_id"] != work_id
-                or witness["counter_path"] != ATTEMPTS + work_id + ".md"
-                or _program_work_identity(state) != identity):
-            _fail("program_refresh_proof_changed")
-        fixed = _refresh_counter_snapshot(git, witness, witness["previous_queue"]["commit_sha"])
-        current = _read(git, witness["counter_path"], "production_attempts")
-        prefix = [] if fixed is None else fixed.get("attempts")
-        rows = [] if current is None else current.get("attempts")
-        if (not isinstance(prefix, list) or not isinstance(rows, list)
-                or fixed is not None and fixed.get("identity") != identity
-                or current is not None and current.get("identity") != identity
-                or len(rows) < len(prefix) or rows[:len(prefix)] != prefix):
-            _fail("program_refresh_proof_changed")
+        for _ in range(64):
+            witness = state.get("program_refresh")
+            if witness is None:
+                return
+            if not isinstance(witness, dict) or set(witness) != fields:
+                _fail("program_refresh_proof_changed")
+            key = canonical(witness["previous_queue"])
+            if key in seen:
+                _fail("program_refresh_proof_changed")
+            seen.add(key)
+            old = _refresh_snapshot(git, witness["previous_queue"])
+            identity = _program_work_identity(old)
+            work_id = _hash(identity)
+            if (not _refresh_versions(witness.get("contract"), old["plan"]["snapshot"]["versions"],
+                                     state["plan"]["snapshot"]["versions"])
+                    or witness["work_id"] != work_id
+                    or witness["counter_path"] != ATTEMPTS + work_id + ".md"
+                    or state["queue_id"] != old["queue_id"]
+                    or state["request"] != old["request"]
+                    or state["related_runs"] != old["related_runs"]
+                    or state["request"].get("skill_bundle") != resolve_skill_refs("knowledge-extract@16", "knowledge-review@14")
+                    or _program_plan_inputs(state["plan"]) != _program_plan_inputs(old["plan"])
+                    or _program_work_identity(state) != identity):
+                _fail("program_refresh_proof_changed")
+            fixed = _refresh_counter_snapshot(git, witness, witness["previous_queue"]["commit_sha"])
+            current = _read(git, witness["counter_path"], "production_attempts")
+            prefix = [] if fixed is None else fixed.get("attempts")
+            rows = [] if current is None else current.get("attempts")
+            if (not isinstance(prefix, list) or not isinstance(rows, list)
+                    or fixed is not None and fixed.get("identity") != identity
+                    or current is not None and current.get("identity") != identity
+                    or len(rows) < len(prefix) or rows[:len(prefix)] != prefix):
+                _fail("program_refresh_proof_changed")
+            # Old queue progress can legitimately follow its own refresh. Check
+            # that hop's fixed transition and prefix, not a guessed old status.
+            state = old
+        _fail("program_refresh_proof_changed")
     except (KeyError, TypeError, ValueError, AttributeError):
         _fail("program_refresh_proof_changed")
 
@@ -269,7 +326,7 @@ def program_refresh_material(git, ref):
         witness = state.get("program_refresh")
         fields = {"contract", "previous_queue", "work_id", "counter_path", "counter_sha256"}
         if (not isinstance(witness, dict) or set(witness) != fields
-                or witness["contract"] != PROGRAM_REFRESH
+                or witness["contract"] not in {PROGRAM_REFRESH, DOMAIN_POLICY_REFRESH}
                 or witness["previous_queue"].get("path") != ref["path"]):
             _fail("program_refresh_proof_changed")
         old = _refresh_snapshot(git, witness["previous_queue"])
@@ -283,7 +340,8 @@ def program_refresh_material(git, ref):
         if (state["queue_id"] != old["queue_id"] or state["request"] != old["request"]
                 or state["related_runs"] != old["related_runs"]
                 or state["request"].get("skill_bundle") != resolve_skill_refs("knowledge-extract@16", "knowledge-review@14")
-                or not _program_versions(old["plan"]["snapshot"]["versions"], state["plan"]["snapshot"]["versions"])
+                or not _refresh_versions(witness["contract"], old["plan"]["snapshot"]["versions"],
+                                         state["plan"]["snapshot"]["versions"])
                 or _program_plan_inputs(old["plan"]) != _program_plan_inputs(state["plan"])
                 or _program_work_identity(state) != identity
                 or witness["work_id"] != work_id or witness["counter_path"] != ATTEMPTS + work_id + ".md"):
@@ -302,7 +360,7 @@ def program_refresh_material(git, ref):
 
 
 def _refresh_program(repo, git, path, state, model_call):
-    """Refresh only the program snapshot; never write a counter or call a model."""
+    """Explicit bounded program/policy refresh; never write a counter or call a model."""
     from .batching import plan_batches, validate_plan
     from .context import discover_context
     from .extraction_feedback import prepare_feedback
@@ -319,7 +377,10 @@ def _refresh_program(repo, git, path, state, model_call):
     if versions == state["plan"]["snapshot"]["versions"]:
         return {"queue_id": state["queue_id"], "status": state["status"], "state_path": path,
                 "plan_id": state["plan"]["plan_id"], "head": git.head(), "reused": True, "program_refreshed": False}
-    if not _program_versions(state["plan"]["snapshot"]["versions"], versions):
+    old_versions = state["plan"]["snapshot"]["versions"]
+    contract = (PROGRAM_REFRESH if _program_versions(old_versions, versions)
+                else DOMAIN_POLICY_REFRESH if _domain_policy_versions(old_versions, versions, admission=True) else None)
+    if contract is None:
         _fail("program_refresh_rules_changed")
     with _worker_lock(repo):
         head = git.check()
@@ -378,7 +439,7 @@ def _refresh_program(repo, git, path, state, model_call):
         raw = git._existing(counter_path)
         updated = deepcopy(state)
         updated.update(plan=plan, revision=state["revision"] + 1,
-                       program_refresh={"contract": PROGRAM_REFRESH, "previous_queue": previous,
+                       program_refresh={"contract": contract, "previous_queue": previous,
                            "work_id": work_id, "counter_path": counter_path,
                            "counter_sha256": None if raw is None else "sha256-" + hashlib.sha256(raw).hexdigest()})
         _refresh_counter_snapshot(git, updated["program_refresh"], previous["commit_sha"])

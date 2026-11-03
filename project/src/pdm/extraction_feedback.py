@@ -234,11 +234,12 @@ def prepare_feedback(git, failed_attempt, model_call):
 def _program_predecessor_payload(git, ref, payload, versions, context):
     """Rebuild the original audited request through an explicit queue refresh.
 
-    Only the program snapshot and its plan identifiers may change. The saved
-    draft remains unapproved feedback for a new ordinary extraction, never a
-    recovered candidate or a substitute for independent Review.
+    Fixed witnesses distinguish a program-only refresh from the one registered
+    domain-policy upgrade. The saved draft remains unapproved feedback for a
+    new ordinary extraction, never a recovered candidate or a Review substitute.
     """
     from .batching import _context
+    from .domains import domain_policy
     from .model_calls import request_binding
     from .pipeline import _load, _run_path
     from .production import program_refresh_material
@@ -282,6 +283,10 @@ def _program_predecessor_payload(git, ref, payload, versions, context):
             _fail("extraction_feedback_scope_changed")
         original = deepcopy(payload)
         original.pop("extraction_feedback", None)
+        # Reconstruct the actual old request with its exact registered policy;
+        # the successor's new policy never rewrites old payload/audit digests.
+        original["domain_policy"] = domain_policy(context["versions"]["domain_policy_version"])
+        original["rules_version"] = context["versions"]["rules_version"]
         original["batch_context"] = batch_context(old["plan"])
         original["controls"]["head"] = ref["started"]["commit_sha"]
         rows = counter["attempts"]
