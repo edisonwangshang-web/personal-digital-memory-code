@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
 import unittest
@@ -244,6 +245,118 @@ class ProgramRefreshTests(unittest.TestCase):
         self.assertEqual(current[:2], previous)
         self.assertEqual([row["attempt"] for row in current], [1, 2, 3])
         self.assertEqual(len(self.counter_files()), 1)
+
+    def second_engine_upgrade(self):
+        path = self.engine / "project/src/pdm/fixture_upgrade.py"
+        path.write_text(path.read_text() + "# Another artificial program-only upgrade.\n")
+        git(self.engine, "add", str(path.relative_to(self.engine)))
+        git(self.engine, "commit", "-m", "artificial second program-only upgrade")
+
+    def write_queue_state(self, state):
+        path = "memory/runs/processes/queues/" + self.queue + "/state.md"
+        metadata, _ = parse_markdown((self.repo / path).read_bytes())
+        raw = markdown(metadata, canonical(state).decode() + "\n")
+        (self.repo / path).write_bytes(raw)
+        git(self.repo, "add", path)
+        git(self.repo, "commit", "-m", "artificial queue proof mutation")
+        return {"path": path, "commit_sha": PipelineGit(self.repo).head(),
+                "sha256": "sha256-" + hashlib.sha256(raw).hexdigest()}
+
+    def test_ready_queue_can_refresh_twice_before_its_first_attempt(self):
+        self.prepare()
+        audit = self.ledger.path.read_bytes()
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        self.assertEqual(self.ledger.path.read_bytes(), audit)
+        self.assertEqual(self.counter_files(), {})
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        self.assertEqual(self.roles, ["extract", "review"])
+        self.assertEqual([row["attempt"] for row in self.attempts()[0]["attempts"]], [1])
+
+    def test_failed_request_survives_two_refreshes_without_an_intervening_attempt(self):
+        old_rows = self.failed()
+        old_counter, old_audit = self.counter_files(), self.ledger.path.read_bytes()
+        old_operations = deepcopy(self.ledger.snapshot()["operations"])
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        self.assertEqual(self.counter_files(), old_counter)
+        self.assertEqual(self.ledger.path.read_bytes(), old_audit)
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        rows = self.attempts()[0]["attempts"]
+        self.assertEqual(rows[:1], old_rows)
+        self.assertEqual([row["attempt"] for row in rows], [1, 2])
+        self.assertEqual(self.roles, ["extract", "extract", "review"])
+        self.assertEqual(self.payloads[-2][1]["extraction_feedback"]["source_run_id"], old_rows[0]["run_id"])
+        for key, value in old_operations.items():
+            self.assertEqual(self.ledger.snapshot()["operations"][key], value)
+        proof = verify_group_publication(self.repo, result["publication"]["run_id"], source_paths=self.paths)
+        self.assertEqual(verify_group_publication(self.repo, proof["run_id"], historical=True)["commit_sha"],
+                         proof["commit_sha"])
+        before = self.checkpoint()
+        self.assertEqual(self.run_slice()["status"], "published")
+        self.assertEqual(self.checkpoint(), before)
+
+    def test_an_intervening_third_failure_retains_only_the_last_original_slot(self):
+        old_rows = self.failed(2)
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        self.failure_mode = "temporal"
+        self.assertEqual(self.run_slice()["status"], "failed")
+        third_rows = deepcopy(self.attempts()[0]["attempts"])
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        self.failure_mode = None
+        result = self.run_slice(steps=8)
+        self.assertEqual(result["status"], "published", result)
+        rows = self.attempts()[0]["attempts"]
+        self.assertEqual(rows[:2], old_rows)
+        self.assertEqual(rows[:3], third_rows)
+        self.assertEqual([row["attempt"] for row in rows], [1, 2, 3, 4])
+        self.assertEqual(self.roles, ["extract"] * 4 + ["review"])
+
+    def reject_changed_intermediate_refresh(self, field):
+        self.failed()
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        first = deepcopy(self.state(self.queue))
+        self.second_engine_upgrade()
+        self.prepare(refresh=True)
+        current = deepcopy(self.state(self.queue))
+        if field == "previous_queue":
+            first["program_refresh"][field]["sha256"] = "sha256-" + "0" * 64
+        else:
+            first["program_refresh"][field] = "sha256-" + "0" * 64
+        current["program_refresh"]["previous_queue"] = self.write_queue_state(first)
+        self.write_queue_state(current)
+        before = self.checkpoint()
+        with self.assertRaises(CaptureError) as caught:
+            self.run_slice()
+        self.assertEqual(caught.exception.code, "program_refresh_proof_changed")
+        self.assertEqual(self.checkpoint(), before)
+        self.assertEqual(self.roles, ["extract"])
+
+    def test_changed_intermediate_queue_witness_stops_before_a_new_call(self):
+        self.reject_changed_intermediate_refresh("previous_queue")
+
+    def test_changed_intermediate_counter_digest_stops_before_a_new_call(self):
+        self.reject_changed_intermediate_refresh("counter_sha256")
+
+    def test_an_unknown_attempt_after_the_first_refresh_blocks_a_second_refresh(self):
+        self.failed()
+        advance_engine(self.engine)
+        self.prepare(refresh=True)
+        self.failure_mode = "unknown"
+        self.assertEqual(self.run_slice()["status"], "unknown")
+        self.second_engine_upgrade()
+        self.reject_refresh()
+        self.assertEqual(self.roles, ["extract", "extract"])
+        self.assertEqual([row["attempt"] for row in self.attempts()[0]["attempts"]], [1, 2])
 
     def test_new_source_version_cannot_repurpose_a_queue_during_refresh(self):
         self.prepare()

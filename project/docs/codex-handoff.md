@@ -4,9 +4,11 @@
 
 ## 目标与当前范围
 
+当前dev43仅补历史期间回指及连续程序升级之间未新调用时的原失败反馈续接；同一工作、审计与计数保持，逐边核不可变证明。先核准确提交CI，再继续获准私有加工；实际结果不由工程测试替代。
+
 dev42修正v3对来源历史、引述及否定推断的误拦，并提供相同资料的程序升级受限续接；沿原工作、audit和次数，不重开unknown或耗尽工作。入口和边界见[合同](data-conventions.md#program-only-continuation)，先核准确CI再继续获准真实任务。
 
-当前开发版`0.2.0.dev42`沿用Skill16/14、knowledge-quality-v3、普通质量0.23和source-quality-v3，在原阶段统一时间／引用与返工交接，新增输入识别边界和标准入口人工交叉验收。纯引用窄补丁不新建阶段，物化后仍完整校验和独立Review；旧15/13及历史证明不迁移，unknown、耗尽工作及原次数不重开。只dev，两个master不动；工程检查使用虚构资料，实际获准加工只在私库另记，准确检查与真实业务分别核验，详见[Roadmap](roadmap.md)与[合同](data-conventions.md#stable-processing-contract)。
+dev42批次沿用Skill16/14、knowledge-quality-v3、普通质量0.23和source-quality-v3，在原阶段统一时间／引用与返工交接，新增输入识别边界和标准入口人工交叉验收。纯引用窄补丁不新建阶段，物化后仍完整校验和独立Review；旧15/13及历史证明不迁移，unknown、耗尽工作及原次数不重开。只dev，两个master不动；工程检查使用虚构资料，实际获准加工只在私库另记，准确检查与真实业务分别核验，详见[Roadmap](roadmap.md)与[合同](data-conventions.md#stable-processing-contract)。
 
 历史dev35批次针对整体coverage请求超容量，采用完整表格来源＋完整说明／字典的v2审核布局，global汇总全部范围和关系。新plan／proof及受限stage复用sidecar为0.19，普通12/10候选仍0.18，旧v1计划及请求字节保持。只有原提取completed且固定、Review从未启动、decomposed_input_limit阻塞与同work未耗尽都可核验时，才在下一attempt以原Git／audit观察零新extract复用，再重新程序校验和独立Review。不是通用跨版本迁移；旧失败、unknown、消费及四次上限不变。当前工程、新CI与真实Review／发布／读取待取证，不标M1完成；两个master不动。见[合同](data-conventions.md#review-material-recovery)及[验收](scenarios-and-acceptance.md#review-material-recovery-acceptance)。
 

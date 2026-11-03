@@ -6,7 +6,9 @@
 
 ## 当前阶段
 
-当前开发为`0.2.0.dev42`，仅处理现有v3时间校验的语义误拦及同资料的程序升级续接。沿用Skill16/14、原加工阶段与有限次数，保留历史、unknown和耗尽工作；准确提交的人工回归、独立审查与CI完成后，才在私库按实际授权继续真实加工。新增36项通用人工回归覆盖时间正反例、原进度续接和旧计数保护；本地检查及独立审查不替代准确提交CI或真实业务，不据此宣布M1完成或更新两个master。合同见[受限续接](data-conventions.md#program-only-continuation)，场景见[验收](scenarios-and-acceptance.md)。
+当前开发为`0.2.0.dev43`，只补历史期间回指及连续程序升级的反馈交接。沿用Skill16/14、v3、全部既有格式和原工作次数；人工边界、准确提交CI及真实加工分别取证，未取得结果前不标业务通过。两个master不动，不启动M2。
+
+dev42批次仅处理现有v3时间校验的语义误拦及同资料的程序升级续接。沿用Skill16/14、原加工阶段与有限次数，保留历史、unknown和耗尽工作；准确提交的人工回归、独立审查与CI完成后，才在私库按实际授权继续真实加工。新增36项通用人工回归覆盖时间正反例、原进度续接和旧计数保护；本地检查及独立审查不替代准确提交CI或真实业务，不据此宣布M1完成或更新两个master。合同见[受限续接](data-conventions.md#program-only-continuation)，场景见[验收](scenarios-and-acceptance.md)。
 
 当前批次为`0.2.0.dev41`：新Skill16/14、普通质量0.23、knowledge-quality-v3／source-quality-v3在原阶段统一时间、引用、输入识别与返工交接。重点验窄义免责声明不误拦、历史不覆盖当前／未来、全部可安全检查问题准确反馈、纯引用窄补丁冻结其他字段并完整重审，以及标准CLI／请求渲染／输出schema／发布读取组合。旧规则和已存资料不迁移，来源0.1／正式0.2及其他证明格式、unknown和次数保持；不重开耗尽工作或新增真实调用，两个master不动。准确提交检查与CI另取证，不能以人工通过代替真实业务或M1通过。见[合同](data-conventions.md#stable-processing-contract)与[场景](scenarios-and-acceptance.md#stable-processing-acceptance)。
 

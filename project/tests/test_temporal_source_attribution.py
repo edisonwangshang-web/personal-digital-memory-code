@@ -123,6 +123,44 @@ class TemporalSourceAttributionTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.invalid(body, basis="unknown")
 
+    def test_unknown_anaphoric_cutoff_uses_the_same_named_period(self):
+        for body in (
+            "报告当时记载：截至Q2累计观察8次；Q2年份未知。",
+            "第4页记载分享当时的运营自述（分享日期及Q2年份未知）：覆盖7个测试组，Q2全量接入，截至该Q2累计评估需求800项。",
+            "报告记载观察当时的训练情况（观察日期及H2年份未知）：覆盖3组训练，H2全量记录，截至此H2累计训练80次。",
+            "课程材料记载授课当时的练习情况（授课日期及下半年年份未知）：覆盖5组练习，下半年全量记录，截至其下半年累计练习90次。",
+            "报告当时记载：截至该 Q2累计观察8次；Q2年份未知。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body, basis="unknown")
+
+    def test_unknown_anaphoric_cutoff_still_requires_local_source_and_period(self):
+        for body in (
+            "截至该Q2累计8项；Q2年份未知。",
+            "报告当时截至该Q2累计8项；Q3年份未知。",
+            "报告当时截至该Q2累计8项。Q2年份未知。",
+            "报告当时截至该Q20累计8项；Q2年份未知。",
+            "报告当时截至该Q2累计8项。",
+            "报告当时截至该1月累计8项；11月年份未知。",
+            "报告当时截至该Q1累计8项及截至该Q2累计9项；Q1年份未知。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="unknown")
+
+    def test_anaphoric_cutoff_cannot_qualify_independent_state_claims(self):
+        for body, basis in (
+            ("报告当时截至该Q2累计8项；Q2年份未知，当前已经上线。", "unknown"),
+            ("课程材料当时截至此H2累计8次；H2年份未知，但明天将会完成。", "unknown"),
+            ("报告当时截至该Q2已经累计8项；Q2年份未知。", "unknown"),
+            ("报告引用2021年研究，系统已经上线。", "source_time"),
+            ("“不能作为”已经成为关键词。", None),
+            ("“当前已经上线”均指非来源当时。", None),
+        ):
+            with self.subTest(body=body):
+                self.invalid(body,
+                    "quality_temporal_missing" if basis is None else "quality_temporal_mismatch",
+                    basis=basis, original="人工资料载有2021年研究与来源时间说明。")
+
     def test_narrow_inference_exclusions_do_not_assert_the_outcome(self):
         for body in (
             "一次训练不等于用户已经康复。",

@@ -245,6 +245,24 @@ def _program_predecessor_payload(git, ref, payload, versions, context):
     from .skill_support import resolve_skill_refs
     try:
         old, current, counter = program_refresh_material(git, ref["program_refresh"])
+        # Several program-only refreshes may happen before the next attempt.
+        # Follow their fixed Git witnesses back to the actual failed request,
+        # never substitute the immediate predecessor's unused program version.
+        bridge, seen = current, set()
+        for _ in range(64):
+            if context["versions"] == old["plan"]["snapshot"]["versions"]:
+                break
+            previous_ref = bridge["program_refresh"]["previous_queue"]
+            key = _raw(previous_ref)
+            if key in seen:
+                _fail("extraction_feedback_scope_changed")
+            seen.add(key)
+            previous, checked_bridge, previous_counter = program_refresh_material(git, previous_ref)
+            if checked_bridge != old or previous_counter != counter:
+                _fail("extraction_feedback_scope_changed")
+            bridge, old = checked_bridge, previous
+        else:
+            _fail("extraction_feedback_scope_changed")
         if (counter is None or not counter.get("attempts")
                 or old["active_run_id"] != ref["source_run_id"]
                 or counter["attempts"][-1]["run_id"] != ref["source_run_id"]
