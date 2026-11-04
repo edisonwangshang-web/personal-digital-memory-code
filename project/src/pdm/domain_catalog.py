@@ -57,17 +57,24 @@ def _documents(evidence):
 
 
 def build_domain_catalog(repo, source_paths, run_ids=None, *, domain=None, max_bytes=MAX_EVIDENCE_BYTES,
-                         source_views=None, batch_context=None):
+                         source_views=None, batch_context=None, object_paths=None, compact_sources=False):
     """List selected current knowledge by domain without discovery or persistence.
 
-    ``domain`` filters presentation only. Evidence coverage and classification
-    gaps continue to describe the entire explicitly authorized source/run set.
+    ``domain`` filters presentation only. Evidence coverage retains the explicit
+    source/run and object-selection boundaries; classification gaps describe
+    the returned, verified objects.
+    Optional object selection and compact sources use the existing evidence
+    reader's exact dependency, authorization and budget checks.
     """
     _budget(max_bytes)
     if domain is not None and (not isinstance(domain, str) or domain not in DOMAIN_LABELS):
         _fail("invalid_domain_filter")
     projection = ({"source_views": source_views, "batch_context": batch_context}
                   if source_views is not None or batch_context is not None else {})
+    if object_paths is not None:
+        projection["object_paths"] = object_paths
+    if compact_sources is not False:
+        projection["compact_sources"] = compact_sources
     selected = build_current_evidence(repo, source_paths, run_ids, max_bytes=max_bytes, **projection)
     indexed = _documents(selected)
     groups = {key: {"label": label, "records": [], "topics": []} for key, label in DOMAIN_LABELS.items()}

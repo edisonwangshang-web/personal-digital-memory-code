@@ -90,8 +90,8 @@ def _reading_arguments(command):
 
 
 def _object_reading_arguments(command):
-    command.add_argument("--object", action="append", help="配合--current选择正式记录或主题路径；主题自动带上所引记录")
-    command.add_argument("--compact-sources", action="store_true", help="配合--current仅在带行号的lines中提供原文，避免重复传输")
+    command.add_argument("--object", action="append", help="选择当前读取入口的正式记录或主题路径；主题自动带上所引记录")
+    command.add_argument("--compact-sources", action="store_true", help="当前读取入口仅在带行号的lines中提供原文，避免重复传输")
 
 
 def _object_reading_options(args):
@@ -227,6 +227,7 @@ def parser() -> argparse.ArgumentParser:
     knowledge.add_argument("--budget-bytes", type=int)
     knowledge.add_argument("--format", choices=("json", "markdown"), default="json")
     _reading_arguments(knowledge)
+    _object_reading_arguments(knowledge)
     ask = commands.add_parser("ask", help="仅将指定来源发送模型问答，需调用者已取得相应授权")
     ask.add_argument("--repo", type=Path, required=True)
     ask.add_argument("--source", required=True, action="append", help="可重复指定，最多8份来源；调用前确认全部资料授权")
@@ -507,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             exit_code = 0
         elif args.command == "knowledge":
             from .domain_catalog import build_domain_catalog, render_domain_catalog
-            options = {"domain": args.domain, **_reading_projection(args)}
+            options = {"domain": args.domain, **_reading_projection(args), **_object_reading_options(args)}
             if args.budget_bytes is not None:
                 options["max_bytes"] = args.budget_bytes
             result = build_domain_catalog(args.repo, args.source, args.run, **options)

@@ -208,9 +208,14 @@ python -P -B -m pdm ask --repo "$PDM_DATA_REPO" --current \
 ```bash
 python -P -B -m pdm knowledge --repo "$PDM_DATA_REPO" --source "$source_path" --run "$run_id" \
   --domain learning --budget-bytes "$evidence_budget" --format markdown
+python -P -B -m pdm knowledge --repo "$PDM_DATA_REPO" --source "$source_path" --run "$run_id" \
+  --domain learning --object memory/topics/example-topic.md --compact-sources \
+  --budget-bytes "$evidence_budget" --format markdown
 ```
 
 目录只覆盖显式来源与发布运行，不自动发现全库运行，不调用模型，也不改 README 或正式文件。topic 领域来自精确受审 record 的并集；未分类、分类缺口和 coverage 一起报告。`evidence_budget` 是读取／输出字节上限。
+
+dev46起，目录也支持既有的`--object`与`--compact-sources`。选择一个主题会自动带上必要记录；一次选定范围仍超限时，应缩小到所需主题或记录，保留程序要求的依赖及全部来源授权。默认调用不变；来源原文尚未完整读取与选定知识对象完整分别报告，不能把局部目录称为全库目录。当前证据构建上限为192000字节，不通过放大预算绕过。
 
 当前回答规则区分已核验的系统处理状态与来源历史自述。未提供 pending 只代表本次未提供相关事项，不能把每个资料缺口变成用户任务或宣称全库没有待确认项。正文 `[1]` 对应 citations 第一项；单源、多源及当前读取均在转换前限制引用行号长度，超长或越界坐标统一返回`invalid_citation`。程序也拒绝畸形、越界编号，但编号及坐标有效不能证明逐句语义支持，仍需质量核对。
 

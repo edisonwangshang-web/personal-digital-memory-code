@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_current_evidence as current_fixtures
+import test_selected_current_evidence as selected_fixtures
 from pdm.capture import capture
 from pdm.cli import main
 from pdm.contracts import CaptureError
@@ -277,6 +278,16 @@ class DomainCatalogCliTests(unittest.TestCase):
         build.assert_called_once_with(Path("/artificial"), ["source-a", "source-b"], ["run-a", "run-b"], domain="career", max_bytes=16000)
         self.assertEqual(json.loads(output.getvalue())["scope"], "selected")
 
+    def test_cli_forwards_explicit_objects_and_compact_sources_without_current_flag(self):
+        output = io.StringIO()
+        with patch("pdm.domain_catalog.build_domain_catalog", return_value={"scope": "selected"}) as build, contextlib.redirect_stdout(output):
+            status = main(["knowledge", "--repo", "/artificial", "--source", "source-a", "--run", "run-a",
+                           "--object", "memory/topics/artificial.md", "--object", "memory/records/extra.md",
+                           "--compact-sources", "--domain", "career", "--budget-bytes", "14000"])
+        self.assertEqual(status, 0)
+        build.assert_called_once_with(Path("/artificial"), ["source-a"], ["run-a"], domain="career",
+            max_bytes=14000, object_paths=["memory/topics/artificial.md", "memory/records/extra.md"], compact_sources=True)
+
     def test_cli_requires_explicit_scope_and_rejects_unknown_domain_without_echo(self):
         for args in (["knowledge", "--repo", "/artificial"],
                      ["knowledge", "--repo", "/artificial", "--source", "source-a", "--domain", "PRIVATE_INVALID_DOMAIN"],
@@ -289,6 +300,65 @@ class DomainCatalogCliTests(unittest.TestCase):
                 build.assert_not_called()
                 self.assertEqual(json.loads(error.getvalue())["error"], "invalid_arguments")
                 self.assertNotIn("PRIVATE_INVALID_DOMAIN", error.getvalue())
+
+
+class DomainCatalogSelectedReadingTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = selected_fixtures.SelectedCurrentEvidenceTests(methodName="runTest")
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.repo, self.paths, self.run = self.fixture.repo, self.fixture.paths, self.fixture.run
+
+    def test_bounded_topic_catalog_uses_existing_dependencies_and_truthful_coverage(self):
+        before = self.fixture.snapshot()
+        with patch("pdm.model_calls.call_model", side_effect=AssertionError("Catalog must never call a model")):
+            full = build_domain_catalog(self.repo, self.paths, [self.run], max_bytes=14000)
+            self.assertEqual(full["domains"]["learning"]["records"], [])
+            self.assertTrue(full["coverage"]["budget_exhausted"])
+            selected = build_domain_catalog(self.repo, self.paths, [self.run], max_bytes=14000,
+                object_paths=[self.fixture.topic], compact_sources=True)
+            self.assertEqual([entry["path"] for entry in selected["domains"]["learning"]["records"]],
+                             [self.fixture.record])
+            self.assertEqual([entry["path"] for entry in selected["domains"]["learning"]["topics"]],
+                             [self.fixture.topic])
+            self.assertEqual(selected["coverage"]["dependency_object_paths"], [self.fixture.record])
+            self.assertTrue(selected["coverage"]["object_selection_complete"])
+            self.assertFalse(selected["coverage"]["budget_exhausted"])
+            self.assertFalse(selected["catalog_complete_within_selected_scope"])
+            self.assertEqual(selected["coverage"]["not_needed_source_paths"], [self.paths[1]])
+            self.assertTrue(selected["coverage"]["not_selected_object_paths"])
+            for fmt in ("json", "markdown"):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    status = main(["knowledge", "--repo", str(self.repo), "--source", self.paths[0],
+                        "--source", self.paths[1], "--run", self.run, "--object", self.fixture.topic,
+                        "--compact-sources", "--budget-bytes", "14000", "--format", fmt])
+                self.assertEqual(status, 0)
+                if fmt == "json":
+                    self.assertEqual(json.loads(output.getvalue()), selected)
+                else:
+                    self.assertIn(self.fixture.topic, output.getvalue())
+                    self.assertIn('"object_selection_complete": true', output.getvalue())
+                self.assertNotIn("PRIVATE_UNSELECTED_SECOND_LINE", output.getvalue())
+                self.assertNotIn("UNRELATED_ARTIFICIAL_LONG_SOURCE", output.getvalue())
+        self.assertEqual(self.fixture.snapshot(), before)
+        self.assertEqual(self.fixture.fixture.roles, ["extract", "review"])
+
+    def test_catalog_keeps_existing_selection_authorization_and_input_guards(self):
+        before = self.fixture.snapshot()
+        for paths, objects, code in (
+            (self.paths, ["memory/records/missing-artificial.md"], "object_selection_unavailable"),
+            (self.paths[:1], [self.fixture.topic], "evidence_source_mismatch"),
+        ):
+            with self.subTest(code=code), self.assertRaises(CaptureError) as caught:
+                build_domain_catalog(self.repo, paths, [self.run], object_paths=objects, compact_sources=True)
+            self.assertEqual(caught.exception.code, code)
+        with patch("pdm.evidence.PipelineGit", side_effect=AssertionError("Invalid input must fail before reading")):
+            for options in ({"object_paths": []}, {"object_paths": ["../outside.md"]}, {"compact_sources": 1}):
+                with self.subTest(options=options), self.assertRaises(CaptureError) as caught:
+                    build_domain_catalog(self.repo, self.paths, [self.run], **options)
+                self.assertEqual(caught.exception.code, "invalid_object_selection")
+        self.assertEqual(self.fixture.snapshot(), before)
 
 
 if __name__ == "__main__":
