@@ -785,6 +785,12 @@ _V3_CONDITIONAL_APPLICABILITY = re.compile(
     r'(?:如果|若|或)[^。！？!?；;，,\n“”‘’「」`\"]{0,16}?'
     r'(?P<future>未来)[^。！？!?；;，,\n“”‘’「」`\"]{1,24}?'
     r'(?:时|情况下|条件下)(?:可|宜|建议)?(?:采用|使用|选择|适用|适合)')
+_V3_CONDITIONAL_LABEL = re.compile(r'(?:选择|适用)条件(?:是|为)?[：:]')
+_V3_CONDITIONAL_COMMA = re.compile(
+    r'(?:如果|若|或)[^。！？!?；;，,\n“”‘’「」`\"]{0,16}?'
+    r'(?P<future>未来)[^0-9。！？!?；;，,\n“”‘’「」`\"]{0,20}?'
+    r'(?:变化|增加|减少|增长|扩展|调整)[，,][ \t]*'
+    r'(?:可|宜|建议)?(?:采用|使用|选择|适用|适合)')
 _V3_INPUT_EVIDENCE_LIMIT = re.compile(
     r'(?P<current>当前|目前)(?:的)?(?:该|本|这份)?'
     r'(?:文字视图|文本|文字|笔记|记录|表格|表头|视图|材料)'
@@ -815,10 +821,12 @@ _V3_RELATION_SUBJECT = re.compile(
     r'(?:' + _V3_MATERIAL_REFERENCE + r'|' + _V3_RELATION_MATERIAL + r')$')
 _V3_DISCLAIMER_SUBJECT = re.compile(
     r'(?:' + _V3_MATERIAL_REFERENCE + r'|' + _V3_RELATION_MATERIAL + r'|这|那|此)$')
+_V3_BARE_INFERENCE_DENIAL = re.compile(r'不(?:能)?(?:断言|判断|推断|宣称|声称|认定)')
 _V3_DISCLAIMER = re.compile(_V3_MATERIAL_DISCLAIMER + r'|' +
     _V3_RELATION_DISCLAIMER + r'|'
     r'不(?:能)?(?:据此|由此)?(?:证明|代表)|不足以(?:证明|代表)|'
-    r'不(?:能)?(?:据此|由此)(?:断言|判断|推断|宣称|声称|认定)|'
+    r'不(?:能)?(?:据此|由此)(?:断言|判断|推断|宣称|声称|认定)|' +
+    _V3_BARE_INFERENCE_DENIAL.pattern + r'|'
     r'无法(?:据此|由此)?(?:证明|判断|确认|确定)|'
     r'不等于|不能(?:被)?(?:作为|用作|外推为)')
 _V3_MATERIAL_DENIAL = re.compile(r'(?:非|不是|否认|不可能|不能|无法|不)[ \t]{0,4}$')
@@ -853,6 +861,41 @@ _V3_CUTOFF_PERIOD = re.compile(
     r'截至[ \t]*(?:该|此|其)?[ \t]*(?P<period>Q[1-4]|H[12]|第?[一二三四1-4]季度|[上下]半年|(?:1[0-2]|0?[1-9])月)'
     r'(?![A-Za-z0-9])', re.I)
 _V3_TIME_SENTENCE_BOUNDARY = re.compile(r'[。！？!?\n]|\.(?:\s+|$)')
+_V3_UNKNOWN_TIME = re.compile(
+    r'未(?:完整|完全|充分|清楚)?(?:明确|说明|确定)'
+    r'(?:具体|准确|完整|两端|起止)?(?:日历)?(?:日期|时间|时点|期限)')
+
+
+def _v3_conditional_comma_spans(text):
+    spans = []
+    for match in _V3_CONDITIONAL_COMMA.finditer(text):
+        lead = _V3_TIME_SENTENCE_BOUNDARY.split(text[:match.start()])[-1]
+        # The heading scopes alternative method conditions within this sentence.
+        # Only the future modifier is metadata; other predicates stay visible.
+        if any(char in _V3_ALL_QUOTES.sub("", lead) for char in '“”‘’「」`\"\''):
+            continue
+        quotes = [quoted.span() for quoted in _V3_ALL_QUOTES.finditer(lead)]
+        for label in _V3_CONDITIONAL_LABEL.finditer(lead):
+            before = _V3_BOUNDARY.split(lead[:label.start()])[-1]
+            if (any(left <= label.start() and label.end() <= right for left, right in quotes)
+                    or _V3_MATERIAL_DENIAL.search(before) or re.match(
+                        r'\s*(?:并非|并不是|非|不是|否认|不可能|不能|无法)', before)):
+                continue
+            spans.append(match.span("future"))
+            break
+    return spans
+
+
+def _v3_unknown_time_word(text):
+    known = _UNKNOWN_TIME_WORDS.search(text)
+    if known:
+        return known
+    for match in _V3_UNKNOWN_TIME.finditer(text):
+        lead = _V3_BOUNDARY.split(text[:match.start()])[-1]
+        if not (_V3_MATERIAL_DENIAL.search(lead) or re.match(
+                r'\s*(?:并非|并不是|非|不是|否认|不可能|不能|无法)', lead)):
+            return match
+    return None
 
 
 def _v3_literal_spans(text):
@@ -863,6 +906,7 @@ def _v3_literal_spans(text):
     # Its contents and any current/future predicates remain independently checked.
     spans.extend(match.span("label") for match in _V3_MATERIAL_PRESENTATION.finditer(text))
     spans.extend(match.span("future") for match in _V3_CONDITIONAL_APPLICABILITY.finditer(text))
+    spans.extend(_v3_conditional_comma_spans(text))
     spans.extend(match.span("current") for match in _V3_INPUT_EVIDENCE_LIMIT.finditer(text))
     return spans
 
@@ -1053,9 +1097,11 @@ def _v3_parts(text):
         yield start, len(text), text[start:]
 
 
-def _v3_state_matches(part, prefix=""):
+def _v3_state_matches(part, prefix="", suffix=""):
     """Narrow metadiscourse exceptions, never a blanket negation exemption."""
     excluded = _v3_literal_spans(part)
+    excluded.extend((left - len(prefix), right - len(prefix))
+                    for left, right in _v3_conditional_comma_spans(prefix + part + suffix))
     # The cue governs only the rest of this clause. Earlier actual assertions
     # and later comma/adversative clauses retain their independent checks.
     quoted = [match.span() for match in _V3_ALL_QUOTES.finditer(part)]
@@ -1123,6 +1169,9 @@ def _v3_disclaimers(text, prefix=""):
             or re.match(r'\s*(?:并非|并不是|非|不是|否认|不可能|不能|无法)', lead))
     return [match for match in _V3_DISCLAIMER.finditer(text)
             if not denied(match)
+            and (not _V3_BARE_INFERENCE_DENIAL.fullmatch(match.group())
+                 or not _V3_BOUNDARY.split(text[:match.start()])[-1].strip()
+                 or _V3_DISCLAIMER_SUBJECT.fullmatch(_V3_BOUNDARY.split(text[:match.start()])[-1].strip()))
             and (not re.fullmatch(_V3_RELATION_DISCLAIMER, match.group())
                  or _v3_relation_is_evidential(text, match, prefix))]
 
@@ -1200,7 +1249,7 @@ def collect_temporal_diagnostics(output, context):
             if key in seen:
                 _error("quality_temporal_mismatch", "时间状态声明重复")
             seen.add(key)
-            state_parts = [(start, end, part, _v3_state_matches(part, statement[:start]))
+            state_parts = [(start, end, part, _v3_state_matches(part, statement[:start], statement[end:]))
                            for start, end, part in _v3_parts(statement)]
             state_parts = [row for row in state_parts if row[3]]
             nonassertive_time_words = bool(_V3_WORDS.search(statement)
@@ -1225,19 +1274,19 @@ def collect_temporal_diagnostics(output, context):
             if basis == "unknown":
                 for start, end, part, matches in state_parts:
                     question = re.search(r"是否|有无|能否|\bwhether\b", part, re.I)
-                    unknown = _UNKNOWN_TIME_WORDS.search(part)
+                    unknown = _v3_unknown_time_word(part)
                     states = list(re.finditer(r"已经|现已|正在|尚未|未导入|未提交|\balready\b|\bnot yet\b", part, re.I))
                     uncertain_question = bool(question and unknown and len(states) == 1
                         and question.start() < states[0].start()
                         and (unknown.start() < question.start() or unknown.start() > states[0].end()))
-                    if ((not _UNKNOWN_TIME_WORDS.search(part)
+                    if ((not _v3_unknown_time_word(part)
                             and not _v3_unknown_cutoff(statement, start, part, matches))
                             or _V3_FUTURE.search(part)
                             or states and not uncertain_question):
                         bad_span = (record["body"].index(statement) + start,
                                     record["body"].index(statement) + end)
                         _error("quality_temporal_mismatch", "未知声明不能覆盖同句或后句的实际当前／未来状态")
-                if not state_parts and not (_UNKNOWN_TIME_WORDS.search(statement)
+                if not state_parts and not (_v3_unknown_time_word(statement)
                         or nonassertive_time_words):
                     _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
             elif basis == "source_time":
@@ -1277,7 +1326,7 @@ def collect_temporal_diagnostics(output, context):
                      span=bad_span, field=field)
     for record_id, record in records.items():
         for start, end, part in _v3_parts(record["body"]):
-            matches = _v3_state_matches(part, record["body"][:start])
+            matches = _v3_state_matches(part, record["body"][:start], record["body"][end:])
             uncovered = [match for match in matches if not any(
                 left <= start + match.start() and start + match.end() <= right
                 for left, right in covered.get(record_id, []))]

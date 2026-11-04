@@ -231,6 +231,138 @@ def prepare_feedback(git, failed_attempt, model_call):
     return ref
 
 
+def _validation_target(diagnostic):
+    return (diagnostic["validated_output"] if diagnostic.get("validation_target") == "validated_output"
+            else diagnostic["response"]["output"])
+
+
+def _projection_scope(payload, versions):
+    """Bind diagnostics to the same inputs, independent of reservation HEAD."""
+    return _sha({"sources": payload["sources"], "related": payload["related"],
+                 "quality_context": payload["quality_context"],
+                 "controls_digest": payload["controls"]["digest"], "versions": versions,
+                 **({"rebuild_context": payload["rebuild_context"]} if "rebuild_context" in payload else {})})
+
+
+def check_program_projection(projection, counter):
+    """The v2 queue witness stores one fixed diagnostic view, never a draft."""
+    rows = counter.get("attempts", []) if counter is not None else []
+    if not rows:
+        if projection is not None:
+            _fail("program_refresh_proof_changed")
+        return
+    if (not isinstance(projection, dict)
+            or set(projection) != {"source_run_id", "draft_sha256", "context_sha256", "validation_error"}
+            or projection["source_run_id"] != rows[-1].get("run_id")
+            or any(not isinstance(projection[key], str) or _SHA.fullmatch(projection[key]) is None
+                   for key in ("draft_sha256", "context_sha256"))):
+        _fail("program_refresh_proof_changed")
+    error = projection["validation_error"]
+    if error is not None:
+        from .extraction_validation import MAX_ISSUES
+        details = error.get("details") if isinstance(error, dict) else None
+        if (not isinstance(error, dict) or set(error) != {"code", "message", "details"}
+                or not isinstance(error["code"], str) or not error["code"]
+                or not isinstance(error["message"], str)
+                or not isinstance(details, dict) or set(details) != {"issues", "issues_truncated"}
+                or not isinstance(details["issues"], list) or not 1 <= len(details["issues"]) <= MAX_ISSUES
+                or type(details["issues_truncated"]) is not bool
+                or any(not isinstance(issue, dict) or not isinstance(issue.get("code"), str)
+                       or not isinstance(issue.get("message"), str) for issue in details["issues"])
+                or error["code"] != details["issues"][0]["code"]
+                or error["message"] != details["issues"][0]["message"]):
+            _fail("program_refresh_proof_changed")
+
+
+def _current_validation_error(git, diagnostic, payload, versions, *, sources=None):
+    from .extraction_validation import collect_issues
+    from .pipeline import (_current_object_corrections, _load_sources, _objects,
+                           _updated_objects, _validate_domains)
+    if sources is None:
+        sources = _load_sources(git.repo, sorted(source["path"] for source in payload["sources"]),
+                                allow_versions=True, purpose="history", max_sources=256)
+    output = _validation_target(diagnostic)
+    first_error = None
+    try:
+        # The diagnostic walker deliberately does not replace normal parsing.
+        # Obtain today's first error, including ordinary envelope/identity
+        # checks, instead of reinstating yesterday's possibly fixed error.
+        objects = _objects(output, sources, diagnostic["validation_context"]["run_id"],
+                           diagnostic["response"], versions, None, batch=True,
+                           quality_context=payload["quality_context"], related=payload["related"],
+                           skill_bundle=payload["skill_bundle"])
+        _current_object_corrections(objects, sources)
+        operations = _updated_objects(git, objects, payload["related"], check_current=True,
+                                       rebuild_context=payload.get("rebuild_context"))
+        _validate_domains(objects, payload["related"], operations, versions)
+    except CaptureError as error:
+        first_error = error
+    current = collect_issues(output, sources, quality_context=payload["quality_context"],
+                             source_views=payload["sources"], related=payload["related"],
+                             versions=versions, check_current=True, first_error=first_error)
+    issues = current["issues"]
+    return ({"code": issues[0]["code"], "message": issues[0]["message"], "details": current}
+            if issues else None)
+
+
+def program_projection(git, state, failed_attempt, model_call):
+    """Recheck only current machine issues at an already bounded refresh.
+
+    The source response and Review remain immutable evidence. Storing this
+    small projection makes the next request reconstructible after later code
+    updates, without rerunning a later validator over an old request.
+    """
+    if failed_attempt is None:
+        return None
+    from .batching import project_batch_sources, project_batch_with_context
+    from .knowledge_quality import prepare_quality
+    from .pipeline import _load_sources, _related_context, control_guard
+    ref = prepare_feedback(git, failed_attempt, model_call)
+    if ref is None:
+        _fail("program_refresh_state_blocked")
+    _, diagnostic, _ = _checked_failure(git, ref)
+    plan, request = state["plan"], state["request"]
+    options = {"source_paths": request["allowed_source_paths"]}
+    required = request.get("required_context_sources", [])
+    projection = (project_batch_with_context(git.repo, plan, plan["batches"][0]["batch_id"],
+                    required_source_paths=required, **options) if required else
+                  project_batch_sources(git.repo, plan, plan["batches"][0]["batch_id"], **options))
+    if not projection["coverage"]["complete"]:
+        _fail("program_refresh_scope_changed")
+    views = projection["source_views"]
+    sources = _load_sources(git.repo, sorted(view["path"] for view in views),
+                            allow_versions=True, purpose="history", max_sources=256)
+    related = _related_context(git, state["related_runs"], sources, max_runs=256)
+    context = prepare_quality(sources, source_views=views, skill_bundle=request["skill_bundle"])
+    output = _validation_target(diagnostic)
+    payload = {"sources": views, "related": related, "skill_bundle": request["skill_bundle"],
+               "quality_context": context, "controls": control_guard(git)}
+    if request.get("rebuild_context") is not None:
+        payload["rebuild_context"] = deepcopy(request["rebuild_context"])
+    error = _current_validation_error(git, diagnostic, payload, plan["snapshot"]["versions"], sources=sources)
+    return {"source_run_id": ref["source_run_id"], "draft_sha256": _sha(output),
+            "context_sha256": _projection_scope(payload, plan["snapshot"]["versions"]),
+            "validation_error": error}
+
+
+def _apply_program_projection(git, view, diagnostic, state, payload, versions):
+    from .production import PROGRAM_REFRESH_V2
+    witness = state.get("program_refresh", {})
+    if witness.get("contract") != PROGRAM_REFRESH_V2:
+        return view
+    projection = witness["feedback_projection"]
+    if (not isinstance(projection, dict) or projection["source_run_id"] != view["source_run_id"]
+            or projection["draft_sha256"] != _sha(_validation_target(diagnostic))
+            or projection["context_sha256"] != _projection_scope(payload, versions)):
+        _fail("extraction_feedback_scope_changed")
+    # This view belongs to the immutable refresh transition. Later candidates
+    # (including this draft's own publication) can change live target paths;
+    # rechecking them here would corrupt history or deadlock an ordinary retry.
+    # The normal new extraction still faces every current candidate gate.
+    view["validation_error"] = deepcopy(projection["validation_error"])
+    return view
+
+
 def _program_predecessor_payload(git, ref, payload, versions, context):
     """Rebuild the original audited request through an explicit queue refresh.
 
@@ -305,6 +437,8 @@ def _program_predecessor_payload(git, ref, payload, versions, context):
             original["extraction_feedback"] = _model_view(prior_diagnostic, prior["run_id"], complete=True, stable=True)
             if prior_context["versions"] != context["versions"]:
                 original["extraction_feedback"].pop("repair_context", None)
+                _apply_program_projection(git, original["extraction_feedback"], prior_diagnostic, old,
+                                          original, context["versions"])
         if (context["scope_sha256"] != _scope(original)
                 or context["payload_sha256"] != hashlib.sha256(_raw(original)).hexdigest()
                 or context["request_binding"] != request_binding("extract", original)):
@@ -456,6 +590,9 @@ def load_feedback(git, ref, payload, versions):
                               and "quality_repair_context" not in payload))
     if "program_refresh" in ref:
         view.pop("repair_context", None)
+        from .production import program_refresh_material
+        _, current, _ = program_refresh_material(git, ref["program_refresh"])
+        _apply_program_projection(git, view, diagnostic, current, payload, versions)
     return view
 
 

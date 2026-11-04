@@ -178,6 +178,7 @@ def _save(git, path, value, kind, head):
 
 
 PROGRAM_REFRESH = "same-skill-program-refresh-v1"
+PROGRAM_REFRESH_V2 = "same-skill-program-refresh-v2"
 DOMAIN_POLICY_REFRESH = "same-sources-domain-policy-refresh-v1"
 # This one registered upgrade keeps the existing 16/14 prompts and Skill tree.
 # Historical proof must not start depending on future, unrelated Skill files.
@@ -238,7 +239,7 @@ def _domain_policy_versions(old, new, *, admission=False):
 
 
 def _refresh_versions(contract, old, new):
-    if contract == PROGRAM_REFRESH:
+    if contract in {PROGRAM_REFRESH, PROGRAM_REFRESH_V2}:
         return _program_versions(old, new)
     if contract == DOMAIN_POLICY_REFRESH:
         return _domain_policy_versions(old, new)
@@ -270,23 +271,48 @@ def _refresh_counter_snapshot(git, witness, revision):
     return None if raw is None else _load(raw, "production_attempts")
 
 
+def _check_program_refresh_birth(git, state, revision):
+    """Progress may retain a witness; a later edit cannot replace its birth."""
+    from .pipeline import _load
+    path, witness = _path(state["queue_id"]), state["program_refresh"]
+    birth = None
+    for commit in git.text("log", "--first-parent", "--format=%H", revision, "--", path).splitlines():
+        if not git.run("ls-tree", "-z", commit, "--", path):
+            break
+        saved = _load(git._storage_blob(commit, path), "production_queue")
+        if saved.get("program_refresh") != witness:
+            break
+        birth = commit
+    if birth is None:
+        _fail("program_refresh_proof_changed")
+    parents = git.text("rev-list", "--parents", "-n", "1", birth).split()[1:]
+    if (len(parents) != 1 or not git.run("ls-tree", "-z", parents[0], "--", path)
+            or git._storage_blob(parents[0], path) != git._storage_blob(
+                witness["previous_queue"]["commit_sha"], path)):
+        _fail("program_refresh_proof_changed")
+
+
 def _check_program_refresh_counter(git, state):
     """Validate every fixed hop and only append to original counter prefixes."""
     from .skill_support import resolve_skill_refs
     fields = {"contract", "previous_queue", "work_id", "counter_path", "counter_sha256"}
     seen = set()
+    revision = git.head()
     try:
         for _ in range(64):
             witness = state.get("program_refresh")
             if witness is None:
                 return
-            if not isinstance(witness, dict) or set(witness) != fields:
+            if (not isinstance(witness, dict)
+                    or set(witness) != fields | ({"feedback_projection"}
+                        if witness.get("contract") == PROGRAM_REFRESH_V2 else set())):
                 _fail("program_refresh_proof_changed")
             key = canonical(witness["previous_queue"])
             if key in seen:
                 _fail("program_refresh_proof_changed")
             seen.add(key)
             old = _refresh_snapshot(git, witness["previous_queue"])
+            _check_program_refresh_birth(git, state, revision)
             identity = _program_work_identity(old)
             work_id = _hash(identity)
             if (not _refresh_versions(witness.get("contract"), old["plan"]["snapshot"]["versions"],
@@ -301,6 +327,9 @@ def _check_program_refresh_counter(git, state):
                     or _program_work_identity(state) != identity):
                 _fail("program_refresh_proof_changed")
             fixed = _refresh_counter_snapshot(git, witness, witness["previous_queue"]["commit_sha"])
+            if witness["contract"] == PROGRAM_REFRESH_V2:
+                from .extraction_feedback import check_program_projection
+                check_program_projection(witness["feedback_projection"], fixed)
             current = _read(git, witness["counter_path"], "production_attempts")
             prefix = [] if fixed is None else fixed.get("attempts")
             rows = [] if current is None else current.get("attempts")
@@ -311,6 +340,7 @@ def _check_program_refresh_counter(git, state):
                 _fail("program_refresh_proof_changed")
             # Old queue progress can legitimately follow its own refresh. Check
             # that hop's fixed transition and prefix, not a guessed old status.
+            revision = witness["previous_queue"]["commit_sha"]
             state = old
         _fail("program_refresh_proof_changed")
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -325,12 +355,21 @@ def program_refresh_material(git, ref):
         state = _refresh_snapshot(git, ref)
         witness = state.get("program_refresh")
         fields = {"contract", "previous_queue", "work_id", "counter_path", "counter_sha256"}
-        if (not isinstance(witness, dict) or set(witness) != fields
-                or witness["contract"] not in {PROGRAM_REFRESH, DOMAIN_POLICY_REFRESH}
+        if (not isinstance(witness, dict)
+                or set(witness) != fields | ({"feedback_projection"}
+                    if witness.get("contract") == PROGRAM_REFRESH_V2 else set())
+                or witness["contract"] not in {PROGRAM_REFRESH, PROGRAM_REFRESH_V2, DOMAIN_POLICY_REFRESH}
                 or witness["previous_queue"].get("path") != ref["path"]):
             _fail("program_refresh_proof_changed")
         old = _refresh_snapshot(git, witness["previous_queue"])
         git.run("merge-base", "--is-ancestor", witness["previous_queue"]["commit_sha"], ref["commit_sha"])
+        parents = git.text("rev-list", "--parents", "-n", "1", ref["commit_sha"]).split()[1:]
+        if (len(parents) != 1 or not git.run("ls-tree", "-z", parents[0], "--", ref["path"])
+                or git._storage_blob(parents[0], ref["path"]) != git._storage_blob(
+                    witness["previous_queue"]["commit_sha"], ref["path"])):
+            # A new v2 witness cannot discard its projection later by merely
+            # declaring the old format. Genuine v1 births remain readable.
+            _fail("program_refresh_proof_changed")
         expected = deepcopy(old)
         expected.update(plan=state["plan"], revision=old["revision"] + 1, program_refresh=witness)
         if state != expected:
@@ -354,6 +393,9 @@ def program_refresh_material(git, ref):
         attempts = None if raw is None else _load(raw, "production_attempts")
         if attempts is not None and attempts.get("identity") != identity:
             _fail("program_refresh_proof_changed")
+        if witness["contract"] == PROGRAM_REFRESH_V2:
+            from .extraction_feedback import check_program_projection
+            check_program_projection(witness["feedback_projection"], attempts)
         return old, state, attempts
     except (KeyError, TypeError, ValueError, AttributeError):
         _fail("program_refresh_proof_changed")
@@ -378,7 +420,7 @@ def _refresh_program(repo, git, path, state, model_call):
         return {"queue_id": state["queue_id"], "status": state["status"], "state_path": path,
                 "plan_id": state["plan"]["plan_id"], "head": git.head(), "reused": True, "program_refreshed": False}
     old_versions = state["plan"]["snapshot"]["versions"]
-    contract = (PROGRAM_REFRESH if _program_versions(old_versions, versions)
+    contract = (PROGRAM_REFRESH_V2 if _program_versions(old_versions, versions)
                 else DOMAIN_POLICY_REFRESH if _domain_policy_versions(old_versions, versions, admission=True) else None)
     if contract is None:
         _fail("program_refresh_rules_changed")
@@ -442,6 +484,10 @@ def _refresh_program(repo, git, path, state, model_call):
                        program_refresh={"contract": contract, "previous_queue": previous,
                            "work_id": work_id, "counter_path": counter_path,
                            "counter_sha256": None if raw is None else "sha256-" + hashlib.sha256(raw).hexdigest()})
+        if contract == PROGRAM_REFRESH_V2:
+            from .extraction_feedback import program_projection
+            updated["program_refresh"]["feedback_projection"] = program_projection(
+                git, updated, rows[-1] if rows else None, model_call)
         _refresh_counter_snapshot(git, updated["program_refresh"], previous["commit_sha"])
         with git.lock():
             git.check(head)

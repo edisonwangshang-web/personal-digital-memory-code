@@ -357,6 +357,110 @@ class TemporalSourceAttributionTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.valid(body)
 
+    def test_labeled_alternative_conditions_can_use_a_method_after_a_comma(self):
+        for body in (
+            "训练方案选择条件是：负荷增加或未来需求变化，采用分段训练。",
+            "工具选择条件为：单项任务使用基础方法；多项任务或未来协作扩展，使用组合工具。",
+            "练习方法适用条件：多主题或未来复习范围调整，选择分层练习。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body)
+
+    def test_labeled_conditions_preserve_dates_actual_states_and_other_clauses(self):
+        for body in (
+            "多项任务或未来协作扩展，使用组合工具。",
+            "工具选择条件是：未来将会采用新工具。",
+            "训练方案选择条件是：未来暑假，采用训练方案。",
+            "练习方法适用条件是：未来2028年5月，使用新教材。",
+            "练习方法适用条件是：多主题或未来2028年范围调整，选择分层练习。",
+            "‘选择条件是’为标签；多项任务或未来协作扩展，使用组合工具。",
+            "“选择条件是：作为标签；多项任务或未来协作扩展，使用组合工具。",
+            "”选择条件是：作为标签“；多项任务或未来协作扩展，使用组合工具。",
+            "不是选择条件是：多项任务或未来协作扩展，使用组合工具。",
+            "并非工具选择条件是：多项任务或未来协作扩展，使用组合工具。",
+            "选择条件是：多项任务或未来已经上线的系统扩展，使用组合工具。",
+            "选择条件是：多项任务或未来协作扩展，使用当前已经发布的工具。",
+            "选择条件是：多项任务或未来协作扩展，使用工具并经过跨部门讨论及多项技术验证后系统已经上线。",
+            "选择条件是：多主题或未来复习范围调整，选择分层练习。用户明天毕业。",
+            "选择条件是：多项任务。多项任务或未来协作扩展，使用组合工具。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_bare_negative_inference_cues_are_nonassertive_across_three_domains(self):
+        for verb in ("断言", "判断", "推断", "宣称", "声称", "认定"):
+            for state in ("用户已经康复", "系统当前已经上线", "用户将来掌握课程"):
+                for lead in ("", "材料", "这些是资料说明，"):
+                    with self.subTest(verb=verb, state=state, lead=lead):
+                        self.valid(lead + "不" + verb + state + "。")
+                        self.valid(lead + "不" + verb + state + "。", basis="unknown")
+
+    def test_bare_inference_denials_keep_subject_quote_and_negation_boundaries(self):
+        for body in (
+            "用户不断言已经康复。",
+            "并非用户不断言已经康复。",
+            "不是系统不声称当前已经上线。",
+            "不能不断言已经康复。",
+            "并非材料不断言用户已经掌握课程。",
+            "用户当前已经康复的报告不断言恢复程度。",
+            "‘不断言’已经加入词典。",
+            "不认定已经完成可是系统已经上线。",
+            "不断言已经完成，同时经过跨部门讨论及多项技术验证后系统已经上线。",
+            "当前已经掌握课程，不断言水平提高。",
+            "不断言已经康复，用户将来完成训练。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_incomplete_cognitive_time_descriptions_explicitly_preserve_unknowns(self):
+        for body in (
+            "报告只列训练间隔9日，但未完整明确两端日期。",
+            "材料介绍测试安排，未充分说明具体时间。",
+            "课程说明列出练习顺序，未完全确定起止日期。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body, basis="unknown")
+
+    def test_incomplete_time_wording_does_not_cover_states_or_denied_gaps(self):
+        for body in (
+            "材料未完整明确训练安排。",
+            "材料尚未完成。",
+            "并非未完整明确两端日期。",
+            "不是材料未充分说明具体时间。",
+            "未完整明确两端日期，用户已经康复。",
+            "未充分说明具体时间而系统当前已经上线。",
+            "未完全确定起止日期，用户将来完成课程。",
+            "‘未完整明确两端日期’已经加入词表。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="unknown")
+
+    def test_new_expressions_do_not_bypass_refs_calendars_or_system_facts(self):
+        bodies = (
+            "工具选择条件是：多项任务或未来协作扩展，使用组合工具。",
+            "不断言系统已经上线。",
+            "未完整明确两端日期。",
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.invalid(body, "quality_current_state_unverified", basis="current_state")
+                self.invalid("报告按2027 H1列示3项结果；" + body,
+                    basis="source_time", original="人工报告：2027 H2。")
+                output, context = self.material(body, basis="unknown")
+                output["quality"]["temporal_claims"][0]["source_refs"][0]["quote"] = "无关人工材料。"
+                with self.assertRaises(CaptureError) as caught:
+                    validate_quality_output(output, context)
+                self.assertEqual("quality_source_reference_mismatch", caught.exception.code)
+
+    def test_new_expressions_remain_v3_only(self):
+        for extract, review in (("knowledge-extract@11", "knowledge-review@9"),
+                                ("knowledge-extract@15", "knowledge-review@13")):
+            bundle = resolve_skill_refs(extract, review)
+            with self.subTest(extract=extract):
+                self.valid("选择条件是：多项任务或未来协作扩展，使用组合工具。", bundle=bundle)
+                self.invalid("不断言用户已经掌握课程。", "quality_temporal_missing", bundle=bundle)
+                self.invalid("未完整明确两端日期。", basis="unknown", bundle=bundle)
+
     def test_conditional_or_evidence_frames_do_not_erase_actual_states(self):
         for body in (
             "未来部署将会采用工具。",
