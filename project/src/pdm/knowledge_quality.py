@@ -768,15 +768,29 @@ def _temporal_details(output, field_path, *, claim_index=None, record_id=None,
     return details
 
 
-_V3_BOUNDARY = re.compile(r"[。！？!?；;，,\n]|\.(?:\s+|$)|但是|然而|不过|并且|但|而|"
-    r"(?:且|并|同时)(?=[^。！？!?；;，,\n]{0,16}(?:当前|目前|现在|现已|已经|尚未|明天|未来|将会))")
-_V3_FUTURE = re.compile(r"即将|明天|后天|未来|下(?:周|月|年)|将会|将要|\bwill\b|\btomorrow\b", re.I)
+_V3_FUTURE = re.compile(r"即将|明天|后天|未来|将来|下(?:周|月|年)|将会|将要|\bwill\b|\btomorrow\b", re.I)
 _V3_WORDS = re.compile(_TEMPORAL_WORDS.pattern + r"|现在|正在|" + _V3_FUTURE.pattern, re.I)
+_V3_BOUNDARY = re.compile(r"[。！？!?；;，,\n]|\.(?:\s+|$)|但是|然而|不过|并且|但|而|"
+    r"(?:且|并|同时)(?=[^。！？!?；;，,\n]*(?:" + _V3_WORDS.pattern + r"))", re.I)
 _V3_LITERAL = re.compile(
-    r'(?:字段|列|属性|枚举|标签|标题|变量)(?:的)?(?:名称|名|值)?\s*(?:为|是|叫|称为)?\s*[:：]?\s*'
-    r'(?P<prefix>“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
-    r'|(?P<suffix>“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
-    r'\s*(?:是|为)?\s*(?:字段|列名|属性|枚举|标签|标题|变量)')
+    r'(?:字段|列|栏目|栏|属性|枚举|标签|标题|变量)(?:的)?(?:名称|名|值)?\s*(?:为|是|叫|称为)?\s*[:：]?\s*'
+    r'(?P<prefix>“[^”\n]{1,80}”|‘[^’\n]{1,80}’|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
+    r'|(?P<suffix>“[^”\n]{1,80}”|‘[^’\n]{1,80}’|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
+    r'\s*(?:是|为)?\s*(?:字段|列名|栏目|栏|属性|枚举|标签|标题|变量)')
+_V3_MATERIAL_PRESENTATION = re.compile(
+    r'(?:第[0-9]+页|[该此]页|(?:[本该此]|这份)?(?:来源|原文|文档|报告|材料|分享|说明))'
+    r'(?:以|用)(?P<label>未来(?:规划|计划|展望))'
+    r'(?=介绍|展示|说明|描述|讨论|呈现)')
+_V3_CONDITIONAL_APPLICABILITY = re.compile(
+    r'(?:如果|若|或)[^。！？!?；;，,\n“”‘’「」`\"]{0,16}?'
+    r'(?P<future>未来)[^。！？!?；;，,\n“”‘’「」`\"]{1,24}?'
+    r'(?:时|情况下|条件下)(?:可|宜|建议)?(?:采用|使用|选择|适用|适合)')
+_V3_INPUT_EVIDENCE_LIMIT = re.compile(
+    r'(?P<current>当前|目前)(?:的)?(?:该|本|这份)?'
+    r'(?:文字视图|文本|文字|笔记|记录|表格|表头|视图|材料)'
+    r'(?:未保留|未提供|缺少|不含|不足以|无法支持)'
+    r'[^。！？!?；;，,\n“”‘’「」`\"]{0,48}?'
+    r'(?:确认|核验|判断|还原|重建|验证|证据|信息|上下文|版面|关系)')
 _V3_MATERIAL_REFERENCE = (
     r'(?:(?:这些|那些|这|那|该|此)(?:一)?(?:段|份|则|条|篇|批|组|张|页)?|'
     r'(?:上述|前述|本次|此次|该次))?'
@@ -786,14 +800,28 @@ _V3_MATERIAL_DISCLAIMER = (
     r'(?<![非不])(?<!不是)(?:不能|无法)(?:仅|只|单)?(?:从|由|根据|依据|凭)[ \t]{0,4}'
     + _V3_MATERIAL_REFERENCE + r'[ \t]{0,4}(?:来)?'
     r'(?:判断|推断|断言|证明|宣称|声称|认定|确认|确定)')
+_V3_RELATION_MATERIAL = (
+    r'(?:(?:这些|那些|这|那|该|此|本)(?:份|段|项)?|上述|前述)?'
+    r'(?:要求|用途|目录|方案|规划|观点|判断|诊断|建议|阶段展示|展示)')
+_V3_COMPARISON_MATERIAL = (
+    r'(?:' + _V3_MATERIAL_REFERENCE + r'|' + _V3_RELATION_MATERIAL +
+    r'|未来(?:阶段)?(?:展示|规划|方案|计划))')
+_V3_RELATION_DISCLAIMER = (
+    r'(?:不构成|不是|不(?:能)?(?:据此|由此)?表示|'
+    r'(?:不能|无法)(?:被)?(?:视为|看作|认作|等同于|认定为|(?:转写|转述|改写|表述)(?:为|成))|'
+    r'(?:不能|无法)把' + _V3_COMPARISON_MATERIAL +
+    r'(?:直接|就)?(?:视为|看作|认作|等同于|认定为|(?:转写|转述|改写|表述)(?:为|成)))')
+_V3_RELATION_SUBJECT = re.compile(
+    r'(?:' + _V3_MATERIAL_REFERENCE + r'|' + _V3_RELATION_MATERIAL + r')$')
+_V3_DISCLAIMER_SUBJECT = re.compile(
+    r'(?:' + _V3_MATERIAL_REFERENCE + r'|' + _V3_RELATION_MATERIAL + r'|这|那|此)$')
 _V3_DISCLAIMER = re.compile(_V3_MATERIAL_DISCLAIMER + r'|' +
+    _V3_RELATION_DISCLAIMER + r'|'
     r'不(?:能)?(?:据此|由此)?(?:证明|代表)|不足以(?:证明|代表)|'
-    r'不能(?:据此|由此)(?:断言|判断|推断)|'
-    r'(?<![非不])(?<!不是)不能(?:据此|由此)(?:宣称|声称|认定)|'
+    r'不(?:能)?(?:据此|由此)(?:断言|判断|推断|宣称|声称|认定)|'
     r'无法(?:据此|由此)?(?:证明|判断|确认|确定)|'
-    r'不等于|不能(?:被)?(?:作为|用作|外推为)|'
-    r'(?:不构成|不能(?:被)?(?:作为|用作))[^。！？!?；;，,\n]*?(?:证据|依据)')
-_V3_MATERIAL_DENIAL = re.compile(r'(?:非|不是|否认|不可能)[ \t]{0,4}$')
+    r'不等于|不能(?:被)?(?:作为|用作|外推为)')
+_V3_MATERIAL_DENIAL = re.compile(r'(?:非|不是|否认|不可能|不能|无法|不)[ \t]{0,4}$')
 _V3_MATERIAL_CLAUSE_END = re.compile(r'可是|却')
 _V3_SOURCE_QUALIFIER = re.compile(
     r'当时|导出时|来源时间|(?:该次|当次|那次|上次|前次)(?:导出|采集|读取)|'
@@ -808,7 +836,14 @@ _V3_SOURCE_PERIOD = re.compile(
     r'(?:该|此|其)(?:页|图)?(?:所述|展示|显示|描述)(?:的)?(?:时间|时期|期间|区间)|'
     r'(?:来源|原文|文档|报告|材料|资料|分享|讲者)(?:的)?(?:展示|所述|描述)(?:的)?(?:时期|期间|区间)')
 _V3_SOURCE_YEAR = re.compile(r'(?<![0-9])([0-9]{4})[ \t]*年')
-_V3_QUOTED_LABEL = r'(?:“[^”\n]{1,80}”|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
+_V3_CALENDAR_PERIOD = re.compile(
+    r'(?<![A-Za-z0-9])(?:([0-9]{4})[ \t]*(?:年[ \t]*)?)?([HQ])[ \t]*'
+    r'([0-9]+(?:\.[0-9]+)?)(?![A-Za-z0-9])', re.I)
+_V3_CALENDAR_MONTH = re.compile(
+    r'(?<![0-9])([0-9]{4})[ \t]*年[ \t]*([0-9]+)[ \t]*月(?![ \t]*[0-9]+[ \t]*日)')
+_V3_NUMERIC_DATE = re.compile(
+    r'(?<![A-Za-z0-9./])[0-9]{4,}(?:[./]+[0-9]+){2,}(?![A-Za-z0-9./])')
+_V3_QUOTED_LABEL = r'(?:“[^”\n]{1,80}”|‘[^’\n]{1,80}’|「[^」\n]{1,80}」|`[^`\n]{1,80}`|"[^"\n]{1,80}")'
 _V3_ALL_QUOTES = re.compile(r"""“[^”\n]*”|「[^」\n]*」|`[^`\n]*`|"[^"\n]*"|‘[^’\n]*’|'[^'\n]*'""")
 _V3_HISTORICAL_LABELS = re.compile(
     r'(?P<labels>' + _V3_QUOTED_LABEL + r'(?:\s*(?:、|和|与|及)?\s*' + _V3_QUOTED_LABEL + r')*)'
@@ -824,6 +859,11 @@ def _v3_literal_spans(text):
     spans = [match.span(name) for match in _V3_LITERAL.finditer(text)
              for name in ("prefix", "suffix") if match.group(name) is not None]
     spans.extend(match.span("labels") for match in _V3_HISTORICAL_LABELS.finditer(text))
+    # The source presents a named plan; only that nominal label is metadata.
+    # Its contents and any current/future predicates remain independently checked.
+    spans.extend(match.span("label") for match in _V3_MATERIAL_PRESENTATION.finditer(text))
+    spans.extend(match.span("future") for match in _V3_CONDITIONAL_APPLICABILITY.finditer(text))
+    spans.extend(match.span("current") for match in _V3_INPUT_EVIDENCE_LIMIT.finditer(text))
     return spans
 
 
@@ -833,11 +873,138 @@ def _v3_source_period_qualified(text):
 
 def _v3_source_year_qualified(text, refs):
     """A literal cited year may date a reported event, never a current claim."""
-    if not _V3_SOURCE_ATTRIBUTION.search(text) or _CURRENT_TIME_WORDS.search(text):
+    if (not _V3_SOURCE_ATTRIBUTION.search(text) or _CURRENT_TIME_WORDS.search(text)
+            or re.search(r'[0-9]+[ \t]*月', text)):
         return False
     stated = set(_V3_SOURCE_YEAR.findall(text))
     quoted = {year for ref in refs for year in _V3_SOURCE_YEAR.findall(ref["quote"])}
     return bool(stated and stated <= quoted)
+
+
+def _v3_source_calendar_period_qualified(text, refs):
+    """Match the complete cited year/half/quarter, never just its year."""
+    if _CURRENT_TIME_WORDS.search(text) or _V3_FUTURE.search(text):
+        return False
+    def periods(value, *, strict=False):
+        matches = _V3_CALENDAR_PERIOD.findall(value)
+        month_matches = list(_V3_CALENDAR_MONTH.finditer(value))
+        months = [match.groups() for match in month_matches]
+        def valid(year, kind, number):
+            return len(year) == 4 and 1 <= int(year) <= 9999 and number in (("1", "2") if kind.upper() == "H"
+                                           else ("1", "2", "3", "4"))
+        def valid_month(year, month):
+            return len(year) == 4 and 1 <= int(year) <= 9999 and len(month) <= 2 and 1 <= int(month) <= 12
+        if strict and (any(not valid(*match) for match in matches)
+                       or any(not valid_month(year, month) for year, month in months)):
+            return None
+        if strict and months and any(not any(left.start() <= token.start() and token.end() <= left.end()
+                for left in month_matches) for token in re.finditer(r'(?<![0-9])[0-9]+[ \t]*月', value)):
+            return None
+        return ({(year, kind.upper(), number) for year, kind, number in matches
+                 if valid(year, kind, number)}
+                | {(year, "M", str(int(month))) for year, month in months if valid_month(year, month)})
+    stated = periods(text, strict=True)
+    quoted = set()
+    for ref in refs:
+        quoted.update(periods(ref["quote"]) or ())
+    return bool(stated and stated <= quoted)
+
+
+def _v3_source_numeric_date_qualified(text, refs):
+    """Normalize complete Gregorian dates only in temporary v3 comparisons."""
+    if (not _V3_SOURCE_ATTRIBUTION.search(text)
+            or _CURRENT_TIME_WORDS.search(text) or _V3_FUTURE.search(text)):
+        return False
+    def normalize(value):
+        def replace(match):
+            pieces = re.split(r'[./]', match.group())
+            separators = re.findall(r'[./]+', match.group())
+            if len(pieces) != 3 or separators not in ([".", "."], ["/", "/"]):
+                raise ValueError("ambiguous numeric date")
+            year, month, day = pieces
+            if len(year) != 4 or len(month) > 2 or len(day) > 2:
+                raise ValueError("incomplete numeric date")
+            return date(int(year), int(month), int(day)).isoformat()
+        return _V3_NUMERIC_DATE.sub(replace, value)
+    try:
+        normalized = normalize(text)
+        if normalized == text:
+            return False
+        normalized_refs = [dict(ref, quote=normalize(ref["quote"])) for ref in refs]
+    except ValueError:
+        return False
+    return _source_date_qualified(normalized, normalized_refs)
+
+
+def _v3_explicit_calendars_match(text, refs):
+    """Every actual calendar precision must stand on its own cited evidence.
+
+    A source-time phrase, weaker year, another correct date or nonassertive
+    aside cannot repair an incorrect explicit period/date elsewhere.
+    """
+    def number(value, maximum, *, digits=4):
+        if not value.isdigit() or len(value) > digits or not 1 <= int(value) <= maximum:
+            raise ValueError("invalid calendar component")
+        return int(value)
+    def calendars(value, *, strict, literals=()):
+        occupied, found = list(literals), set()
+        patterns = (("numeric", _V3_NUMERIC_DATE), ("iso", _EXPLICIT_DATE),
+                    ("day", _CHINESE_DATE), ("period", _V3_CALENDAR_PERIOD),
+                    ("month", _V3_CALENDAR_MONTH), ("year", _V3_SOURCE_YEAR))
+        for kind, pattern in patterns:
+            for match in pattern.finditer(value):
+                if any(left <= match.start() and match.end() <= right for left, right in occupied):
+                    continue
+                occupied.append(match.span())
+                try:
+                    if kind == "numeric":
+                        pieces = re.split(r'[./]', match.group())
+                        separators = re.findall(r'[./]+', match.group())
+                        if len(pieces) != 3 or separators not in ([".", "."], ["/", "/"]):
+                            raise ValueError("ambiguous numeric date")
+                        year, month, day = pieces
+                        current = date(number(year, 9999), number(month, 12, digits=2), number(day, 31, digits=2))
+                        found.add(("D", current.year, current.month, current.day))
+                    elif kind == "iso":
+                        current = date.fromisoformat(match.group())
+                        found.add(("D", current.year, current.month, current.day))
+                    elif kind == "day":
+                        year, month, day = match.groups()
+                        month, day = number(month, 12, digits=2), number(day, 31, digits=2)
+                        current = date(number(year, 9999) if year else 2000, month, day)
+                        found.add(("D", current.year, month, day) if year else ("MD", month, day))
+                    elif kind == "period":
+                        year, unit, amount = match.groups()
+                        found.add((unit.upper(), number(year, 9999),
+                                   number(amount, 2 if unit.upper() == "H" else 4, digits=1)))
+                    elif kind == "month":
+                        year, month = match.groups()
+                        found.add(("M", number(year, 9999), number(month, 12, digits=2)))
+                    else:
+                        found.add(("Y", number(match[1], 9999)))
+                except (ValueError, AttributeError, TypeError):
+                    if strict:
+                        raise ValueError("invalid explicit calendar")
+        return found
+    try:
+        stated = calendars(text, strict=True, literals=_v3_literal_spans(text))
+    except ValueError:
+        return False
+    quoted = set().union(*(calendars(ref["quote"], strict=False) for ref in refs))
+    # A year-only statement keeps its established lower-precision reading.
+    # An explicit day or month in the statement never falls back to that year.
+    years = {item[1] for item in quoted if item[0] != "MD"}
+    for item in stated:
+        if item[0] == "Y":
+            if item[1] not in years:
+                return False
+        elif item[0] == "MD":
+            dates = {value for value in quoted if value[0] == "D" and value[2:] == item[1:]}
+            if len(dates) != 1 and item not in quoted:
+                return False
+        elif item not in quoted:
+            return False
+    return True
 
 
 def _v3_unknown_cutoff(statement, start, part, matches):
@@ -886,28 +1053,99 @@ def _v3_parts(text):
         yield start, len(text), text[start:]
 
 
-def _v3_state_matches(part):
+def _v3_state_matches(part, prefix=""):
     """Narrow metadiscourse exceptions, never a blanket negation exemption."""
     excluded = _v3_literal_spans(part)
     # The cue governs only the rest of this clause. Earlier actual assertions
     # and later comma/adversative clauses retain their independent checks.
     quoted = [match.span() for match in _V3_ALL_QUOTES.finditer(part)]
-    for match in _v3_disclaimers(part):
+    for match in _v3_disclaimers(part, prefix):
         quote_end = next((end for start, end in quoted
                           if start <= match.start() and match.end() <= end), len(part))
-        if re.fullmatch(_V3_MATERIAL_DISCLAIMER, match.group()):
-            boundary = _V3_MATERIAL_CLAUSE_END.search(part, match.end(), quote_end)
-            if boundary is not None:
-                quote_end = boundary.start()
+        boundary = _V3_MATERIAL_CLAUSE_END.search(part, match.end(), quote_end)
+        if boundary is not None:
+            quote_end = boundary.start()
         excluded.append((match.start(), quote_end))
     return [match for match in _V3_WORDS.finditer(part)
             if not any(start <= match.start() and match.end() <= end for start, end in excluded)]
 
 
-def _v3_disclaimers(text):
+def _v3_relation_is_evidential(text, match, prefix):
+    if match.group().startswith(("不能把", "无法把")):
+        return True  # The grammar admits only a bounded, nonpredicative material NP.
+    before = text[:match.start()].rstrip()
+    subject = _V3_BOUNDARY.split(before)[-1].strip()
+    tail = _V3_BOUNDARY.split(text[match.end():])[0].rstrip()
+    proof = re.search(r'(?:的)?(?:证明|证据|依据|核验|核实|验证|保证)(?:[”」`\"])?$', tail)
+    state_reference = re.fullmatch(r'(?:用户|企业|个人|组织|团队|系统)'
+        r'(?:或(?:用户|企业|个人|组织|团队|系统))?(?:的)?(?:当前|目前|现在)(?:实际)?状态', tail)
+    if match.group() == "不是" and (not (proof or state_reference) or any(word.group() not in
+            {"当前", "目前", "现在", "未来", "将来"} for word in _V3_WORDS.finditer(tail))):
+        return False
+    if _V3_RELATION_SUBJECT.search(subject):
+        return True
+    if match.group() == "不构成" and proof:
+        return True
+    if proof and tail.endswith("保证") and not any(word.group() not in
+            {"当前", "目前", "现在", "未来", "将来"} for word in _V3_WORDS.finditer(tail)):
+        return True
+    if subject in ("也", "亦") and re.search(r'[，,][ \t]*$', prefix):
+        previous = _V3_BOUNDARY.split(prefix.rstrip(" \t，,"))[-1].strip()
+        # Coordination can omit the same material subject only after a valid
+        # evidential clause, never after an arbitrary negative or quoted cue.
+        paired = all(previous.count(left) == previous.count(right)
+                     for left, right in (("“", "”"), ("‘", "’"), ("「", "」")))
+        paired = paired and all(previous.count(quote) % 2 == 0 for quote in ('"', "'", '`'))
+        antecedents = [cue for cue in _v3_disclaimers(previous)
+            if re.fullmatch(_V3_MATERIAL_DISCLAIMER, cue.group())
+            or _v3_relation_is_evidential(previous, cue, "")]
+        return bool(paired and antecedents and not _v3_state_matches(previous))
+    if subject:
+        return False
+    # An omitted subject may refer to the immediately preceding material
+    # classification, never to an actual person's or system's state.
+    previous = _V3_BOUNDARY.split((prefix + before).rstrip(" \t，,"))[-1].strip()
+    return bool(re.fullmatch(r'(?:这|该|此|上述|前述)(?:要求|内容|观点|判断)?'
+        r'(?:是|属于)[^。！？!?；;，,\n]{1,32}', previous)
+        and _V3_RELATION_SUBJECT.search(previous) and not _V3_WORDS.search(previous))
+
+
+def _v3_disclaimers(text, prefix=""):
+    def denied(match):
+        before = text[:match.start()]
+        if _V3_MATERIAL_DENIAL.search(before):
+            return True
+        subject = _V3_DISCLAIMER_SUBJECT.search(before)
+        if subject is None:
+            return False
+        lead = _V3_BOUNDARY.split(before[:subject.start()])[-1]
+        return bool(_V3_MATERIAL_DENIAL.search(lead)
+            or re.match(r'\s*(?:并非|并不是|非|不是|否认|不可能|不能|无法)', lead))
     return [match for match in _V3_DISCLAIMER.finditer(text)
-            if not (re.fullmatch(_V3_MATERIAL_DISCLAIMER, match.group())
-                    and _V3_MATERIAL_DENIAL.search(text[:match.start()]))]
+            if not denied(match)
+            and (not re.fullmatch(_V3_RELATION_DISCLAIMER, match.group())
+                 or _v3_relation_is_evidential(text, match, prefix))]
+
+
+def _v3_only_nonassertive(statement):
+    """An incidental label or evidence aside does not date other content."""
+    for start, _, part in _v3_parts(statement):
+        part = part.strip()
+        if not part:
+            continue
+        if _V3_LITERAL.fullmatch(part):
+            continue
+        cues = _v3_disclaimers(part, statement[:start])
+        if cues:
+            subject = part[:cues[0].start()].strip()
+            if not subject or subject in ("也", "亦") or _V3_RELATION_SUBJECT.search(subject):
+                continue
+        if (re.fullmatch(r'(?:这|该|此|上述|前述)(?:要求|内容|观点|判断)?'
+                r'(?:是|属于)[^。！？!?；;，,\n]{1,32}', part)
+                and _V3_RELATION_SUBJECT.search(part) and not _V3_WORDS.search(part)):
+            continue
+        return False
+    return True
 
 
 def _v3_source_prefix(statement, start):
@@ -962,9 +1200,11 @@ def collect_temporal_diagnostics(output, context):
             if key in seen:
                 _error("quality_temporal_mismatch", "时间状态声明重复")
             seen.add(key)
-            state_parts = [(start, end, part, _v3_state_matches(part))
+            state_parts = [(start, end, part, _v3_state_matches(part, statement[:start]))
                            for start, end, part in _v3_parts(statement)]
             state_parts = [row for row in state_parts if row[3]]
+            nonassertive_time_words = bool(_V3_WORDS.search(statement)
+                and (_v3_disclaimers(statement) or _v3_literal_spans(statement)))
             basis = claim["basis"]
             if basis == "current_state":
                 field = "system_fact_id"
@@ -998,9 +1238,11 @@ def collect_temporal_diagnostics(output, context):
                                     record["body"].index(statement) + end)
                         _error("quality_temporal_mismatch", "未知声明不能覆盖同句或后句的实际当前／未来状态")
                 if not state_parts and not (_UNKNOWN_TIME_WORDS.search(statement)
-                        or _v3_disclaimers(statement) or _v3_literal_spans(statement)):
+                        or nonassertive_time_words):
                     _error("quality_temporal_mismatch", "未知时间状态须在正文明确")
             elif basis == "source_time":
+                if not _v3_explicit_calendars_match(statement, refs):
+                    _error("quality_temporal_mismatch", "显式日历期间或日期必须按正文精度匹配本声明来源")
                 for start, end, part, matches in state_parts:
                     first = matches[0].start()
                     prefix = _v3_source_prefix(statement, start)
@@ -1012,6 +1254,8 @@ def collect_temporal_diagnostics(output, context):
                     qualified = (_V3_SOURCE_QUALIFIER.search(part)
                         or _source_date_qualified(part, refs)
                         or _v3_source_year_qualified(part, refs)
+                        or _v3_source_calendar_period_qualified(part, refs)
+                        or _v3_source_numeric_date_qualified(part, refs)
                         or _v3_source_period_qualified(part)
                         or _V3_SOURCE_QUALIFIER.search(prefix)
                         or _source_date_qualified(prefix, refs))
@@ -1023,15 +1267,17 @@ def collect_temporal_diagnostics(output, context):
                 if not state_parts and not (_V3_SOURCE_QUALIFIER.search(statement)
                         or _source_date_qualified(statement, refs)
                         or _v3_source_year_qualified(statement, refs)
+                        or _v3_source_calendar_period_qualified(statement, refs)
+                        or _v3_source_numeric_date_qualified(statement, refs)
                         or _v3_source_period_qualified(statement)
-                        or _v3_disclaimers(statement) or _v3_literal_spans(statement)):
+                        or _v3_only_nonassertive(statement)):
                     _error("quality_temporal_mismatch", "来源当时状态须明确时间限定")
         except CaptureError as error:
             remember(error, index=index, record_id=record_id, statement=statement,
                      span=bad_span, field=field)
     for record_id, record in records.items():
         for start, end, part in _v3_parts(record["body"]):
-            matches = _v3_state_matches(part)
+            matches = _v3_state_matches(part, record["body"][:start])
             uncovered = [match for match in matches if not any(
                 left <= start + match.start() and start + match.end() <= right
                 for left, right in covered.get(record_id, []))]

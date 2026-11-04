@@ -74,6 +74,116 @@ class TemporalSourceAttributionTests(unittest.TestCase):
     def test_a_literal_year_without_source_attribution_is_not_permission(self):
         self.invalid("2021年训练后指标改善。", basis="source_time", original="人工资料2021年。")
 
+    def test_literal_calendar_periods_match_their_own_source_periods(self):
+        for body, original in (
+            ("报告按2024 H1、2024 H2列示训练次数依次为3和5。", "人工报告：2024 H1、2024 H2。"),
+            ("第2页按2025 q1、2025q2展示交付次数依次为4和6。", "人工分享：2025 Q1、2025 Q2。"),
+            ("课程材料按2023 h 1展示练习次数为8。", "人工课程：2023 H1。"),
+            ("2024 H1训练次数为3。", "人工报告：2024 H1。"),
+            ("报告2024年H1记载5月观察次数为3。", "人工报告：2024年 H1，5月观察次数为3。"),
+            ("测试覆盖率为42%，标注2023年4月。", "人工报告：2023年 4月，测试覆盖率42%。"),
+        ):
+            with self.subTest(body=body):
+                self.valid(body, basis="source_time", original=original)
+
+    def test_calendar_periods_do_not_borrow_a_year_or_another_period(self):
+        for body, original in (
+            ("报告按2024 H1列示训练次数为3。", "人工报告：2024 H2。"),
+            ("分享按2025 Q1列示交付次数为4。", "人工分享：2025年说明及2026 Q1。"),
+            ("课程材料按2023 Q2列示练习次数为8。", "人工课程：2023 Q1。"),
+            ("报告按2024 H1、2024 H2列示次数。", "人工报告：2024 H1。"),
+            ("报告按Q1列示训练次数为3。", "人工报告：2024 Q1。"),
+            ("报告按2024 Q1/Q2列示训练次数。", "人工报告：2024 Q1。"),
+            ("分享按2024 H1及Q2列示交付次数。", "人工分享：2024 H1。"),
+            ("课程材料按2024 Q1.5列示练习次数。", "人工课程：2024 Q1。"),
+            ("报告列示2023年5月训练次数。", "人工报告：2023年4月。"),
+            ("报告列示2023年13月训练次数。", "人工报告：2023年13月。"),
+            ("报告按2024年2月及3月列示训练次数。", "人工报告：2024年2月。"),
+            ("报告列示2023年4月5日训练次数。", "人工报告：2023年4月6日。"),
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="source_time", original=original)
+        for period in ("2024 H0", "2024 H3", "2024 H10", "2024 Q0", "2024 Q5", "2024 Q10"):
+            with self.subTest(period=period):
+                self.invalid("报告按" + period + "列示训练次数。", basis="source_time",
+                    original="人工报告：" + period + "。")
+
+    def test_calendar_periods_preserve_actual_current_and_future_checks(self):
+        for body in (
+            "报告按2024 H1列示训练次数，用户当前已经康复。",
+            "分享按2024 H1列示交付次数。系统已经上线。",
+            "课程材料按2024 H1列示练习次数，明天将会完成。",
+            "报告按2024 H1介绍当前已经康复。",
+            "分享按2024 H1介绍未来将会交付。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="source_time", original="人工资料：2024 H1。")
+
+    def test_every_explicit_calendar_is_checked_before_weaker_fallbacks(self):
+        wrong = (
+            ("报告按2024 H1列示次数。", "人工报告：2024 H2。"),
+            ("报告按2024年Q1列示次数。", "人工报告：2024年Q2。"),
+            ("报告列示2023年5月训练次数。", "人工报告：2023年4月。"),
+            ("报告列示2022.2.3训练次数。", "人工报告：2022.2.4。"),
+            ("报告列示2021年2月29日训练次数。", "人工报告：2021年2月29日。"),
+        )
+        for body, original in wrong:
+            for suffix in ("报告不构成用户已经康复的证明。", "栏目为‘未来规划’。", "报告当时介绍该结果。"):
+                with self.subTest(body=body, suffix=suffix):
+                    self.invalid(body + suffix, basis="source_time", original=original)
+        for body, original in (
+            ("报告按2024 H1列示2023年4月5日次数。", "人工报告：2024 H1及2023年4月6日。"),
+            ("报告按2024 H1列示2023年2月30日次数。", "人工报告：2024 H1及2023年2月30日。"),
+            ("报告引用2024年实验并按2024 Q1列示次数。", "人工报告：2024年实验及2024 Q2。"),
+            ("报告于2022年2月3日列示2024 H1次数。", "人工报告：2022年2月3日及2024 H2。"),
+            ("报告列示2022.2.3与2024 H1次数。", "人工报告：2022.2.3及2024 H2。"),
+            ("报告按2024-02-05与2024-02-06列示次数。", "人工报告：2024-02-05。"),
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="source_time", original=original)
+        self.valid("报告当时按2024 H1及2023年4月5日列示次数。",
+            basis="source_time", original="人工报告：2024 H1及2023年4月5日。")
+        self.valid("栏目为‘2024 H2’；报告当时介绍方法。", basis="source_time")
+        self.invalid("报告列示3项训练；栏目为‘未来规划’。", basis="source_time")
+
+    def test_invalid_calendar_components_remain_bounded_errors(self):
+        for body in ("报告当时按0000 H1列示次数。", "报告当时按0000年4月列示次数。",
+                     "报告当时按2024年" + "9" * 5000 + "月列示次数。"):
+            with self.subTest(length=len(body)):
+                self.invalid(body, basis="source_time", original=body)
+
+    def test_numeric_gregorian_dates_are_bound_to_the_claims_own_quotes(self):
+        for body, original in (
+            ("来源报告的观察周期为2022.2.3-2022.3.4；样本为3组。", "人工观察周期：2022.2.3-2022.3.4，样本3组。"),
+            ("报告列示测试期间2023/4/5-2023/5/6。", "人工测试期间：2023/04/05-2023/05/06。"),
+            ("课程材料引用2020.2.29的练习记录。", "人工练习记录：2020年2月29日。"),
+        ):
+            with self.subTest(body=body):
+                self.valid(body, basis="source_time", original=original)
+        for body, original in (
+            ("报告列示2022.2.3-2022.3.4。", "另一观察周期：2022.2.3-2022.3.5。"),
+            ("报告列示2022/2/3。", "人工材料：2021/2/3。"),
+            ("2022.2.3发生训练。", "人工材料：2022.2.3。"),
+            ("报告列示2.3发生训练。", "人工材料：2022.2.3。"),
+            ("报告列示2022.2发生训练。", "人工材料：2022.2.3。"),
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="source_time", original=original)
+        for value in ("2021.2.29", "2022/13/1", "2022.2.30", "2022.2/3", "2022.2.003",
+                      "20222.2.3", "2022.2.3.4", "2022..2.3"):
+            with self.subTest(value=value):
+                self.invalid("报告列示2022.1.1及" + value + "。", basis="source_time",
+                    original="人工报告：2022.1.1及" + value + "。")
+
+    def test_numeric_date_formats_do_not_authorize_current_or_future_claims(self):
+        for body in (
+            "报告列示2022.2.3，用户当前已经康复。",
+            "材料引用2022/2/3。系统明天将会发布。",
+            "课程材料列示2022.2.3，用户已经掌握课程。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, basis="source_time", original="人工材料：2022.2.3。")
+
     def test_year_or_period_cannot_qualify_independent_current_or_future_state(self):
         for body in (
             "报告引用2021年实验。当前已经恢复。",
@@ -199,6 +309,232 @@ class TemporalSourceAttributionTests(unittest.TestCase):
                 for basis in (None, "unknown"):
                     with self.subTest(verb=verb, statement=statement, basis=basis):
                         self.valid(body, basis=basis)
+
+    def test_nonassertive_inference_denials_share_the_same_boundaries(self):
+        for predicate in ("断言", "判断", "推断", "认定"):
+            for state in ("用户现在已经康复", "系统将来实际发布", "用户已经掌握课程"):
+                body = "不据此" + predicate + state + "。"
+                for basis in (None, "unknown"):
+                    with self.subTest(body=body, basis=basis):
+                        self.valid(body, basis=basis)
+        for body in (
+            "并非本报告不据此断言用户已经康复。",
+            "不能不据此断言系统已经上线。",
+            "不是不据此认定用户已经掌握课程。",
+            "‘不据此断言’已经加入词表。",
+            "不据此断言已经康复可是用户已经康复。",
+            "不据此判断已经完成，系统将来实际发布。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_source_presentations_and_explicit_column_names_are_metadata(self):
+        for body in (
+            "指南第3页“未来计划”栏列出运动安排。",
+            "报告第6页‘未来规划’栏目列出测试方向。",
+            "课程材料的栏目为‘当前练习’。",
+            "课程材料的字段名称为‘正在学习’。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body)
+        for body in (
+            "报告第3页以未来计划介绍运动安排；计划提出日期及目标期限未知。",
+            "材料以未来规划介绍测试方向；提出时间及完成期限未知。",
+            "课程说明用未来展望描述练习项目；提出日期与目标日期未知。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body, basis="unknown")
+
+    def test_conditional_applicability_and_input_evidence_limits_are_nonassertive(self):
+        for body in (
+            "如果未来训练负荷变化时采用备选方案。",
+            "单项任务使用基础方法；多任务或未来部署需求增长时选择组合方法。",
+            "若未来复习内容增加时可使用分层练习法。",
+            "当前文字视图未保留足以独立确认表头对应的信息。",
+            "当前笔记缺少用于核验动作次数的证据。",
+            "目前文本无法支持题目与答案关系的独立确认。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body)
+
+    def test_conditional_or_evidence_frames_do_not_erase_actual_states(self):
+        for body in (
+            "未来部署将会采用工具。",
+            "未来暑假时采用练习方法。",
+            "如果未来将会康复时采用训练方案。",
+            "若未来复习时使用当前已经发布的教材。",
+            "多任务或未来部署时采用工具并系统后天发布。",
+            "‘若未来部署时采用’已经成为词条。",
+            "当前文字视图已经发布。",
+            "当前材料已经写入。",
+            "当前笔记已经同步。",
+            "当前表格已经处理完成。",
+            "当前材料尚未发布。",
+            "当前笔记未保留用户当前已经康复的证据。",
+            "当前表格缺少用于核验列名的信息且系统将会上线。",
+            "‘当前表格缺少用于核验的信息’已经成为词条。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_metadata_excludes_only_the_name_not_actual_states(self):
+        for body in (
+            "未来规划包括测试流程。",
+            "指南第3页“未来计划”栏列出用户当前已经康复。",
+            "报告第6页‘未来规划’栏目已经启用。",
+            "栏目为‘当前练习’，用户将来实际完成课程。",
+            "报告第3页以未来计划介绍用户当前已经康复。",
+            "材料以未来规划介绍系统明天将会发布；提出时间未知。",
+            "课程说明用未来展望描述用户已经掌握课程。",
+            "报告第3页当前已经发布并以未来规划介绍流程。",
+            "第3页以未来规划介绍“当前已经上线”。",
+            "‘第3页以未来规划介绍’已经成为课程术语。",
+            "“栏目为‘未来规划’”已经加入注释。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_an_incidental_nontemporal_disclaimer_does_not_supply_time(self):
+        for body in (
+            "报告称训练样本为3组，不据此推断用户恢复程度。",
+            "分享称测试覆盖率为42%，不据此判断其他平台质量。",
+            "课程材料列出5项练习，不据此认定课程难度。",
+        ):
+            for basis in ("unknown", "source_time"):
+                with self.subTest(body=body, basis=basis):
+                    self.invalid(body, basis=basis)
+
+    def test_every_future_predicate_preserves_its_independent_clause(self):
+        for cue in ("不据此断言已经康复", "报告不构成已经完成的证明", "不能把未来计划认定为已实现"):
+            for conjunction in ("且", "并", "同时"):
+                for future in ("将来", "后天", "下周", "下月", "下年", "将要", "即将"):
+                    body = cue + conjunction + "系统" + future + "发布。"
+                    with self.subTest(body=body):
+                        self.invalid(body, "quality_temporal_missing")
+                self.invalid(cue + conjunction + "system will publish.", "quality_temporal_missing")
+
+    def test_long_coordinated_prefixes_do_not_hide_real_states(self):
+        for cue in ("报告不构成用户已经康复的证明", "不能把未来规划认定为已实现", "方案不能视为已经采用"):
+            for conjunction in ("且", "并", "同时"):
+                for state in ("系统已经上线", "用户当前已经康复", "用户后天将会完成课程"):
+                    body = cue + conjunction + "经过跨团队沟通与多轮独立检查及额外验证以后" + state + "。"
+                    with self.subTest(cue=cue, conjunction=conjunction, state=state):
+                        self.invalid(body, "quality_temporal_missing")
+
+    def test_material_relations_deny_evidence_or_attribution_not_the_state(self):
+        for body in (
+            "这不构成本轮已经读取记录的证明。",
+            "报告不构成用户已经康复的证明。",
+            "课程目录不表示用户当前已经掌握课程。",
+            "方案不能视为用户已经采用方案。",
+            "该要求是资料整理用途，不能视为用户已经实施方案。",
+            "这是讲者的方向性判断，不构成用户决定或已经完成的转型。",
+            "这是课程的学习建议，不构成用户决定或已经完成的学习。",
+            "不能把未来阶段展示直接认定为已实现。",
+            "不能把未来方案看作用户已经康复。",
+            "不能把该份材料等同于用户已经掌握课程。",
+            "材料写道“这不构成本轮已经读取记录的证明”。",
+        ):
+            for basis in (None, "unknown"):
+                with self.subTest(body=body, basis=basis):
+                    self.valid(body, basis=basis)
+
+    def test_material_relations_preserve_real_subject_states_and_boundaries(self):
+        for body in (
+            "患者不能视为已经康复。",
+            "系统不构成已经上线的产品。",
+            "用户不表示已经掌握课程。",
+            "不能视为已经康复。",
+            "该要求是资料整理用途。不能视为已经实施方案。",
+            "不能把当前已经发布的报告认定为已经完成。",
+            "不能把未来将会完成的方案认定为已经实施。",
+            "当前已经发布的报告不构成用户已经采用的证明。",
+            "报告不构成已经康复的证明可是用户已经康复。",
+            "方案不能视为已经采用却已经发布。",
+            "不能把未来规划认定为已实现且系统已经上线。",
+            "不能把未来规划认定为已实现，明天将会完成。",
+            "“不构成”已经加入术语表。",
+            "“不能视为”已经成为关键词。",
+            "“不能把未来规划认定为”已经加入术语表。",
+            "材料写道“不构成已经康复的证明”可是用户已经康复。",
+            "并非不构成已经康复的证明。",
+            "不是不能视为用户已经掌握课程。",
+            "否认不能把未来方案认定为已实现。",
+            "不能不构成已经完成的转型。",
+            "并非报告不构成用户已经康复的证明。",
+            "并非方案不能视为用户已经采用方案。",
+            "不是这份材料不表示用户已经掌握课程。",
+            "否认这不构成本轮已经读取记录的证明。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_negative_attribution_and_coordinated_material_subjects(self):
+        for relation in ("转写为", "转述成", "改写为", "表述成"):
+            for material, state in (
+                ("训练方案", "用户已经康复"),
+                ("测试用途", "系统已经上线"),
+                ("课程目录", "用户已经掌握课程"),
+            ):
+                body = material + "不能" + relation + state + "，也不表示记录已经完成。"
+                self.valid("不能把该份材料" + relation + state + "。")
+                for basis in (None, "unknown"):
+                    with self.subTest(body=body, basis=basis):
+                        self.valid(body, basis=basis)
+
+    def test_negative_proof_identity_requires_material_and_evidence_roles(self):
+        for body in (
+            "这是训练资料的判断，不是用户当前状态的核验。",
+            "这是设计材料的建议，不是系统目前状态的验证。",
+            "课程报告不是用户现在掌握程度的证明。",
+            "这是讲者当时的诊断，不是用户或企业当前状态。",
+            "统计期间未明确，不能视为当前能力保证。",
+        ):
+            with self.subTest(body=body):
+                self.valid(body)
+        for body in (
+            "用户不是当前已经康复的人。",
+            "系统不是当前已经发布的平台。",
+            "报告不是系统已经发布后给出的验证。",
+            "不是报告不是企业当前状态的核验。",
+            "这是材料的判断。不是系统当前状态的核验。",
+            "“不是当前状态的核验”已经成为词条。",
+            "这是材料的判断，不是系统当前状态的验证但系统明天将会发布。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_attribution_coordination_does_not_inherit_arbitrary_negation(self):
+        for body in (
+            "患者不能转述为已经康复。",
+            "系统不能转写为已经上线。",
+            "报告不包含流程图，也不表示系统已经上线。",
+            "当前已经发布的方案不能转写为用户已经采用。",
+            "不能把当前已经发布的报告转述为用户已经采用。",
+            "方案不能转述为已经实施。也不表示系统已经上线。",
+            "方案不能转述为已经实施；也不表示用户已经学会。",
+            "并非用途不能转写为用户已经采用，也不表示系统已经上线。",
+            "方案不能转写为已经采用，也不表示已经完成且系统后天发布。",
+            "“不能转写为”已经加入词表。",
+            "材料写道“方案不能转写为已经实施，也不表示已经完成”已经成为条目。",
+            "材料写道`方案不能转写为已经实施，也不表示已经完成`已经成为条目。",
+            "用户不等于已经康复，也不表示记录已经完成。",
+        ):
+            with self.subTest(body=body):
+                self.invalid(body, "quality_temporal_missing")
+
+    def test_new_relations_and_periods_do_not_change_legacy_time_rules(self):
+        for extract, review in (("knowledge-extract@11", "knowledge-review@9"),
+                                ("knowledge-extract@15", "knowledge-review@13")):
+            bundle = resolve_skill_refs(extract, review)
+            with self.subTest(extract=extract):
+                self.invalid("报告不构成用户已经康复的证明。", "quality_temporal_missing", bundle=bundle)
+                self.invalid("报告按2024 H1列示训练次数。", basis="source_time",
+                    original="人工报告：2024 H1。", bundle=bundle)
+
+    def test_new_relations_do_not_supply_current_system_fact_authority(self):
+        self.invalid("报告不构成已经完成的证明。当前已经上线。",
+            "quality_current_state_unverified", basis="current_state")
 
     def test_negative_inference_predicates_preserve_quote_and_clause_boundaries(self):
         for body in (
